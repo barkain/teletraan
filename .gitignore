@@ -1,0 +1,62 @@
+# OS files
+.DS_Store
+*.swp
+*.swo
+
+# Editor
+.idea/
+.vscode/
+*.sublime-*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+.eggs/
+*.egg-info/
+.ruff_cache/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Node.js (frontend has its own, but just in case)
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.egg
+.next/
+
+# Test artifacts
+test-results/
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Debug files
+debug-*.png
+
+# Claude Code
+.claude/
+
+# Lock files (optional, but we'll include uv.lock)
+# uv.lock - keeping this one
+
+# Logs
+*.log
+logs/
