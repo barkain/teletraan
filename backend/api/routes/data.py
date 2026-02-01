@@ -244,10 +244,15 @@ async def refresh_data(
 
         # Run deep multi-agent analysis
         try:
-            logger.info(f"Running deep analysis for {len(symbols_updated)} symbols...")
+            logger.info("=" * 50)
+            logger.info(f"Starting deep multi-agent analysis for {len(symbols_updated)} symbols: {symbols_updated}")
+            logger.info("=" * 50)
             deep_insights = await deep_analysis_engine.run_and_store(symbols_updated)
-            deep_insights_generated = len(deep_insights.get("insights", []))
-            logger.info(f"Deep analysis generated {deep_insights_generated} insights")
+            # run_and_store returns list[DeepInsight], not a dict
+            deep_insights_generated = len(deep_insights)
+            logger.info("=" * 50)
+            logger.info(f"Deep analysis complete: {deep_insights_generated} insights generated and stored")
+            logger.info("=" * 50)
         except Exception as e:
             logger.error(f"Deep analysis failed: {e}")
             # Don't fail the whole request, just log
@@ -280,12 +285,23 @@ async def run_deep_analysis(
         Dict with analysis results including insights count and elapsed time.
     """
     try:
-        result = await deep_analysis_engine.run_and_store(symbols)
+        symbol_desc = f"{len(symbols)} symbols" if symbols else "all symbols"
+        logger.info("=" * 50)
+        logger.info(f"Deep analysis endpoint called for {symbol_desc}")
+        if symbols:
+            logger.info(f"Symbols: {symbols}")
+        logger.info("=" * 50)
+
+        # run_and_store returns list[DeepInsight], not a dict
+        stored_insights = await deep_analysis_engine.run_and_store(symbols)
+
+        logger.info("=" * 50)
+        logger.info(f"Deep analysis endpoint complete: {len(stored_insights)} insights stored")
+        logger.info("=" * 50)
+
         return {
             "status": "success",
-            "insights_generated": len(result.get("insights", [])),
-            "analysts_used": result.get("analysts_completed", []),
-            "elapsed_time": result.get("elapsed_time"),
+            "insights_generated": len(stored_insights),
         }
     except Exception as e:
         logger.error(f"Deep analysis failed: {e}")

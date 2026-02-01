@@ -152,6 +152,13 @@ export interface AnalystEvidence {
   confidence?: number;
 }
 
+export interface DiscoveryContext {
+  macro_regime: string;
+  macro_themes: string[];
+  top_sectors: string[];
+  opportunity_type: string;
+}
+
 export interface DeepInsight {
   id: number;
   created_at: string;
@@ -186,9 +193,59 @@ export interface DeepInsight {
   // Metadata
   analysts_involved: string[];
   data_sources: string[];
+
+  // Trading parameters (autonomous discovery)
+  entry_zone?: string;
+  target_price?: string;
+  stop_loss?: string;
+  timeframe?: 'swing' | 'position' | 'long-term';
+  discovery_context?: DiscoveryContext;
+
+  // Parent insight linking (for follow-up insights derived from conversations)
+  parent_insight_id?: number;
+  source_conversation_id?: number;
 }
 
 export interface DeepInsightListResponse {
   items: DeepInsight[];
   total: number;
+}
+
+// Autonomous Analysis Response
+export interface AutonomousAnalysisResponse {
+  analysis_id: string;
+  status: string;
+  insights_count: number;
+  elapsed_seconds: number;
+  discovery_summary: string;
+  market_regime: string;
+  top_sectors: string[];
+  phases_completed?: string[];
+  errors?: string[];
+}
+
+// Background Analysis Task
+export interface AnalysisTask {
+  id: string;
+  status: string;
+  progress: number;
+  current_phase: string | null;
+  phase_details: string | null;
+  phase_name: string | null;
+  result_insight_ids: number[] | null;
+  result_analysis_id: string | null;
+  market_regime: string | null;
+  top_sectors: string[] | null;
+  discovery_summary: string | null;
+  phases_completed: string[] | null;
+  error_message: string | null;
+  elapsed_seconds: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface StartAnalysisResponse {
+  task_id: string;
+  status: string;
+  message: string;
 }

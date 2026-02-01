@@ -48,6 +48,17 @@ class DeepInsightResponse(DeepInsightBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
+    # Parent insight linking (for follow-up insights derived from conversations)
+    parent_insight_id: Optional[int] = None
+    source_conversation_id: Optional[int] = None
+
+    # Trading parameters (autonomous discovery)
+    entry_zone: Optional[str] = None
+    target_price: Optional[str] = None
+    stop_loss: Optional[str] = None
+    timeframe: Optional[str] = None
+    discovery_context: Optional[dict] = None
+
     class Config:
         from_attributes = True
 

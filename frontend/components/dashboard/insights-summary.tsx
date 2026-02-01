@@ -118,13 +118,13 @@ export function InsightsSummary({ insights, isLoading }: InsightsSummaryProps) {
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Recent Insights</CardTitle>
+            <CardTitle>Recent Signals</CardTitle>
             <CardDescription>
-              AI-generated analysis from your watchlist
+              Technical signals from your watchlist
             </CardDescription>
           </div>
           <Link
-            href="/insights"
+            href="/signals"
             className={cn(
               'flex items-center gap-1 text-sm text-muted-foreground',
               'hover:text-foreground transition-colors'
@@ -140,7 +140,7 @@ export function InsightsSummary({ insights, isLoading }: InsightsSummaryProps) {
           <InsightsSkeleton />
         ) : !insights || insights.length === 0 ? (
           <div className="py-8 text-center text-muted-foreground">
-            No insights available
+            No signals available
           </div>
         ) : (
           <div className="space-y-4">

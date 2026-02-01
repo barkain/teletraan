@@ -290,6 +290,9 @@ export const api = {
       }),
     generate: (symbols?: string[]) =>
       postApi<{ message: string; job_id?: string }>('/api/v1/deep-insights/generate', { symbols }),
+    // Autonomous analysis - no symbols required
+    autonomous: (params?: { max_insights?: number; deep_dive_count?: number }) =>
+      postApi<AutonomousAnalysisResponse>('/api/v1/deep-insights/autonomous', params),
   },
 
   // Analysis
@@ -385,7 +388,8 @@ export const chatApi = {
 };
 
 // Import types
-import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction } from '@/types';
+import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse } from '@/types';
+import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
 
 // ============================================
 // Data Refresh API
@@ -399,3 +403,46 @@ import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, A
 export async function refreshData(symbols?: string[]): Promise<RefreshDataResponse> {
   return postApi<RefreshDataResponse>('/api/v1/data/refresh', { symbols });
 }
+
+// ============================================
+// Knowledge API
+// ============================================
+
+export const knowledgeApi = {
+  // Patterns
+  patterns: {
+    list: async (params?: KnowledgePatternsParams): Promise<KnowledgePatternsResponse> => {
+      return fetchApi<KnowledgePatternsResponse>('/api/v1/knowledge/patterns', {
+        params: params as Record<string, string | number | boolean | undefined>
+      });
+    },
+    get: (id: string) =>
+      fetchApi<KnowledgePattern>(`/api/v1/knowledge/patterns/${id}`),
+    matching: async (params?: MatchingPatternsParams): Promise<KnowledgePatternsResponse> => {
+      const queryParams: Record<string, string | number | boolean | undefined> = {};
+      if (params?.symbols) {
+        queryParams.symbols = params.symbols.join(',');
+      }
+      if (params?.current_rsi !== undefined) {
+        queryParams.current_rsi = params.current_rsi;
+      }
+      if (params?.current_vix !== undefined) {
+        queryParams.current_vix = params.current_vix;
+      }
+      return fetchApi<KnowledgePatternsResponse>('/api/v1/knowledge/patterns/matching', {
+        params: queryParams
+      });
+    },
+  },
+
+  // Themes
+  themes: {
+    list: async (params?: ConversationThemesParams): Promise<ConversationThemesResponse> => {
+      return fetchApi<ConversationThemesResponse>('/api/v1/knowledge/themes', {
+        params: params as Record<string, string | number | boolean | undefined>
+      });
+    },
+    get: (id: string) =>
+      fetchApi<ConversationTheme>(`/api/v1/knowledge/themes/${id}`),
+  },
+};

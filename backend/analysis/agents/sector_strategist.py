@@ -63,12 +63,13 @@ def format_sector_context(market_data: dict) -> str:
     that the sector strategist agent can analyze effectively.
 
     Args:
-        market_data: Dictionary containing sector performance data with keys:
-            - sector_metrics: Dict mapping sector symbols to performance metrics
-            - rotation_analysis: Dict with rotation signals and leading/lagging sectors
-            - market_phase: Current identified market phase
-            - benchmark_performance: SPY/benchmark returns
-            - economic_indicators: Optional economic context
+        market_data: Dictionary containing sector performance data from context builder:
+            - sector_performance: Dict mapping sector ETF symbols to performance metrics
+            - price_history: Dict mapping symbols to OHLCV data
+            - stocks: List of stock metadata
+            - market_summary: Overall market status
+            - economic_indicators: List of economic indicator dicts
+            Or legacy format with sector_metrics, rotation_analysis, etc.
 
     Returns:
         Formatted string context for the LLM agent.
@@ -78,13 +79,122 @@ def format_sector_context(market_data: dict) -> str:
 
     context_parts = []
 
-    # Add sector performance metrics
+    # Check for new context builder format (sector_performance from ETFs)
+    sector_performance = market_data.get("sector_performance", {})
+
+    if sector_performance and isinstance(sector_performance, dict):
+        context_parts.append("## Sector ETF Performance")
+        context_parts.append("")
+
+        # Sort by monthly change descending to show relative strength
+        sorted_sectors = sorted(
+            sector_performance.items(),
+            key=lambda x: x[1].get("monthly_change_pct", 0) if isinstance(x[1], dict) else 0,
+            reverse=True
+        )
+
+        for symbol, metrics in sorted_sectors:
+            if not isinstance(metrics, dict):
+                continue
+            name = metrics.get("name", symbol)
+            sector = metrics.get("sector", "")
+            current = metrics.get("current_price", 0)
+            daily_pct = metrics.get("daily_change_pct", 0)
+            weekly_pct = metrics.get("weekly_change_pct", 0)
+            monthly_pct = metrics.get("monthly_change_pct", 0)
+            volume = metrics.get("volume", 0)
+
+            context_parts.append(
+                f"- **{name}** ({symbol}) - {sector}"
+            )
+            context_parts.append(
+                f"  Price: ${current:.2f}, Daily: {daily_pct:+.2f}%, "
+                f"Weekly: {weekly_pct:+.2f}%, Monthly: {monthly_pct:+.2f}%"
+            )
+            context_parts.append(f"  Volume: {volume:,}")
+
+        context_parts.append("")
+
+        # Calculate relative strength rankings
+        context_parts.append("## Relative Strength Rankings (by Monthly Return)")
+        context_parts.append("")
+        for rank, (symbol, metrics) in enumerate(sorted_sectors, 1):
+            if not isinstance(metrics, dict):
+                continue
+            sector = metrics.get("sector", symbol)
+            monthly_pct = metrics.get("monthly_change_pct", 0)
+            context_parts.append(f"{rank}. {sector} ({symbol}): {monthly_pct:+.2f}%")
+        context_parts.append("")
+
+        # Identify leaders and laggards
+        if len(sorted_sectors) >= 4:
+            leaders = sorted_sectors[:2]
+            laggards = sorted_sectors[-2:]
+
+            context_parts.append("## Rotation Analysis")
+            context_parts.append("")
+            context_parts.append("Leading Sectors: " + ", ".join(
+                f"{m.get('sector', s)} ({m.get('monthly_change_pct', 0):+.2f}%)"
+                for s, m in leaders if isinstance(m, dict)
+            ))
+            context_parts.append("Lagging Sectors: " + ", ".join(
+                f"{m.get('sector', s)} ({m.get('monthly_change_pct', 0):+.2f}%)"
+                for s, m in laggards if isinstance(m, dict)
+            ))
+            context_parts.append("")
+
+    # Add individual stock data grouped by sector
+    stocks = market_data.get("stocks", [])
+    price_history = market_data.get("price_history", {})
+
+    if stocks and price_history:
+        # Group stocks by sector
+        by_sector: dict[str, list] = {}
+        for stock in stocks:
+            sector = stock.get("sector") or "Other"  # Handle None values
+            if sector not in by_sector:
+                by_sector[sector] = []
+            by_sector[sector].append(stock)
+
+        context_parts.append("## Individual Stock Performance by Sector")
+        context_parts.append("")
+
+        for sector, sector_stocks in sorted(by_sector.items()):
+            context_parts.append(f"### {sector}")
+            for stock in sector_stocks:
+                symbol = stock.get("symbol", "")
+                name = stock.get("name", symbol)
+                prices = price_history.get(symbol, [])
+
+                if prices and len(prices) >= 2:
+                    latest = prices[0]  # Sorted descending
+                    prev = prices[1]
+                    current = latest.get("close", 0)
+                    daily_change = ((current - prev.get("close", current)) / prev.get("close", 1)) * 100 if prev.get("close") else 0
+                    volume = latest.get("volume", 0)
+
+                    context_parts.append(
+                        f"- {symbol} ({name}): ${current:.2f} ({daily_change:+.2f}%), Vol: {volume:,}"
+                    )
+            context_parts.append("")
+
+    # Market summary / benchmark
+    market_summary = market_data.get("market_summary", {})
+    market_index = market_summary.get("market_index", {})
+    if market_index:
+        context_parts.append("## Benchmark (SPY)")
+        context_parts.append("")
+        context_parts.append(f"Current: ${market_index.get('current', 0):.2f}")
+        context_parts.append(f"Daily Change: {market_index.get('change_pct', 0):+.2f}%")
+        context_parts.append(f"Volume: {market_index.get('volume', 0):,}")
+        context_parts.append("")
+
+    # Handle legacy format fields
     sector_metrics = market_data.get("sector_metrics", {})
-    if sector_metrics:
+    if sector_metrics and not sector_performance:
         context_parts.append("## Sector Performance Metrics")
         context_parts.append("")
 
-        # Sort by relative strength descending
         sorted_sectors = sorted(
             sector_metrics.items(),
             key=lambda x: x[1].get("relative_strength", 0),
@@ -107,7 +217,7 @@ def format_sector_context(market_data: dict) -> str:
             )
         context_parts.append("")
 
-    # Add rotation analysis
+    # Rotation analysis (legacy)
     rotation = market_data.get("rotation_analysis", {})
     if rotation:
         context_parts.append("## Rotation Analysis")
@@ -131,57 +241,47 @@ def format_sector_context(market_data: dict) -> str:
                 for s in lagging
             )
             context_parts.append(f"Lagging Sectors: {laggers}")
-
-        signals = rotation.get("signals", [])
-        if signals:
-            context_parts.append("Signals:")
-            for signal in signals:
-                sig_type = signal.get("signal", "unknown")
-                description = signal.get("description", "")
-                strength = signal.get("strength", "moderate")
-                context_parts.append(f"  - [{sig_type.upper()}] {description} (strength: {strength})")
-
         context_parts.append("")
 
-    # Add market phase context
+    # Market phase (legacy)
     market_phase = market_data.get("market_phase", "unknown")
-    phase_desc = market_data.get("phase_description", "")
-    expected_leaders = market_data.get("expected_leaders", [])
-
     if market_phase != "unknown":
         context_parts.append("## Current Market Phase")
         context_parts.append("")
         context_parts.append(f"Phase: {market_phase.replace('_', ' ').title()}")
+        phase_desc = market_data.get("phase_description", "")
         if phase_desc:
             context_parts.append(f"Description: {phase_desc}")
+        expected_leaders = market_data.get("expected_leaders", [])
         if expected_leaders:
             context_parts.append(f"Expected Leaders: {', '.join(expected_leaders)}")
         context_parts.append("")
 
-    # Add benchmark performance
-    benchmark = market_data.get("benchmark_performance", {})
-    if benchmark:
-        context_parts.append("## Benchmark (SPY)")
-        context_parts.append("")
-        context_parts.append(
-            f"Daily: {benchmark.get('daily_return', 0):+.2f}%, "
-            f"Weekly: {benchmark.get('weekly_return', 0):+.2f}%, "
-            f"Monthly: {benchmark.get('monthly_return', 0):+.2f}%"
-        )
-        context_parts.append("")
-
-    # Add economic indicators if available
-    economic = market_data.get("economic_indicators", {})
+    # Economic indicators (handle both list and dict formats)
+    economic = market_data.get("economic_indicators", [])
     if economic:
         context_parts.append("## Economic Context")
         context_parts.append("")
-        for indicator, value in economic.items():
-            formatted_name = indicator.replace("_", " ").title()
-            if isinstance(value, (int, float)):
-                context_parts.append(f"- {formatted_name}: {value:.2f}")
-            else:
-                context_parts.append(f"- {formatted_name}: {value}")
+        if isinstance(economic, list):
+            # New format: list of indicator dicts
+            for ind in economic:
+                if isinstance(ind, dict):
+                    name = ind.get("name", ind.get("series_id", "Unknown"))
+                    value = ind.get("value", "N/A")
+                    unit = ind.get("unit", "")
+                    context_parts.append(f"- {name}: {value}{unit}")
+        elif isinstance(economic, dict):
+            # Legacy format: flat dict
+            for indicator, value in economic.items():
+                formatted_name = indicator.replace("_", " ").title()
+                if isinstance(value, (int, float)):
+                    context_parts.append(f"- {formatted_name}: {value:.2f}")
+                else:
+                    context_parts.append(f"- {formatted_name}: {value}")
         context_parts.append("")
+
+    if not context_parts or context_parts == [""]:
+        return "No sector data available for analysis."
 
     return "\n".join(context_parts)
 

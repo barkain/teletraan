@@ -161,101 +161,229 @@ def format_risk_context(market_data: dict) -> str:
     Format volatility and risk data for analyst consumption.
 
     Args:
-        market_data: Dictionary containing market data with keys like:
-            - vix_data: VIX levels, term structure
-            - price_data: Current prices, historical volatility
-            - portfolio: Current portfolio positions
-            - correlations: Asset correlation matrix
+        market_data: Dictionary containing market data from context builder:
+            - price_history: Dict mapping symbols to list of OHLCV dicts
+            - technical_indicators: Dict mapping symbols to indicator values (including ATR)
+            - stocks: List of stock metadata
+            - sector_performance: Dict mapping sector ETFs to performance metrics
+            - economic_indicators: List of economic indicator dicts
+            - market_summary: Overall market status
+            Or legacy format with vix_data, price_data, portfolio, correlations.
 
     Returns:
         Formatted string context for the risk analyst prompt.
     """
     context_parts = []
 
-    # VIX and Volatility Data
-    context_parts.append("=== VOLATILITY DATA ===")
-    if "vix_data" in market_data:
-        vix = market_data["vix_data"]
-        if "current_vix" in vix:
-            context_parts.append(f"Current VIX: {vix['current_vix']}")
-        if "vix_1m" in vix:
-            context_parts.append(f"VIX 1-Month: {vix['vix_1m']}")
-        if "vix_3m" in vix:
-            context_parts.append(f"VIX 3-Month: {vix['vix_3m']}")
-        if "vix_6m" in vix:
-            context_parts.append(f"VIX 6-Month: {vix['vix_6m']}")
-        if "term_structure" in vix:
-            context_parts.append(f"Term Structure: {vix['term_structure']}")
-        if "vix_percentile_52w" in vix:
-            context_parts.append(f"VIX 52-Week Percentile: {vix['vix_percentile_52w']}%")
+    # Check for new context builder format
+    price_history = market_data.get("price_history", {})
+    technical_indicators = market_data.get("technical_indicators", {})
+    stocks = market_data.get("stocks", [])
 
-    # Price and Historical Volatility Data
-    if "price_data" in market_data:
-        context_parts.append("\n=== PRICE AND VOLATILITY DATA ===")
-        for symbol, data in market_data["price_data"].items():
+    if price_history and isinstance(price_history, dict):
+        # New format from context builder
+
+        context_parts.append("=== PRICE AND VOLATILITY DATA ===")
+
+        for symbol, prices in price_history.items():
+            if not prices:
+                continue
+
             context_parts.append(f"\n--- {symbol} ---")
-            if "current_price" in data:
-                context_parts.append(f"Current Price: ${data['current_price']:.2f}")
-            if "historical_vol_30d" in data:
-                context_parts.append(f"30-Day Historical Vol: {data['historical_vol_30d']:.1f}%")
-            if "historical_vol_90d" in data:
-                context_parts.append(f"90-Day Historical Vol: {data['historical_vol_90d']:.1f}%")
-            if "implied_vol" in data:
-                context_parts.append(f"Implied Vol: {data['implied_vol']:.1f}%")
-            if "iv_percentile" in data:
-                context_parts.append(f"IV Percentile: {data['iv_percentile']:.0f}%")
-            if "beta" in data:
-                context_parts.append(f"Beta: {data['beta']:.2f}")
-            if "avg_true_range" in data:
-                context_parts.append(f"ATR (14-day): ${data['avg_true_range']:.2f}")
-            if "max_drawdown_52w" in data:
-                context_parts.append(f"Max Drawdown (52W): {data['max_drawdown_52w']:.1f}%")
-            if "support_level" in data:
-                context_parts.append(f"Key Support: ${data['support_level']:.2f}")
-            if "resistance_level" in data:
-                context_parts.append(f"Key Resistance: ${data['resistance_level']:.2f}")
 
-    # Portfolio Data
-    if "portfolio" in market_data:
-        context_parts.append("\n=== CURRENT PORTFOLIO ===")
-        portfolio = market_data["portfolio"]
-        if "total_value" in portfolio:
-            context_parts.append(f"Total Value: ${portfolio['total_value']:,.2f}")
-        if "positions" in portfolio:
-            context_parts.append("\nPositions:")
-            for pos in portfolio["positions"]:
-                symbol = pos.get("symbol", "N/A")
-                weight = pos.get("weight", 0)
-                value = pos.get("value", 0)
-                context_parts.append(f"  - {symbol}: {weight:.1f}% (${value:,.2f})")
-        if "cash_pct" in portfolio:
-            context_parts.append(f"Cash: {portfolio['cash_pct']:.1f}%")
-        if "sector_exposure" in portfolio:
-            context_parts.append("\nSector Exposure:")
-            for sector, pct in portfolio["sector_exposure"].items():
-                context_parts.append(f"  - {sector}: {pct:.1f}%")
+            # Get stock metadata
+            stock_info = next(
+                (s for s in stocks if isinstance(s, dict) and s.get("symbol") == symbol),
+                {"symbol": symbol}
+            )
+            if stock_info.get("sector"):
+                context_parts.append(f"Sector: {stock_info.get('sector')}")
 
-    # Correlation Data
-    if "correlations" in market_data:
-        context_parts.append("\n=== CORRELATION MATRIX ===")
-        correlations = market_data["correlations"]
-        for pair, corr in correlations.items():
-            context_parts.append(f"{pair}: {corr:.2f}")
+            # Current price from most recent data (prices sorted descending)
+            latest = prices[0]
+            current_price = float(latest.get("close", 0))
+            context_parts.append(f"Current Price: ${current_price:.2f}")
+            context_parts.append(f"Today's High: ${latest.get('high', 0):.2f}")
+            context_parts.append(f"Today's Low: ${latest.get('low', 0):.2f}")
+            context_parts.append(f"Volume: {latest.get('volume', 0):,}")
 
-    # Risk Events Calendar
-    if "risk_events" in market_data:
-        context_parts.append("\n=== UPCOMING RISK EVENTS ===")
-        for event in market_data["risk_events"]:
-            date = event.get("date", "TBD")
-            name = event.get("event", "Unknown")
-            impact = event.get("expected_impact", "unknown")
-            context_parts.append(f"  - {date}: {name} (Impact: {impact})")
+            # Calculate historical volatility from price data
+            if len(prices) >= 21:
+                # 20-day historical volatility
+                closes = [p.get("close", 0) for p in prices[:21] if p.get("close")]
+                if len(closes) >= 21:
+                    daily_returns = []
+                    for i in range(1, len(closes)):
+                        if closes[i-1] > 0:
+                            daily_returns.append((closes[i] - closes[i-1]) / closes[i-1])
+                    if daily_returns:
+                        import math
+                        mean_return = sum(daily_returns) / len(daily_returns)
+                        variance = sum((r - mean_return) ** 2 for r in daily_returns) / len(daily_returns)
+                        daily_vol = math.sqrt(variance)
+                        annual_vol = daily_vol * math.sqrt(252) * 100
+                        context_parts.append(f"20-Day Historical Vol: {annual_vol:.1f}%")
 
-    # Market Context
-    if "market_context" in market_data:
-        context_parts.append("\n=== MARKET CONTEXT ===")
-        for item in market_data["market_context"]:
-            context_parts.append(f"  - {item}")
+            # Calculate max drawdown from available data
+            if len(prices) >= 5:
+                highs = [p.get("high", 0) for p in prices if p.get("high")]
+                lows = [p.get("low", 0) for p in prices if p.get("low")]
+                if highs and lows:
+                    peak = max(highs)
+                    trough = min(lows)
+                    if peak > 0:
+                        max_dd = ((peak - trough) / peak) * 100
+                        context_parts.append(f"Max Drawdown (period): {max_dd:.1f}%")
+
+            # Calculate support/resistance from price data
+            if len(prices) >= 20:
+                recent_lows = [p.get("low", float("inf")) for p in prices[:20] if p.get("low")]
+                recent_highs = [p.get("high", 0) for p in prices[:20] if p.get("high")]
+                if recent_lows and recent_highs:
+                    support = min(recent_lows)
+                    resistance = max(recent_highs)
+                    context_parts.append(f"20-Period Support: ${support:.2f}")
+                    context_parts.append(f"20-Period Resistance: ${resistance:.2f}")
+
+            # Technical indicators for this symbol (e.g., ATR)
+            indicators = technical_indicators.get(symbol, {})
+            if indicators:
+                for ind_type, ind_data in indicators.items():
+                    if isinstance(ind_data, dict):
+                        value = ind_data.get("value")
+                        if value is not None:
+                            if ind_type.lower() == "atr":
+                                if current_price > 0:
+                                    atr_pct = (value / current_price) * 100
+                                    context_parts.append(f"ATR (14-day): ${value:.2f} ({atr_pct:.1f}% of price)")
+                                else:
+                                    context_parts.append(f"ATR (14-day): ${value:.2f}")
+                            elif ind_type.lower() == "rsi":
+                                context_parts.append(f"RSI: {value:.1f}")
+                            elif "bollinger" in ind_type.lower():
+                                metadata = ind_data.get("metadata", {})
+                                upper = metadata.get("upper", 0)
+                                lower = metadata.get("lower", 0)
+                                if upper and lower:
+                                    bb_width = ((upper - lower) / value) * 100 if value > 0 else 0
+                                    context_parts.append(f"Bollinger Band Width: {bb_width:.1f}%")
+
+        # Market summary for overall context
+        market_summary = market_data.get("market_summary", {})
+        market_index = market_summary.get("market_index", {})
+        if market_index:
+            context_parts.append("\n=== MARKET INDEX (SPY) ===")
+            context_parts.append(f"Current: ${market_index.get('current', 0):.2f}")
+            context_parts.append(f"Change: {market_index.get('change_pct', 0):+.2f}%")
+            context_parts.append(f"High: ${market_index.get('high', 0):.2f}")
+            context_parts.append(f"Low: ${market_index.get('low', 0):.2f}")
+
+        # Sector performance for diversification context
+        sector_performance = market_data.get("sector_performance", {})
+        if sector_performance:
+            context_parts.append("\n=== SECTOR PERFORMANCE (for correlation context) ===")
+            for etf, perf in sector_performance.items():
+                if isinstance(perf, dict):
+                    sector = perf.get("sector", etf)
+                    daily_pct = perf.get("daily_change_pct", 0)
+                    monthly_pct = perf.get("monthly_change_pct", 0)
+                    context_parts.append(f"{etf} ({sector}): 1D={daily_pct:+.2f}%, 1M={monthly_pct:+.2f}%")
+
+        # Economic indicators for macro risk context
+        economic = market_data.get("economic_indicators", [])
+        if economic:
+            context_parts.append("\n=== ECONOMIC RISK FACTORS ===")
+            if isinstance(economic, list):
+                for ind in economic:
+                    if isinstance(ind, dict):
+                        name = ind.get("name", ind.get("series_id", "Unknown"))
+                        value = ind.get("value", "N/A")
+                        unit = ind.get("unit", "")
+                        context_parts.append(f"{name}: {value}{unit}")
+            elif isinstance(economic, dict):
+                for indicator, value in economic.items():
+                    context_parts.append(f"{indicator}: {value}")
+
+    else:
+        # Legacy format support
+        context_parts.append("=== VOLATILITY DATA ===")
+        if "vix_data" in market_data:
+            vix = market_data["vix_data"]
+            if "current_vix" in vix:
+                context_parts.append(f"Current VIX: {vix['current_vix']}")
+            if "vix_1m" in vix:
+                context_parts.append(f"VIX 1-Month: {vix['vix_1m']}")
+            if "vix_3m" in vix:
+                context_parts.append(f"VIX 3-Month: {vix['vix_3m']}")
+            if "vix_6m" in vix:
+                context_parts.append(f"VIX 6-Month: {vix['vix_6m']}")
+            if "term_structure" in vix:
+                context_parts.append(f"Term Structure: {vix['term_structure']}")
+            if "vix_percentile_52w" in vix:
+                context_parts.append(f"VIX 52-Week Percentile: {vix['vix_percentile_52w']}%")
+
+        if "price_data" in market_data:
+            context_parts.append("\n=== PRICE AND VOLATILITY DATA ===")
+            for symbol, data in market_data["price_data"].items():
+                context_parts.append(f"\n--- {symbol} ---")
+                if "current_price" in data:
+                    context_parts.append(f"Current Price: ${data['current_price']:.2f}")
+                if "historical_vol_30d" in data:
+                    context_parts.append(f"30-Day Historical Vol: {data['historical_vol_30d']:.1f}%")
+                if "historical_vol_90d" in data:
+                    context_parts.append(f"90-Day Historical Vol: {data['historical_vol_90d']:.1f}%")
+                if "implied_vol" in data:
+                    context_parts.append(f"Implied Vol: {data['implied_vol']:.1f}%")
+                if "iv_percentile" in data:
+                    context_parts.append(f"IV Percentile: {data['iv_percentile']:.0f}%")
+                if "beta" in data:
+                    context_parts.append(f"Beta: {data['beta']:.2f}")
+                if "avg_true_range" in data:
+                    context_parts.append(f"ATR (14-day): ${data['avg_true_range']:.2f}")
+                if "max_drawdown_52w" in data:
+                    context_parts.append(f"Max Drawdown (52W): {data['max_drawdown_52w']:.1f}%")
+                if "support_level" in data:
+                    context_parts.append(f"Key Support: ${data['support_level']:.2f}")
+                if "resistance_level" in data:
+                    context_parts.append(f"Key Resistance: ${data['resistance_level']:.2f}")
+
+        if "portfolio" in market_data:
+            context_parts.append("\n=== CURRENT PORTFOLIO ===")
+            portfolio = market_data["portfolio"]
+            if "total_value" in portfolio:
+                context_parts.append(f"Total Value: ${portfolio['total_value']:,.2f}")
+            if "positions" in portfolio:
+                context_parts.append("\nPositions:")
+                for pos in portfolio["positions"]:
+                    symbol = pos.get("symbol", "N/A")
+                    weight = pos.get("weight", 0)
+                    value = pos.get("value", 0)
+                    context_parts.append(f"  - {symbol}: {weight:.1f}% (${value:,.2f})")
+            if "cash_pct" in portfolio:
+                context_parts.append(f"Cash: {portfolio['cash_pct']:.1f}%")
+            if "sector_exposure" in portfolio:
+                context_parts.append("\nSector Exposure:")
+                for sector, pct in portfolio["sector_exposure"].items():
+                    context_parts.append(f"  - {sector}: {pct:.1f}%")
+
+        if "correlations" in market_data:
+            context_parts.append("\n=== CORRELATION MATRIX ===")
+            correlations = market_data["correlations"]
+            for pair, corr in correlations.items():
+                context_parts.append(f"{pair}: {corr:.2f}")
+
+        if "risk_events" in market_data:
+            context_parts.append("\n=== UPCOMING RISK EVENTS ===")
+            for event in market_data["risk_events"]:
+                date = event.get("date", "TBD")
+                name = event.get("event", "Unknown")
+                impact = event.get("expected_impact", "unknown")
+                context_parts.append(f"  - {date}: {name} (Impact: {impact})")
+
+        if "market_context" in market_data:
+            context_parts.append("\n=== MARKET CONTEXT ===")
+            for item in market_data["market_context"]:
+                context_parts.append(f"  - {item}")
 
     return "\n".join(context_parts)
 

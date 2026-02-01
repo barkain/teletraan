@@ -6,48 +6,6 @@ import { toast } from 'sonner';
 import { useEffect } from 'react';
 import type { Stock, PriceHistory, Insight, PaginatedResponse } from '@/types';
 
-// Mock stock data for fallback
-const MOCK_STOCK: Stock = {
-  symbol: 'AAPL',
-  name: 'Apple Inc.',
-  sector: 'Technology',
-  current_price: 185.92,
-  change_percent: 1.23,
-  market_cap: 2890000000000,
-  volume: 52000000,
-};
-
-// Mock price history generator
-function generateMockPriceHistory(days: number): PriceHistory[] {
-  const history: PriceHistory[] = [];
-  let basePrice = 180;
-  const today = new Date();
-
-  for (let i = days; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-
-    const volatility = (Math.random() - 0.5) * 6;
-    basePrice = Math.max(150, Math.min(200, basePrice + volatility));
-
-    const open = basePrice + (Math.random() - 0.5) * 2;
-    const close = basePrice + (Math.random() - 0.5) * 2;
-    const high = Math.max(open, close) + Math.random() * 2;
-    const low = Math.min(open, close) - Math.random() * 2;
-
-    history.push({
-      date: date.toISOString().split('T')[0],
-      open: Number(open.toFixed(2)),
-      high: Number(high.toFixed(2)),
-      low: Number(low.toFixed(2)),
-      close: Number(close.toFixed(2)),
-      volume: Math.floor(Math.random() * 50000000) + 30000000,
-    });
-  }
-
-  return history;
-}
-
 /**
  * Custom hook for fetching stock details
  * Uses the v1 stocks API
@@ -55,14 +13,7 @@ function generateMockPriceHistory(days: number): PriceHistory[] {
 export function useStock(symbol: string | undefined) {
   const query = useQuery<Stock>({
     queryKey: ['stock', symbol],
-    queryFn: async () => {
-      try {
-        return await api.stocks.get(symbol!);
-      } catch (error) {
-        console.warn(`Stock API unavailable for ${symbol}, using mock data:`, error);
-        return { ...MOCK_STOCK, symbol: symbol! };
-      }
-    },
+    queryFn: () => api.stocks.get(symbol!),
     enabled: !!symbol,
     staleTime: 30 * 1000, // 30 seconds
     retry: 2,
@@ -79,7 +30,10 @@ export function useStock(symbol: string | undefined) {
     }
   }, [query.error, symbol]);
 
-  return query;
+  return {
+    ...query,
+    isEmpty: !query.isLoading && !query.isError && !query.data,
+  };
 }
 
 /**
@@ -92,14 +46,7 @@ export function useStockPriceHistory(
 ) {
   const query = useQuery<PriceHistory[]>({
     queryKey: ['stock-price-history', symbol, days],
-    queryFn: async () => {
-      try {
-        return await api.stocks.history(symbol!, { days });
-      } catch (error) {
-        console.warn(`Price history API unavailable for ${symbol}, using mock data:`, error);
-        return generateMockPriceHistory(days);
-      }
-    },
+    queryFn: () => api.stocks.history(symbol!, { days }),
     enabled: !!symbol,
     staleTime: 60 * 1000, // 1 minute
     retry: 2,
@@ -114,7 +61,10 @@ export function useStockPriceHistory(
     }
   }, [query.error, symbol]);
 
-  return query;
+  return {
+    ...query,
+    isEmpty: !query.isLoading && !query.isError && (!query.data || query.data.length === 0),
+  };
 }
 
 /**
@@ -125,16 +75,11 @@ export function useStocks(params?: { sector?: string; limit?: number }) {
   const query = useQuery<Stock[]>({
     queryKey: ['stocks', params?.sector, params?.limit],
     queryFn: async () => {
-      try {
-        const response = await api.stocks.list({
-          sector: params?.sector,
-          limit: params?.limit ?? 100,
-        });
-        return response.items;
-      } catch (error) {
-        console.warn('Stocks API unavailable, using mock data:', error);
-        return [MOCK_STOCK];
-      }
+      const response = await api.stocks.list({
+        sector: params?.sector,
+        limit: params?.limit ?? 100,
+      });
+      return response.items;
     },
     staleTime: 30 * 1000, // 30 seconds
     retry: 2,
@@ -149,7 +94,10 @@ export function useStocks(params?: { sector?: string; limit?: number }) {
     }
   }, [query.error]);
 
-  return query;
+  return {
+    ...query,
+    isEmpty: !query.isLoading && !query.isError && (!query.data || query.data.length === 0),
+  };
 }
 
 /**
@@ -160,13 +108,8 @@ export function useStockInsights(symbol: string | undefined) {
   const query = useQuery<Insight[]>({
     queryKey: ['stock-insights', symbol],
     queryFn: async () => {
-      try {
-        const response = await api.insights.list({ symbol, per_page: 10 });
-        return response.items;
-      } catch (error) {
-        console.warn(`Insights API unavailable for ${symbol}:`, error);
-        return [];
-      }
+      const response = await api.insights.list({ symbol, per_page: 10 });
+      return response.items;
     },
     enabled: !!symbol,
     staleTime: 60 * 1000, // 1 minute
@@ -174,7 +117,10 @@ export function useStockInsights(symbol: string | undefined) {
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
   });
 
-  return query;
+  return {
+    ...query,
+    isEmpty: !query.isLoading && !query.isError && (!query.data || query.data.length === 0),
+  };
 }
 
 // Helper to format currency

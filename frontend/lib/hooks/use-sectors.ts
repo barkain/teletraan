@@ -58,43 +58,6 @@ export const SECTOR_LIST: Array<{ symbol: string; name: string; color: string }>
 
 const REFRESH_INTERVAL = 60 * 1000; // 60 seconds
 
-// Mock data generator for fallback
-function generateMockSectorData(): SectorData[] {
-  return SECTOR_LIST.map((sector) => ({
-    symbol: sector.symbol,
-    name: sector.name,
-    performance: (Math.random() - 0.5) * 6, // -3% to +3%
-    weeklyPerformance: (Math.random() - 0.5) * 10, // -5% to +5%
-    monthlyPerformance: (Math.random() - 0.5) * 20, // -10% to +10%
-    volume: Math.floor(Math.random() * 100000000) + 50000000,
-    marketCap: Math.floor(Math.random() * 500000000000) + 100000000000,
-    price: Math.random() * 200 + 50,
-    change: (Math.random() - 0.5) * 10,
-  }));
-}
-
-function generateMockHistoricalData(): SectorHistoricalData[] {
-  const data: SectorHistoricalData[] = [];
-  const today = new Date();
-
-  for (let i = 30; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-
-    const entry: SectorHistoricalData = {
-      date: date.toISOString().split('T')[0],
-    };
-
-    SECTOR_LIST.forEach((sector) => {
-      entry[sector.symbol] = (Math.random() - 0.5) * 4;
-    });
-
-    data.push(entry);
-  }
-
-  return data;
-}
-
 function determineSectorRotationPhase(sectors: SectorData[]): SectorRotationPhase {
   // Simple heuristic based on sector leadership
   const sortedByPerformance = [...sectors].sort((a, b) => b.performance - a.performance);
@@ -125,20 +88,7 @@ function determineSectorRotationPhase(sectors: SectorData[]): SectorRotationPhas
 export function useSectors() {
   const query = useQuery<SectorDetailsResponse>({
     queryKey: ['sectors-detailed'],
-    queryFn: async () => {
-      try {
-        return await fetchApi<SectorDetailsResponse>('/api/market/sectors');
-      } catch {
-        // Return mock data if API is unavailable
-        const mockSectors = generateMockSectorData();
-        return {
-          sectors: mockSectors,
-          rotationPhase: determineSectorRotationPhase(mockSectors),
-          historicalPerformance: generateMockHistoricalData(),
-          lastUpdated: new Date().toISOString(),
-        };
-      }
-    },
+    queryFn: () => fetchApi<SectorDetailsResponse>('/api/market/sectors'),
     refetchInterval: REFRESH_INTERVAL,
     staleTime: REFRESH_INTERVAL / 2,
   });
@@ -151,7 +101,10 @@ export function useSectors() {
     }
   }, [query.error]);
 
-  return query;
+  return {
+    ...query,
+    isEmpty: !query.isLoading && !query.isError && (!query.data?.sectors || query.data.sectors.length === 0),
+  };
 }
 
 /**

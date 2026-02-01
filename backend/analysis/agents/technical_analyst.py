@@ -279,172 +279,240 @@ Use these signal types in your findings:
 def format_technical_context(market_data: dict[str, Any]) -> str:
     """Format market data for technical analyst consumption.
 
-    Takes raw market data and formats it into a structured string that the
-    technical analyst agent can easily parse and analyze.
+    Takes raw market data from context builder and formats it into a structured
+    string that the technical analyst agent can easily parse and analyze.
 
     Args:
-        market_data: Dictionary containing market data with potential keys:
-            - symbol: Stock symbol
-            - prices: List of OHLCV dictionaries
-            - indicators: Pre-calculated technical indicators
-            - current_price: Latest price
-            - volume: Volume data
-            - timeframe: Data timeframe
+        market_data: Dictionary containing market data from context builder with keys:
+            - stocks: List of stock metadata dicts
+            - price_history: Dict mapping symbols to list of OHLCV dicts
+            - technical_indicators: Dict mapping symbols to indicator values
+            - market_summary: Overall market status
 
     Returns:
         Formatted string context for the technical analyst prompt.
     """
     context_parts: list[str] = []
 
-    # Symbol and basic info
-    symbol = market_data.get("symbol", "UNKNOWN")
-    context_parts.append(f"## Stock: {symbol}")
+    # Handle both old-style (per-stock) and new-style (aggregated) data formats
+    # New format from context_builder has price_history as dict mapping symbol -> prices
+    price_history = market_data.get("price_history", {})
+    technical_indicators = market_data.get("technical_indicators", {})
+    stocks = market_data.get("stocks", [])
 
-    # Current price information
-    current_price = market_data.get("current_price")
-    if current_price:
-        context_parts.append(f"Current Price: ${current_price:.2f}")
+    # If we have the new aggregated format, process each symbol
+    if price_history and isinstance(price_history, dict):
+        context_parts.append("# Technical Analysis Data\n")
 
-    # Price history
-    prices = market_data.get("prices", [])
-    if prices:
-        context_parts.append(f"\n### Price History ({len(prices)} periods)")
+        # Add market summary if available
+        market_summary = market_data.get("market_summary", {})
+        market_index = market_summary.get("market_index", {})
+        if market_index:
+            context_parts.append("## Market Overview (SPY)")
+            context_parts.append(f"Current: ${market_index.get('current', 0):.2f}")
+            change_pct = market_index.get("change_pct", 0)
+            context_parts.append(f"Change: {change_pct:+.2f}%")
+            context_parts.append(f"Volume: {market_index.get('volume', 0):,}")
+            context_parts.append("")
 
-        # Get recent prices (last 20)
-        recent_prices = prices[-20:] if len(prices) > 20 else prices
+        # Process each stock
+        for symbol, prices in price_history.items():
+            if not prices:
+                continue
 
-        # Calculate summary statistics
-        closes = [p.get("close", 0) for p in recent_prices if p.get("close")]
-        if closes:
-            high_20 = max(p.get("high", 0) for p in recent_prices if p.get("high"))
-            low_20 = min(p.get("low", float("inf")) for p in recent_prices if p.get("low"))
-            avg_volume = sum(p.get("volume", 0) for p in recent_prices) / len(recent_prices)
-
-            context_parts.append(f"20-Period High: ${high_20:.2f}")
-            context_parts.append(f"20-Period Low: ${low_20:.2f}")
-            context_parts.append(f"Average Volume: {avg_volume:,.0f}")
-
-        # Recent OHLCV data (last 5 periods)
-        context_parts.append("\nRecent OHLCV (last 5 periods):")
-        for p in recent_prices[-5:]:
-            date_str = _format_date(p.get("date"))
-            context_parts.append(
-                f"  {date_str}: O=${p.get('open', 0):.2f} "
-                f"H=${p.get('high', 0):.2f} L=${p.get('low', 0):.2f} "
-                f"C=${p.get('close', 0):.2f} V={p.get('volume', 0):,}"
+            # Find stock metadata
+            stock_info = next(
+                (s for s in stocks if s.get("symbol") == symbol),
+                {"symbol": symbol, "name": symbol}
             )
 
-    # Pre-calculated indicators
-    indicators = market_data.get("indicators", {})
-    if indicators:
-        context_parts.append("\n### Technical Indicators")
+            context_parts.append(f"## {symbol} - {stock_info.get('name', symbol)}")
+            if stock_info.get("sector"):
+                context_parts.append(f"Sector: {stock_info.get('sector')}")
 
-        # RSI
-        rsi = indicators.get("rsi")
-        if rsi is not None:
-            rsi_signal = _interpret_rsi(rsi)
-            context_parts.append(f"RSI(14): {rsi:.2f} - {rsi_signal}")
+            # Current price from most recent data
+            current_price: float = 0.0
+            if prices:
+                latest = prices[0]  # Prices are sorted descending by date
+                current_price = float(latest.get("close", 0))
+                context_parts.append(f"Current Price: ${current_price:.2f}")
+                context_parts.append(f"Volume: {latest.get('volume', 0):,}")
 
-        # MACD
-        macd = indicators.get("macd", {})
-        if macd:
-            macd_line = macd.get("macd_line")
-            signal_line = macd.get("signal_line")
-            histogram = macd.get("histogram")
-            if all(v is not None for v in [macd_line, signal_line, histogram]):
-                macd_signal = "Bullish" if histogram > 0 else "Bearish"
+            # Price history summary
+            context_parts.append(f"\n### Price History ({len(prices)} periods)")
+
+            # Get recent prices (last 20, remembering they're sorted desc)
+            recent_prices = prices[:20]
+
+            # Calculate summary statistics
+            closes = [p.get("close", 0) for p in recent_prices if p.get("close")]
+            if closes:
+                high_20 = max(p.get("high", 0) for p in recent_prices if p.get("high"))
+                low_20 = min(p.get("low", float("inf")) for p in recent_prices if p.get("low"))
+                avg_volume = sum(p.get("volume", 0) for p in recent_prices) / len(recent_prices)
+
+                context_parts.append(f"20-Period High: ${high_20:.2f}")
+                context_parts.append(f"20-Period Low: ${low_20:.2f}")
+                context_parts.append(f"Average Volume: {avg_volume:,.0f}")
+
+            # Recent OHLCV data (last 5 periods)
+            context_parts.append("\nRecent OHLCV (last 5 periods):")
+            for p in recent_prices[:5]:
+                date_str = _format_date(p.get("date"))
                 context_parts.append(
-                    f"MACD: Line={macd_line:.4f}, Signal={signal_line:.4f}, "
-                    f"Histogram={histogram:.4f} ({macd_signal})"
+                    f"  {date_str}: O=${p.get('open', 0):.2f} "
+                    f"H=${p.get('high', 0):.2f} L=${p.get('low', 0):.2f} "
+                    f"C=${p.get('close', 0):.2f} V={p.get('volume', 0):,}"
                 )
 
-        # Bollinger Bands
-        bb = indicators.get("bollinger_bands", {})
-        if bb:
-            upper = bb.get("upper")
-            middle = bb.get("middle")
-            lower = bb.get("lower")
-            if all(v is not None for v in [upper, middle, lower]):
-                bb_width = ((upper - lower) / middle) * 100 if middle else 0
+            # Technical indicators for this symbol
+            indicators = technical_indicators.get(symbol, {})
+            if indicators:
+                context_parts.append("\n### Technical Indicators")
+
+                for indicator_type, ind_data in indicators.items():
+                    if isinstance(ind_data, dict):
+                        value = ind_data.get("value")
+                        metadata = ind_data.get("metadata", {})
+
+                        if value is not None:
+                            # Format based on indicator type
+                            if indicator_type.lower() == "rsi":
+                                rsi_signal = _interpret_rsi(value)
+                                context_parts.append(f"RSI(14): {value:.2f} - {rsi_signal}")
+                            elif indicator_type.lower() == "macd":
+                                if metadata:
+                                    signal_line = metadata.get("signal_line", 0)
+                                    histogram = metadata.get("histogram", 0)
+                                    macd_signal = "Bullish" if histogram > 0 else "Bearish"
+                                    context_parts.append(
+                                        f"MACD: Line={value:.4f}, Signal={signal_line:.4f}, "
+                                        f"Histogram={histogram:.4f} ({macd_signal})"
+                                    )
+                                else:
+                                    context_parts.append(f"MACD: {value:.4f}")
+                            elif "sma" in indicator_type.lower() or "ema" in indicator_type.lower():
+                                context_parts.append(f"{indicator_type.upper()}: ${value:.2f}")
+                            elif indicator_type.lower() == "atr":
+                                if current_price and current_price > 0:
+                                    atr_pct = (value / current_price) * 100
+                                    context_parts.append(f"ATR(14): ${value:.2f} ({atr_pct:.2f}% of price)")
+                                else:
+                                    context_parts.append(f"ATR(14): ${value:.2f}")
+                            elif indicator_type.lower() == "bollinger_bands":
+                                if metadata:
+                                    upper = metadata.get("upper", 0)
+                                    lower = metadata.get("lower", 0)
+                                    middle = value
+                                    if middle > 0:
+                                        bb_width = ((upper - lower) / middle) * 100
+                                        context_parts.append(
+                                            f"Bollinger Bands: Upper=${upper:.2f}, "
+                                            f"Middle=${middle:.2f}, Lower=${lower:.2f} (Width: {bb_width:.1f}%)"
+                                        )
+                            else:
+                                context_parts.append(f"{indicator_type}: {value:.4f}")
+
+            context_parts.append("")  # Blank line between stocks
+
+    # Fall back to old format handling if no new-style data
+    elif market_data.get("symbol") or market_data.get("prices"):
+        # Legacy single-stock format
+        symbol = market_data.get("symbol", "UNKNOWN")
+        context_parts.append(f"## Stock: {symbol}")
+
+        legacy_current_price = market_data.get("current_price")
+        if legacy_current_price is not None:
+            context_parts.append(f"Current Price: ${float(legacy_current_price):.2f}")
+
+        prices = market_data.get("prices", [])
+        if prices:
+            context_parts.append(f"\n### Price History ({len(prices)} periods)")
+
+            recent_prices = prices[-20:] if len(prices) > 20 else prices
+
+            closes = [p.get("close", 0) for p in recent_prices if p.get("close")]
+            if closes:
+                high_20 = max(p.get("high", 0) for p in recent_prices if p.get("high"))
+                low_20 = min(p.get("low", float("inf")) for p in recent_prices if p.get("low"))
+                avg_volume = sum(p.get("volume", 0) for p in recent_prices) / len(recent_prices)
+
+                context_parts.append(f"20-Period High: ${high_20:.2f}")
+                context_parts.append(f"20-Period Low: ${low_20:.2f}")
+                context_parts.append(f"Average Volume: {avg_volume:,.0f}")
+
+            context_parts.append("\nRecent OHLCV (last 5 periods):")
+            for p in recent_prices[-5:]:
+                date_str = _format_date(p.get("date"))
                 context_parts.append(
-                    f"Bollinger Bands: Upper=${upper:.2f}, "
-                    f"Middle=${middle:.2f}, Lower=${lower:.2f} (Width: {bb_width:.1f}%)"
+                    f"  {date_str}: O=${p.get('open', 0):.2f} "
+                    f"H=${p.get('high', 0):.2f} L=${p.get('low', 0):.2f} "
+                    f"C=${p.get('close', 0):.2f} V={p.get('volume', 0):,}"
                 )
 
-        # Moving Averages
-        sma_20 = indicators.get("sma_20")
-        sma_50 = indicators.get("sma_50")
-        sma_200 = indicators.get("sma_200")
+        indicators = market_data.get("indicators", {})
+        if indicators:
+            context_parts.append("\n### Technical Indicators")
 
-        ma_parts = []
-        if sma_20 is not None:
-            ma_parts.append(f"SMA(20)=${sma_20:.2f}")
-        if sma_50 is not None:
-            ma_parts.append(f"SMA(50)=${sma_50:.2f}")
-        if sma_200 is not None:
-            ma_parts.append(f"SMA(200)=${sma_200:.2f}")
+            rsi = indicators.get("rsi")
+            if rsi is not None:
+                rsi_signal = _interpret_rsi(rsi)
+                context_parts.append(f"RSI(14): {rsi:.2f} - {rsi_signal}")
 
-        if ma_parts:
-            context_parts.append(f"Moving Averages: {', '.join(ma_parts)}")
+            macd = indicators.get("macd", {})
+            if macd:
+                macd_line = macd.get("macd_line")
+                signal_line = macd.get("signal_line")
+                histogram = macd.get("histogram")
+                if all(v is not None for v in [macd_line, signal_line, histogram]):
+                    macd_signal = "Bullish" if histogram > 0 else "Bearish"
+                    context_parts.append(
+                        f"MACD: Line={macd_line:.4f}, Signal={signal_line:.4f}, "
+                        f"Histogram={histogram:.4f} ({macd_signal})"
+                    )
 
-        # ATR (volatility)
-        atr = indicators.get("atr")
-        if atr is not None and current_price:
-            atr_pct = (atr / current_price) * 100
-            context_parts.append(f"ATR(14): ${atr:.2f} ({atr_pct:.2f}% of price)")
+            bb = indicators.get("bollinger_bands", {})
+            if bb:
+                upper = bb.get("upper")
+                middle = bb.get("middle")
+                lower = bb.get("lower")
+                if all(v is not None for v in [upper, middle, lower]):
+                    bb_width = ((upper - lower) / middle) * 100 if middle else 0
+                    context_parts.append(
+                        f"Bollinger Bands: Upper=${upper:.2f}, "
+                        f"Middle=${middle:.2f}, Lower=${lower:.2f} (Width: {bb_width:.1f}%)"
+                    )
 
-        # Stochastic
-        stochastic = indicators.get("stochastic", {})
-        if stochastic:
-            k = stochastic.get("k")
-            d = stochastic.get("d")
-            if k is not None and d is not None:
-                stoch_signal = _interpret_stochastic(k, d)
-                context_parts.append(f"Stochastic: %K={k:.2f}, %D={d:.2f} - {stoch_signal}")
+            sma_20 = indicators.get("sma_20")
+            sma_50 = indicators.get("sma_50")
+            sma_200 = indicators.get("sma_200")
 
-    # Support and Resistance levels
-    sr_levels = market_data.get("support_resistance", {})
-    if sr_levels:
-        context_parts.append("\n### Support/Resistance Levels")
+            ma_parts = []
+            if sma_20 is not None:
+                ma_parts.append(f"SMA(20)=${sma_20:.2f}")
+            if sma_50 is not None:
+                ma_parts.append(f"SMA(50)=${sma_50:.2f}")
+            if sma_200 is not None:
+                ma_parts.append(f"SMA(200)=${sma_200:.2f}")
 
-        support_levels = sr_levels.get("support", [])
-        if support_levels:
-            levels_str = ", ".join(f"${s['level']:.2f}" for s in support_levels[:3])
-            context_parts.append(f"Support: {levels_str}")
+            if ma_parts:
+                context_parts.append(f"Moving Averages: {', '.join(ma_parts)}")
 
-        resistance_levels = sr_levels.get("resistance", [])
-        if resistance_levels:
-            levels_str = ", ".join(f"${r['level']:.2f}" for r in resistance_levels[:3])
-            context_parts.append(f"Resistance: {levels_str}")
+            atr = indicators.get("atr")
+            if atr is not None and legacy_current_price:
+                atr_pct = (atr / float(legacy_current_price)) * 100
+                context_parts.append(f"ATR(14): ${atr:.2f} ({atr_pct:.2f}% of price)")
 
-    # Detected patterns
-    patterns = market_data.get("patterns", [])
-    if patterns:
-        context_parts.append("\n### Detected Patterns")
-        for pattern in patterns[:5]:  # Limit to 5 patterns
-            p_type = pattern.get("pattern_type", "unknown")
-            confidence = pattern.get("confidence", 0)
-            description = pattern.get("description", "")
-            context_parts.append(f"- {p_type} (Confidence: {confidence:.0%}): {description}")
+            stochastic = indicators.get("stochastic", {})
+            if stochastic:
+                k = stochastic.get("k")
+                d = stochastic.get("d")
+                if k is not None and d is not None:
+                    stoch_signal = _interpret_stochastic(k, d)
+                    context_parts.append(f"Stochastic: %K={k:.2f}, %D={d:.2f} - {stoch_signal}")
 
-    # Volume analysis
-    volume_data = market_data.get("volume_analysis", {})
-    if volume_data:
-        context_parts.append("\n### Volume Analysis")
-        avg_vol = volume_data.get("average_volume")
-        current_vol = volume_data.get("current_volume")
-        if avg_vol and current_vol:
-            vol_ratio = current_vol / avg_vol
-            vol_signal = "Above average" if vol_ratio > 1.2 else "Below average" if vol_ratio < 0.8 else "Normal"
-            context_parts.append(f"Current Volume: {current_vol:,} ({vol_ratio:.1f}x average) - {vol_signal}")
-
-    # Trend information
-    trend = market_data.get("trend", {})
-    if trend:
-        context_parts.append("\n### Trend Analysis")
-        trend_dir = trend.get("direction", "unknown")
-        trend_strength = trend.get("strength", 0)
-        context_parts.append(f"Trend: {trend_dir.upper()} (Strength: {trend_strength:.0%})")
+    else:
+        context_parts.append("No price data available for technical analysis.")
 
     return "\n".join(context_parts)
 

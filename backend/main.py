@@ -1,11 +1,31 @@
 """FastAPI application entry point."""
 
+import logging
+import sys
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+# Configure logging before importing other modules
+# This ensures all loggers created with getLogger(__name__) use this configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ],
+    force=True,  # Override any existing configuration
+)
+
+# Set specific loggers to appropriate levels
+logging.getLogger("uvicorn").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # Reduce access log noise
+logging.getLogger("httpx").setLevel(logging.WARNING)  # Reduce HTTP client noise
+
+logger = logging.getLogger(__name__)
 
 from api import api_router
 from api.exceptions import (

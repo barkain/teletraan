@@ -21,6 +21,9 @@ from models.stock import Stock
 from models.price import PriceHistory
 from models.economic import EconomicIndicator
 from analysis.engine import AnalysisEngine
+from analysis.outcome_tracker import InsightOutcomeTracker
+from analysis.memory_service import InstitutionalMemoryService
+from analysis.statistical_calculator import StatisticalFeatureCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +379,109 @@ class ETLOrchestrator:
         logger.info(f"Refreshed {updated} stocks")
         return updated
 
+    async def check_insight_outcomes(self) -> dict[str, Any]:
+        """Daily job to check and update insight outcomes.
+
+        Evaluates all actively tracking insight outcomes to see if predictions
+        were validated. Updates current prices, evaluates completed tracking
+        periods, and updates pattern success rates based on results.
+
+        Returns:
+            Dict containing outcomes_checked and patterns_updated counts.
+        """
+        logger.info("Running insight outcome check job")
+
+        async with async_session_factory() as session:
+            tracker = InsightOutcomeTracker(session)
+
+            # Check all tracking outcomes
+            updated_outcomes = await tracker.check_outcomes()
+
+            # Update pattern success rates based on completed outcomes
+            patterns_updated = await tracker.update_pattern_success_rates()
+
+            logger.info(
+                f"Outcome check complete: {len(updated_outcomes)} outcomes updated, "
+                f"{patterns_updated} patterns updated"
+            )
+
+            return {
+                "outcomes_checked": len(updated_outcomes),
+                "patterns_updated": patterns_updated,
+            }
+
+    async def decay_theme_relevance(self) -> dict[str, Any]:
+        """Daily job to decay conversation theme relevance.
+
+        Applies time-based relevance decay to all active themes and
+        deactivates themes that fall below the minimum threshold.
+
+        Returns:
+            Dict containing themes_processed and deactivated counts.
+        """
+        logger.info("Running theme relevance decay job")
+
+        async with async_session_factory() as session:
+            memory_service = InstitutionalMemoryService(session)
+
+            # Get all active themes - this applies decay internally
+            themes = await memory_service.get_active_themes()
+
+            # Deactivate themes below threshold
+            deactivated = 0
+            for theme in themes:
+                if theme.current_relevance < 0.1:
+                    theme.is_active = False
+                    deactivated += 1
+
+            await session.commit()
+
+            logger.info(
+                f"Theme decay complete: {len(themes)} themes processed, "
+                f"{deactivated} themes deactivated"
+            )
+
+            return {
+                "themes_processed": len(themes),
+                "deactivated": deactivated,
+            }
+
+    async def compute_daily_features(
+        self,
+        symbols: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Daily job to compute statistical features for watchlist.
+
+        Computes momentum, mean-reversion, volatility, seasonality,
+        and cross-sectional features for all watchlist symbols.
+
+        Args:
+            symbols: List of symbols to compute. Uses DEFAULT_SYMBOLS if not provided.
+
+        Returns:
+            Dict containing features_computed and symbols counts.
+        """
+        symbols = symbols or self.DEFAULT_SYMBOLS
+        logger.info(f"Computing daily statistical features for {len(symbols)} symbols")
+
+        async with async_session_factory() as session:
+            calculator = StatisticalFeatureCalculator(session)
+
+            # Compute all features
+            features = await calculator.compute_all_features(symbols)
+
+            await session.commit()
+
+            logger.info(
+                f"Feature computation complete: {len(features)} features computed "
+                f"for {len(symbols)} symbols"
+            )
+
+            return {
+                "features_computed": len(features),
+                "symbols": len(symbols),
+            }
+
     def start(self) -> None:
         """Start the scheduler with configured jobs."""
         if self._is_running:
@@ -414,9 +520,37 @@ class ETLOrchestrator:
             replace_existing=True,
         )
 
+        # Daily insight outcome check at 4:30 PM ET (after market close)
+        self.scheduler.add_job(
+            self.check_insight_outcomes,
+            CronTrigger(hour=16, minute=30, timezone="America/New_York"),
+            id="daily_outcome_check",
+            replace_existing=True,
+        )
+
+        # Daily theme relevance decay at midnight ET
+        self.scheduler.add_job(
+            self.decay_theme_relevance,
+            CronTrigger(hour=0, minute=0, timezone="America/New_York"),
+            id="daily_theme_decay",
+            replace_existing=True,
+        )
+
+        # Daily statistical feature computation at 7:00 AM ET (before market open)
+        self.scheduler.add_job(
+            self.compute_daily_features,
+            CronTrigger(hour=7, minute=0, timezone="America/New_York"),
+            id="daily_feature_computation",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
         self._is_running = True
-        logger.info("ETL scheduler started with jobs: daily_price_refresh, weekly_economic_refresh, daily_analysis, weekly_stock_info_refresh")
+        logger.info(
+            "ETL scheduler started with jobs: daily_price_refresh, "
+            "weekly_economic_refresh, daily_analysis, weekly_stock_info_refresh, "
+            "daily_outcome_check, daily_theme_decay, daily_feature_computation"
+        )
 
     def stop(self) -> None:
         """Stop the scheduler."""

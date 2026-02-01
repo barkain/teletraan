@@ -157,14 +157,12 @@ def format_correlation_context(market_data: dict[str, Any]) -> str:
     string that the Correlation Detective agent can analyze effectively.
 
     Args:
-        market_data: Dictionary containing market data with keys:
-            - symbols: List of symbols being analyzed
-            - prices: Dict mapping symbols to price history (list of OHLCV dicts)
-            - sectors: Dict mapping symbols to their sector ETF
-            - sector_prices: Dict mapping sector ETFs to price history
-            - correlations: Optional pre-computed correlation matrix
-            - market_indices: Optional dict of index data (SPY, QQQ, etc.)
-            - economic_indicators: Optional economic data
+        market_data: Dictionary containing market data from context builder:
+            - price_history: Dict mapping symbols to list of OHLCV dicts
+            - stocks: List of stock metadata with sector info
+            - sector_performance: Dict mapping sector ETFs to performance metrics
+            - market_summary: Overall market status
+            Or legacy format with prices, sectors, sector_prices, etc.
 
     Returns:
         Formatted string context for the correlation detective agent.
@@ -174,26 +172,33 @@ def format_correlation_context(market_data: dict[str, Any]) -> str:
     # Header
     context_parts.append("=== Cross-Asset Correlation Analysis Context ===\n")
 
-    # Primary symbols being analyzed
-    symbols = market_data.get("symbols", [])
-    if symbols:
-        context_parts.append(f"Primary Symbols: {', '.join(symbols)}\n")
+    # Check for new context builder format
+    price_history = market_data.get("price_history", {})
+    stocks = market_data.get("stocks", [])
+    sector_performance = market_data.get("sector_performance", {})
 
-    # Price performance summary
-    prices = market_data.get("prices", {})
-    if prices:
+    if price_history and isinstance(price_history, dict):
+        # New format from context builder
+
+        # List symbols being analyzed
+        symbols = list(price_history.keys())
+        if symbols:
+            context_parts.append(f"Primary Symbols: {', '.join(symbols)}\n")
+
+        # Price performance summary
         context_parts.append("\n--- Recent Price Performance ---")
-        for symbol, price_history in prices.items():
-            if price_history and len(price_history) >= 2:
-                latest = price_history[-1]
-                prev = price_history[-2]
+        for symbol, prices in price_history.items():
+            if prices and len(prices) >= 2:
+                # Prices are sorted descending by date
+                latest = prices[0]
+                prev = prices[1]
                 daily_change = ((latest.get("close", 0) - prev.get("close", 1)) /
                                prev.get("close", 1) * 100) if prev.get("close") else 0
 
                 # Calculate weekly change if enough data
                 weekly_change = 0.0
-                if len(price_history) >= 6:
-                    week_ago = price_history[-6]
+                if len(prices) >= 6:
+                    week_ago = prices[5]
                     weekly_change = ((latest.get("close", 0) - week_ago.get("close", 1)) /
                                     week_ago.get("close", 1) * 100) if week_ago.get("close") else 0
 
@@ -203,54 +208,132 @@ def format_correlation_context(market_data: dict[str, Any]) -> str:
                 )
 
                 # Volume analysis
-                if latest.get("volume") and len(price_history) >= 20:
-                    avg_volume = sum(p.get("volume", 0) for p in price_history[-20:]) / 20
+                if latest.get("volume") and len(prices) >= 20:
+                    avg_volume = sum(p.get("volume", 0) for p in prices[:20]) / 20
                     vol_ratio = latest["volume"] / avg_volume if avg_volume > 0 else 1
                     if vol_ratio > 1.5:
                         context_parts.append(f"  Volume: {vol_ratio:.1f}x average (elevated)")
                     elif vol_ratio < 0.5:
                         context_parts.append(f"  Volume: {vol_ratio:.1f}x average (subdued)")
 
-    # Sector mapping and performance
-    sectors = market_data.get("sectors", {})
-    sector_prices = market_data.get("sector_prices", {})
-    if sectors and sector_prices:
-        context_parts.append("\n\n--- Sector Performance ---")
-        for sector_etf, sector_history in sector_prices.items():
-            if sector_history and len(sector_history) >= 2:
-                latest = sector_history[-1]
-                prev = sector_history[-2]
-                daily_change = ((latest.get("close", 0) - prev.get("close", 1)) /
-                               prev.get("close", 1) * 100) if prev.get("close") else 0
-                context_parts.append(f"\n{sector_etf}: {daily_change:+.2f}%")
+        # Build stock-to-sector mapping from stocks metadata
+        stock_sectors: dict[str, str] = {}
+        for stock in stocks:
+            if isinstance(stock, dict):
+                symbol = stock.get("symbol", "")
+                sector = stock.get("sector", "")
+                if symbol and sector:
+                    stock_sectors[symbol] = sector
 
-        # Stock vs sector relationships
-        context_parts.append("\n\n--- Stock-Sector Mappings ---")
-        for symbol, sector in sectors.items():
-            context_parts.append(f"\n{symbol} -> {sector}")
+        if stock_sectors:
+            context_parts.append("\n\n--- Stock-Sector Mappings ---")
+            for symbol, sector in sorted(stock_sectors.items()):
+                context_parts.append(f"\n{symbol} -> {sector}")
 
-    # Pre-computed correlations
-    correlations = market_data.get("correlations", {})
-    if correlations:
-        context_parts.append("\n\n--- Correlation Matrix (30-day) ---")
-        for pair, corr in correlations.items():
-            context_parts.append(f"\n{pair}: {corr:.2f}")
+        # Sector ETF performance
+        if sector_performance:
+            context_parts.append("\n\n--- Sector ETF Performance ---")
+            for etf_symbol, perf in sector_performance.items():
+                if isinstance(perf, dict):
+                    sector_name = perf.get("sector", etf_symbol)
+                    daily_pct = perf.get("daily_change_pct", 0)
+                    weekly_pct = perf.get("weekly_change_pct", 0)
+                    monthly_pct = perf.get("monthly_change_pct", 0)
+                    context_parts.append(
+                        f"\n{etf_symbol} ({sector_name}): "
+                        f"1D={daily_pct:+.2f}%, 1W={weekly_pct:+.2f}%, 1M={monthly_pct:+.2f}%"
+                    )
 
-    # Market indices
-    market_indices = market_data.get("market_indices", {})
-    if market_indices:
-        context_parts.append("\n\n--- Market Indices ---")
-        for index, data in market_indices.items():
-            if isinstance(data, dict):
-                change = data.get("daily_change", 0)
-                context_parts.append(f"\n{index}: {change:+.2f}%")
+        # Calculate correlations between stocks if we have price history
+        if len(price_history) >= 2:
+            context_parts.append("\n\n--- Calculated Correlations (30-day returns) ---")
+            symbols_list = list(price_history.keys())
+            for i, sym_a in enumerate(symbols_list):
+                for sym_b in symbols_list[i+1:]:
+                    prices_a = price_history.get(sym_a, [])
+                    prices_b = price_history.get(sym_b, [])
+                    if len(prices_a) >= 20 and len(prices_b) >= 20:
+                        corr = calculate_correlation(prices_a, prices_b, period=20)
+                        context_parts.append(f"\n{sym_a}/{sym_b}: {corr:.2f}")
 
-    # Economic indicators
+        # Market summary as index reference
+        market_summary = market_data.get("market_summary", {})
+        market_index = market_summary.get("market_index", {})
+        if market_index:
+            context_parts.append("\n\n--- Market Index (SPY) ---")
+            context_parts.append(f"\nSPY: ${market_index.get('current', 0):.2f} ({market_index.get('change_pct', 0):+.2f}%)")
+
+    else:
+        # Legacy format support
+        symbols = market_data.get("symbols", [])
+        if symbols:
+            context_parts.append(f"Primary Symbols: {', '.join(symbols)}\n")
+
+        prices = market_data.get("prices", {})
+        if prices:
+            context_parts.append("\n--- Recent Price Performance ---")
+            for symbol, price_hist in prices.items():
+                if price_hist and len(price_hist) >= 2:
+                    latest = price_hist[-1]
+                    prev = price_hist[-2]
+                    daily_change = ((latest.get("close", 0) - prev.get("close", 1)) /
+                                   prev.get("close", 1) * 100) if prev.get("close") else 0
+
+                    weekly_change = 0.0
+                    if len(price_hist) >= 6:
+                        week_ago = price_hist[-6]
+                        weekly_change = ((latest.get("close", 0) - week_ago.get("close", 1)) /
+                                        week_ago.get("close", 1) * 100) if week_ago.get("close") else 0
+
+                    context_parts.append(
+                        f"\n{symbol}: ${latest.get('close', 0):.2f} "
+                        f"(1D: {daily_change:+.2f}%, 1W: {weekly_change:+.2f}%)"
+                    )
+
+        sectors = market_data.get("sectors", {})
+        sector_prices = market_data.get("sector_prices", {})
+        if sectors and sector_prices:
+            context_parts.append("\n\n--- Sector Performance ---")
+            for sector_etf, sector_history in sector_prices.items():
+                if sector_history and len(sector_history) >= 2:
+                    latest = sector_history[-1]
+                    prev = sector_history[-2]
+                    daily_change = ((latest.get("close", 0) - prev.get("close", 1)) /
+                                   prev.get("close", 1) * 100) if prev.get("close") else 0
+                    context_parts.append(f"\n{sector_etf}: {daily_change:+.2f}%")
+
+            context_parts.append("\n\n--- Stock-Sector Mappings ---")
+            for symbol, sector in sectors.items():
+                context_parts.append(f"\n{symbol} -> {sector}")
+
+        correlations = market_data.get("correlations", {})
+        if correlations:
+            context_parts.append("\n\n--- Correlation Matrix (30-day) ---")
+            for pair, corr in correlations.items():
+                context_parts.append(f"\n{pair}: {corr:.2f}")
+
+        market_indices = market_data.get("market_indices", {})
+        if market_indices:
+            context_parts.append("\n\n--- Market Indices ---")
+            for index, data in market_indices.items():
+                if isinstance(data, dict):
+                    change = data.get("daily_change", 0)
+                    context_parts.append(f"\n{index}: {change:+.2f}%")
+
+    # Economic indicators (handle both list and dict)
     economic = market_data.get("economic_indicators", {})
     if economic:
         context_parts.append("\n\n--- Economic Indicators ---")
-        for indicator, value in economic.items():
-            context_parts.append(f"\n{indicator}: {value}")
+        if isinstance(economic, list):
+            for ind in economic:
+                if isinstance(ind, dict):
+                    name = ind.get("name", ind.get("series_id", "Unknown"))
+                    value = ind.get("value", "N/A")
+                    unit = ind.get("unit", "")
+                    context_parts.append(f"\n{name}: {value}{unit}")
+        elif isinstance(economic, dict):
+            for indicator, value in economic.items():
+                context_parts.append(f"\n{indicator}: {value}")
 
     # Historical context if provided
     historical_data = market_data.get("historical_context", {})

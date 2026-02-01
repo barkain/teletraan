@@ -155,104 +155,254 @@ def format_macro_context(market_data: dict) -> str:
     Format economic data for macro analyst consumption.
 
     Args:
-        market_data: Dictionary containing economic/market data with keys such as:
-            - fed_funds_rate: Current Fed Funds rate
-            - treasury_2y: 2-year Treasury yield
-            - treasury_10y: 10-year Treasury yield
-            - cpi_yoy: Year-over-year CPI
-            - pce_yoy: Year-over-year PCE
-            - unemployment_rate: Current unemployment rate
-            - initial_claims: Weekly initial jobless claims
-            - ism_manufacturing: ISM Manufacturing PMI
-            - ism_services: ISM Services PMI
-            - gdp_growth: GDP growth rate
-            - dxy: Dollar index value
-            - fed_dot_plot: Fed's projected rate path
-            - recent_fed_statements: Recent FOMC statements/minutes
+        market_data: Dictionary containing economic/market data from context builder:
+            - economic_indicators: List of economic indicator dicts with series_id, name, value, unit
+            - sector_performance: Dict mapping sector ETFs to performance metrics
+            - market_summary: Overall market status
+            Or legacy flat format with direct keys like fed_funds_rate, cpi_yoy, etc.
 
     Returns:
         Formatted string context for the macro economist agent.
     """
     context_parts = []
 
-    # Federal Reserve Data
-    context_parts.append("=== FEDERAL RESERVE DATA ===")
-    if "fed_funds_rate" in market_data:
-        context_parts.append(f"Fed Funds Rate: {market_data['fed_funds_rate']}%")
-    if "fed_dot_plot" in market_data:
-        context_parts.append(f"Dot Plot Median: {market_data['fed_dot_plot']}")
-    if "recent_fed_statements" in market_data:
-        context_parts.append(f"Recent Fed Guidance: {market_data['recent_fed_statements']}")
+    # Check if data is in new context builder format (list of economic_indicators)
+    economic_indicators = market_data.get("economic_indicators", [])
 
-    # Treasury Yields
-    context_parts.append("\n=== TREASURY YIELDS ===")
-    if "treasury_2y" in market_data:
-        context_parts.append(f"2-Year Treasury: {market_data['treasury_2y']}%")
-    if "treasury_10y" in market_data:
-        context_parts.append(f"10-Year Treasury: {market_data['treasury_10y']}%")
-    if "treasury_2y" in market_data and "treasury_10y" in market_data:
-        spread = market_data["treasury_10y"] - market_data["treasury_2y"]
-        context_parts.append(f"2Y/10Y Spread: {spread:.2f}%")
-        if spread < 0:
-            context_parts.append("** YIELD CURVE INVERTED **")
+    if economic_indicators and isinstance(economic_indicators, list):
+        # New format: extract from list of indicator dicts
+        # Build a lookup dict for easy access
+        indicators_by_id: dict[str, dict] = {}
+        indicators_by_name: dict[str, dict] = {}
+        for ind in economic_indicators:
+            if isinstance(ind, dict):
+                series_id = ind.get("series_id", "").lower()
+                name = ind.get("name", "").lower()
+                indicators_by_id[series_id] = ind
+                indicators_by_name[name] = ind
 
-    # Inflation Metrics
-    context_parts.append("\n=== INFLATION METRICS ===")
-    if "cpi_yoy" in market_data:
-        context_parts.append(f"CPI (YoY): {market_data['cpi_yoy']}%")
-    if "cpi_mom" in market_data:
-        context_parts.append(f"CPI (MoM): {market_data['cpi_mom']}%")
-    if "core_cpi_yoy" in market_data:
-        context_parts.append(f"Core CPI (YoY): {market_data['core_cpi_yoy']}%")
-    if "pce_yoy" in market_data:
-        context_parts.append(f"PCE (YoY): {market_data['pce_yoy']}%")
-    if "core_pce_yoy" in market_data:
-        context_parts.append(f"Core PCE (YoY): {market_data['core_pce_yoy']}%")
+        context_parts.append("=== ECONOMIC INDICATORS ===")
 
-    # Labor Market
-    context_parts.append("\n=== LABOR MARKET ===")
-    if "unemployment_rate" in market_data:
-        context_parts.append(f"Unemployment Rate: {market_data['unemployment_rate']}%")
-    if "initial_claims" in market_data:
-        context_parts.append(f"Initial Jobless Claims: {market_data['initial_claims']:,}")
-    if "continuing_claims" in market_data:
-        context_parts.append(f"Continuing Claims: {market_data['continuing_claims']:,}")
-    if "nonfarm_payrolls" in market_data:
-        context_parts.append(f"Nonfarm Payrolls: {market_data['nonfarm_payrolls']:+,}")
-    if "wage_growth_yoy" in market_data:
-        context_parts.append(f"Wage Growth (YoY): {market_data['wage_growth_yoy']}%")
+        # Group indicators by category
+        fed_indicators = []
+        inflation_indicators = []
+        labor_indicators = []
+        activity_indicators = []
+        other_indicators = []
 
-    # Economic Activity
-    context_parts.append("\n=== ECONOMIC ACTIVITY ===")
-    if "gdp_growth" in market_data:
-        context_parts.append(f"GDP Growth (QoQ SAAR): {market_data['gdp_growth']}%")
-    if "ism_manufacturing" in market_data:
-        pmi = market_data["ism_manufacturing"]
-        status = "Expansion" if pmi > 50 else "Contraction"
-        context_parts.append(f"ISM Manufacturing PMI: {pmi} ({status})")
-    if "ism_services" in market_data:
-        pmi = market_data["ism_services"]
-        status = "Expansion" if pmi > 50 else "Contraction"
-        context_parts.append(f"ISM Services PMI: {pmi} ({status})")
-    if "retail_sales_mom" in market_data:
-        context_parts.append(f"Retail Sales (MoM): {market_data['retail_sales_mom']}%")
-    if "industrial_production_mom" in market_data:
-        context_parts.append(
-            f"Industrial Production (MoM): {market_data['industrial_production_mom']}%"
-        )
+        for ind in economic_indicators:
+            name = ind.get("name", "").lower()
+            series_id = ind.get("series_id", "").lower()
 
-    # Dollar & Global
-    context_parts.append("\n=== CURRENCY & GLOBAL ===")
-    if "dxy" in market_data:
-        context_parts.append(f"Dollar Index (DXY): {market_data['dxy']}")
-    if "eurusd" in market_data:
-        context_parts.append(f"EUR/USD: {market_data['eurusd']}")
-    if "oil_price" in market_data:
-        context_parts.append(f"Crude Oil (WTI): ${market_data['oil_price']}")
-    if "global_factors" in market_data:
-        context_parts.append(f"Global Factors: {market_data['global_factors']}")
+            # Categorize by name/series_id patterns
+            if any(x in name or x in series_id for x in ["fed", "funds", "rate", "fomc"]):
+                fed_indicators.append(ind)
+            elif any(x in name or x in series_id for x in ["cpi", "pce", "inflation", "price"]):
+                inflation_indicators.append(ind)
+            elif any(x in name or x in series_id for x in ["unemployment", "payroll", "jobs", "claims", "labor", "wage"]):
+                labor_indicators.append(ind)
+            elif any(x in name or x in series_id for x in ["gdp", "pmi", "ism", "retail", "industrial", "manufacturing"]):
+                activity_indicators.append(ind)
+            else:
+                other_indicators.append(ind)
 
-    # Historical Context
+        # Federal Reserve Data
+        if fed_indicators:
+            context_parts.append("\n=== FEDERAL RESERVE DATA ===")
+            for ind in fed_indicators:
+                name = ind.get("name", ind.get("series_id", "Unknown"))
+                value = ind.get("value", "N/A")
+                unit = ind.get("unit", "")
+                date = ind.get("date", "")
+                context_parts.append(f"{name}: {value}{unit} (as of {date})")
+
+        # Inflation Metrics
+        if inflation_indicators:
+            context_parts.append("\n=== INFLATION METRICS ===")
+            for ind in inflation_indicators:
+                name = ind.get("name", ind.get("series_id", "Unknown"))
+                value = ind.get("value", "N/A")
+                unit = ind.get("unit", "")
+                date = ind.get("date", "")
+                context_parts.append(f"{name}: {value}{unit} (as of {date})")
+
+        # Labor Market
+        if labor_indicators:
+            context_parts.append("\n=== LABOR MARKET ===")
+            for ind in labor_indicators:
+                name = ind.get("name", ind.get("series_id", "Unknown"))
+                value = ind.get("value", "N/A")
+                unit = ind.get("unit", "")
+                date = ind.get("date", "")
+                if isinstance(value, (int, float)) and value > 1000:
+                    context_parts.append(f"{name}: {value:,.0f}{unit} (as of {date})")
+                else:
+                    context_parts.append(f"{name}: {value}{unit} (as of {date})")
+
+        # Economic Activity
+        if activity_indicators:
+            context_parts.append("\n=== ECONOMIC ACTIVITY ===")
+            for ind in activity_indicators:
+                name = ind.get("name", ind.get("series_id", "Unknown"))
+                value = ind.get("value", "N/A")
+                unit = ind.get("unit", "")
+                date = ind.get("date", "")
+                # Add expansion/contraction status for PMI
+                if "pmi" in name.lower() or "ism" in name.lower():
+                    try:
+                        status = "Expansion" if float(value) > 50 else "Contraction"
+                        context_parts.append(f"{name}: {value}{unit} ({status}) (as of {date})")
+                    except (ValueError, TypeError):
+                        context_parts.append(f"{name}: {value}{unit} (as of {date})")
+                else:
+                    context_parts.append(f"{name}: {value}{unit} (as of {date})")
+
+        # Other Indicators
+        if other_indicators:
+            context_parts.append("\n=== OTHER INDICATORS ===")
+            for ind in other_indicators:
+                name = ind.get("name", ind.get("series_id", "Unknown"))
+                value = ind.get("value", "N/A")
+                unit = ind.get("unit", "")
+                date = ind.get("date", "")
+                context_parts.append(f"{name}: {value}{unit} (as of {date})")
+
+        # If no indicators were found, note that
+        if not any([fed_indicators, inflation_indicators, labor_indicators, activity_indicators, other_indicators]):
+            context_parts.append("No economic indicators available in database.")
+
+    else:
+        # Legacy flat format or new format with empty economic_indicators
+        # Only output sections that have data
+
+        # Federal Reserve Data
+        fed_data = []
+        if "fed_funds_rate" in market_data:
+            fed_data.append(f"Fed Funds Rate: {market_data['fed_funds_rate']}%")
+        if "fed_dot_plot" in market_data:
+            fed_data.append(f"Dot Plot Median: {market_data['fed_dot_plot']}")
+        if "recent_fed_statements" in market_data:
+            fed_data.append(f"Recent Fed Guidance: {market_data['recent_fed_statements']}")
+        if fed_data:
+            context_parts.append("=== FEDERAL RESERVE DATA ===")
+            context_parts.extend(fed_data)
+
+        # Treasury Yields
+        treasury_data = []
+        if "treasury_2y" in market_data:
+            treasury_data.append(f"2-Year Treasury: {market_data['treasury_2y']}%")
+        if "treasury_10y" in market_data:
+            treasury_data.append(f"10-Year Treasury: {market_data['treasury_10y']}%")
+        if "treasury_2y" in market_data and "treasury_10y" in market_data:
+            spread = market_data["treasury_10y"] - market_data["treasury_2y"]
+            treasury_data.append(f"2Y/10Y Spread: {spread:.2f}%")
+            if spread < 0:
+                treasury_data.append("** YIELD CURVE INVERTED **")
+        if treasury_data:
+            context_parts.append("\n=== TREASURY YIELDS ===")
+            context_parts.extend(treasury_data)
+
+        # Inflation Metrics
+        inflation_data = []
+        if "cpi_yoy" in market_data:
+            inflation_data.append(f"CPI (YoY): {market_data['cpi_yoy']}%")
+        if "cpi_mom" in market_data:
+            inflation_data.append(f"CPI (MoM): {market_data['cpi_mom']}%")
+        if "core_cpi_yoy" in market_data:
+            inflation_data.append(f"Core CPI (YoY): {market_data['core_cpi_yoy']}%")
+        if "pce_yoy" in market_data:
+            inflation_data.append(f"PCE (YoY): {market_data['pce_yoy']}%")
+        if "core_pce_yoy" in market_data:
+            inflation_data.append(f"Core PCE (YoY): {market_data['core_pce_yoy']}%")
+        if inflation_data:
+            context_parts.append("\n=== INFLATION METRICS ===")
+            context_parts.extend(inflation_data)
+
+        # Labor Market
+        labor_data = []
+        if "unemployment_rate" in market_data:
+            labor_data.append(f"Unemployment Rate: {market_data['unemployment_rate']}%")
+        if "initial_claims" in market_data:
+            labor_data.append(f"Initial Jobless Claims: {market_data['initial_claims']:,}")
+        if "continuing_claims" in market_data:
+            labor_data.append(f"Continuing Claims: {market_data['continuing_claims']:,}")
+        if "nonfarm_payrolls" in market_data:
+            labor_data.append(f"Nonfarm Payrolls: {market_data['nonfarm_payrolls']:+,}")
+        if "wage_growth_yoy" in market_data:
+            labor_data.append(f"Wage Growth (YoY): {market_data['wage_growth_yoy']}%")
+        if labor_data:
+            context_parts.append("\n=== LABOR MARKET ===")
+            context_parts.extend(labor_data)
+
+        # Economic Activity
+        activity_data = []
+        if "gdp_growth" in market_data:
+            activity_data.append(f"GDP Growth (QoQ SAAR): {market_data['gdp_growth']}%")
+        if "ism_manufacturing" in market_data:
+            pmi = market_data["ism_manufacturing"]
+            status = "Expansion" if pmi > 50 else "Contraction"
+            activity_data.append(f"ISM Manufacturing PMI: {pmi} ({status})")
+        if "ism_services" in market_data:
+            pmi = market_data["ism_services"]
+            status = "Expansion" if pmi > 50 else "Contraction"
+            activity_data.append(f"ISM Services PMI: {pmi} ({status})")
+        if "retail_sales_mom" in market_data:
+            activity_data.append(f"Retail Sales (MoM): {market_data['retail_sales_mom']}%")
+        if "industrial_production_mom" in market_data:
+            activity_data.append(
+                f"Industrial Production (MoM): {market_data['industrial_production_mom']}%"
+            )
+        if activity_data:
+            context_parts.append("\n=== ECONOMIC ACTIVITY ===")
+            context_parts.extend(activity_data)
+
+        # Currency & Global
+        currency_data = []
+        if "dxy" in market_data:
+            currency_data.append(f"Dollar Index (DXY): {market_data['dxy']}")
+        if "eurusd" in market_data:
+            currency_data.append(f"EUR/USD: {market_data['eurusd']}")
+        if "oil_price" in market_data:
+            currency_data.append(f"Crude Oil (WTI): ${market_data['oil_price']}")
+        if "global_factors" in market_data:
+            currency_data.append(f"Global Factors: {market_data['global_factors']}")
+        if currency_data:
+            context_parts.append("\n=== CURRENCY & GLOBAL ===")
+            context_parts.extend(currency_data)
+
+        # If no legacy data at all, add a note but proceed with sector/market data
+        if not any([fed_data, treasury_data, inflation_data, labor_data, activity_data, currency_data]):
+            context_parts.append("=== ECONOMIC INDICATORS ===")
+            context_parts.append("Note: No detailed economic indicators available in database.")
+            context_parts.append("Analysis based on sector performance and market index data below.")
+
+    # Sector Performance (from context builder)
+    sector_performance = market_data.get("sector_performance", {})
+    if sector_performance:
+        context_parts.append("\n=== SECTOR PERFORMANCE ===")
+        for symbol, perf in sector_performance.items():
+            if isinstance(perf, dict):
+                name = perf.get("name", symbol)
+                sector = perf.get("sector", "")
+                daily_pct = perf.get("daily_change_pct", 0)
+                weekly_pct = perf.get("weekly_change_pct", 0)
+                monthly_pct = perf.get("monthly_change_pct", 0)
+                context_parts.append(
+                    f"{symbol} ({sector}): Daily={daily_pct:+.2f}%, "
+                    f"Weekly={weekly_pct:+.2f}%, Monthly={monthly_pct:+.2f}%"
+                )
+
+    # Market Summary (from context builder)
+    market_summary = market_data.get("market_summary", {})
+    if market_summary:
+        market_index = market_summary.get("market_index", {})
+        if market_index:
+            context_parts.append("\n=== MARKET INDEX (SPY) ===")
+            context_parts.append(f"Current: ${market_index.get('current', 0):.2f}")
+            context_parts.append(f"Change: {market_index.get('change_pct', 0):+.2f}%")
+            context_parts.append(f"Volume: {market_index.get('volume', 0):,}")
+
+    # Historical Context (legacy support)
     if "historical_context" in market_data:
         context_parts.append("\n=== HISTORICAL CONTEXT ===")
         context_parts.append(market_data["historical_context"])

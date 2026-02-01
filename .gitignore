@@ -52,7 +52,7 @@ htmlcov/
 debug-*.png
 
 # Claude Code
-.claude/
+.claude*/
 
 # Lock files (optional, but we'll include uv.lock)
 # uv.lock - keeping this one
