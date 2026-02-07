@@ -573,7 +573,7 @@ export function useInsightChat(conversationId: number | undefined) {
   // Auto-connect on mount when conversationId is available
   useEffect(() => {
     if (conversationId) {
-      connect();
+      queueMicrotask(() => connect());
     }
 
     return () => {

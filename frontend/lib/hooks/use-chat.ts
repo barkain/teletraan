@@ -348,7 +348,7 @@ export function useChat() {
 
   // Auto-connect on mount
   useEffect(() => {
-    connect();
+    queueMicrotask(() => connect());
 
     return () => {
       disconnect();
