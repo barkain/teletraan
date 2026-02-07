@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('Outcome Badge', () => {
   test.beforeEach(async ({ page }) => {
@@ -13,7 +13,7 @@ test.describe('Outcome Badge', () => {
 
   test('badge renders on insight cards', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Wait for insight cards to load
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
@@ -39,7 +39,7 @@ test.describe('Outcome Badge', () => {
 
   test('TRACKING status shows blue badge', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -66,7 +66,7 @@ test.describe('Outcome Badge', () => {
 
   test('COMPLETED validated shows green badge', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -92,7 +92,7 @@ test.describe('Outcome Badge', () => {
 
   test('COMPLETED invalidated shows red badge', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -118,7 +118,7 @@ test.describe('Outcome Badge', () => {
 
   test('tooltip shows details on hover', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -157,7 +157,7 @@ test.describe('Outcome Badge', () => {
     // We need to check if different sizes render properly
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -189,7 +189,7 @@ test.describe('Outcome Badge', () => {
     const spinnerCount = await spinners.count();
     console.log(`Found ${spinnerCount} spinner elements during load`);
 
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // After loading, spinners should be gone or minimal
     const spinnerCountAfter = await spinners.count();
@@ -200,7 +200,7 @@ test.describe('Outcome Badge', () => {
 
   test('badge shows return percentage', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -221,7 +221,7 @@ test.describe('Outcome Badge', () => {
 
   test('pending status shows correctly', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -247,7 +247,7 @@ test.describe('Outcome Badge', () => {
 
   test('days remaining shows for active tracking', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -268,7 +268,7 @@ test.describe('Outcome Badge', () => {
 
   test('invalidated status shows warning', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);

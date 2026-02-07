@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // Shared mock data for deep insights API
 const mockInsightsResponse = {
@@ -147,7 +147,7 @@ test.describe('Dashboard (Home Page)', () => {
   test('home page loads with Teletraan branding', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // The main heading should say "Teletraan"
     const heading = page.locator('h1', { hasText: 'Teletraan' });
@@ -165,7 +165,7 @@ test.describe('Dashboard (Home Page)', () => {
   test('hero image is visible', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // The hero image should be present with the correct alt text
     const heroImage = page.locator('img[alt*="Teletraan Command Center"]');
@@ -179,7 +179,7 @@ test.describe('Dashboard (Home Page)', () => {
   test('summary stats cards render with correct data', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Wait for stats cards to appear
     const totalInsightsLabel = page.locator('text=Total Insights');
@@ -210,7 +210,7 @@ test.describe('Dashboard (Home Page)', () => {
   test('Discover Opportunities button exists and is functional', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // The "Discover Opportunities" button is in the hero section
     const discoverButton = page.getByRole('button', { name: /Discover Opportunities/i });
@@ -221,7 +221,7 @@ test.describe('Dashboard (Home Page)', () => {
   test('Latest Insights section renders with insight cards', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const latestInsightsHeading = page.locator('text=Latest Insights');
     await expect(latestInsightsHeading).toBeVisible({ timeout: 10000 });
@@ -238,7 +238,7 @@ test.describe('Dashboard (Home Page)', () => {
   test('Market status badge is displayed', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const marketBadge = page.locator('text=/Market (Open|Closed)/');
     await expect(marketBadge).toBeVisible({ timeout: 10000 });
@@ -247,7 +247,7 @@ test.describe('Dashboard (Home Page)', () => {
   test('Continue Your Research section renders', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const researchSection = page.locator('text=Continue Your Research');
     await expect(researchSection).toBeVisible({ timeout: 10000 });
@@ -259,7 +259,7 @@ test.describe('Dashboard (Home Page)', () => {
   test('filter tabs are visible on home page', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await expect(page.locator('[role="tablist"]').first()).toBeVisible({ timeout: 10000 });
     await expect(page.locator('[role="tab"]', { hasText: 'All' }).first()).toBeVisible();
@@ -306,7 +306,7 @@ test.describe('Dashboard (Home Page)', () => {
     });
 
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const emptyState = page.locator('text=No AI Insights Yet');
     await expect(emptyState).toBeVisible({ timeout: 10000 });

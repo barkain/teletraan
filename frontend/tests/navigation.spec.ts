@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // Helper to set up standard API mocks so pages render without real backend
 async function setupGlobalMocks(page: import('@playwright/test').Page) {
@@ -79,7 +79,7 @@ test.describe('Navigation - Desktop Header', () => {
   test('header has correct primary navigation links', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const header = page.locator('header');
 
@@ -98,7 +98,7 @@ test.describe('Navigation - Desktop Header', () => {
   test('Data dropdown reveals Market Data and Signals links', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const header = page.locator('header');
 
@@ -115,7 +115,7 @@ test.describe('Navigation - Desktop Header', () => {
   test('clicking Home link navigates to home page', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Use the desktop nav links (inside header > nav)
     const desktopNav = page.locator('header nav');
@@ -130,7 +130,7 @@ test.describe('Navigation - Desktop Header', () => {
   test('clicking Insights link navigates to insights page', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const desktopNav = page.locator('header nav');
     const insightsLink = desktopNav.locator('a', { hasText: 'Insights' }).first();
@@ -144,7 +144,7 @@ test.describe('Navigation - Desktop Header', () => {
   test('clicking Conversations link navigates to conversations page', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const desktopNav = page.locator('header nav');
     const conversationsLink = desktopNav.locator('a', { hasText: 'Conversations' }).first();
@@ -158,7 +158,7 @@ test.describe('Navigation - Desktop Header', () => {
   test('clicking Research link navigates to research page', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const desktopNav = page.locator('header nav');
     const researchLink = desktopNav.locator('a', { hasText: 'Research' }).first();
@@ -172,7 +172,7 @@ test.describe('Navigation - Desktop Header', () => {
   test('clicking Market Data from Data dropdown navigates correctly', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Click the Data dropdown in header nav
     const dataButton = page.locator('header nav button', { hasText: 'Data' });
@@ -191,7 +191,7 @@ test.describe('Navigation - Desktop Header', () => {
   test('active nav link is highlighted', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const header = page.locator('header');
 
@@ -214,7 +214,7 @@ test.describe('Navigation - Sidebar', () => {
   test('sidebar has primary navigation links', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const sidebar = page.locator('aside');
 
@@ -230,7 +230,7 @@ test.describe('Navigation - Sidebar', () => {
   test('sidebar has collapsible Data section', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const sidebar = page.locator('aside');
 
@@ -247,7 +247,7 @@ test.describe('Navigation - Sidebar', () => {
   test('sidebar has Run Analysis and Settings at bottom', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const sidebar = page.locator('aside');
 
@@ -258,7 +258,7 @@ test.describe('Navigation - Sidebar', () => {
   test('sidebar link navigates to insights page', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const sidebar = page.locator('aside');
     // Use getByRole to target the actual link, not the section heading
@@ -285,7 +285,7 @@ test.describe('Navigation - Mobile Menu', () => {
     await page.setViewportSize({ width: 375, height: 812 });
 
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const mobileMenuBtn = page.locator('header button').filter({ has: page.locator('text=Toggle menu') });
     await expect(mobileMenuBtn).toBeVisible({ timeout: 10000 });
@@ -296,7 +296,7 @@ test.describe('Navigation - Mobile Menu', () => {
     await page.setViewportSize({ width: 375, height: 812 });
 
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const mobileMenuBtn = page.locator('header button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle menu' }) });
     await expect(mobileMenuBtn).toBeVisible({ timeout: 10000 });
@@ -319,7 +319,7 @@ test.describe('Navigation - Mobile Menu', () => {
     await page.setViewportSize({ width: 375, height: 812 });
 
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const mobileMenuBtn = page.locator('header button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle menu' }) });
     await mobileMenuBtn.click();
@@ -334,7 +334,7 @@ test.describe('Navigation - Mobile Menu', () => {
     await page.setViewportSize({ width: 375, height: 812 });
 
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const mobileMenuBtn = page.locator('header button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle menu' }) });
     await mobileMenuBtn.click();
@@ -354,7 +354,7 @@ test.describe('Navigation - Mobile Menu', () => {
     await page.setViewportSize({ width: 375, height: 812 });
 
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const sidebar = page.locator('aside');
     await expect(sidebar).toBeHidden();
@@ -373,7 +373,7 @@ test.describe('Navigation - Theme Toggle', () => {
   test('theme toggle button exists in header', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const themeToggle = page.locator('button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle theme' }) });
     await expect(themeToggle).toBeVisible({ timeout: 10000 });
@@ -382,7 +382,7 @@ test.describe('Navigation - Theme Toggle', () => {
   test('theme toggle opens dropdown with Light, Dark, System options', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const themeToggle = page.locator('button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle theme' }) });
     await expect(themeToggle).toBeVisible({ timeout: 10000 });
@@ -396,7 +396,7 @@ test.describe('Navigation - Theme Toggle', () => {
   test('selecting Dark theme applies dark class', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const themeToggle = page.locator('button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle theme' }) });
     await themeToggle.click();
@@ -414,7 +414,7 @@ test.describe('Navigation - Theme Toggle', () => {
   test('selecting Light theme applies light class', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const themeToggle = page.locator('button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle theme' }) });
     await themeToggle.click();
@@ -442,7 +442,7 @@ test.describe('Navigation - Logo and Branding', () => {
   test('clicking header logo navigates to home', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // The logo link is an anchor with href="/" containing the TrendingUp icon
     // On wider viewports it also shows "Teletraan" text, but the link itself always exists
@@ -457,7 +457,7 @@ test.describe('Navigation - Logo and Branding', () => {
   test('page title is set to Teletraan', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const title = await page.title();
     expect(title).toContain('Teletraan');

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // Mock insights covering all action types for filter testing
 const mockInsightsAll = {
@@ -168,7 +168,7 @@ test.describe('Insights Page', () => {
   test('insights page loads with title and description', async ({ page }) => {
     await setupInsightsMocks(page);
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const title = page.locator('h1', { hasText: 'AI Insights' });
     await expect(title).toBeVisible({ timeout: 10000 });
@@ -180,7 +180,7 @@ test.describe('Insights Page', () => {
   test('insights page shows result count', async ({ page }) => {
     await setupInsightsMocks(page);
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const resultCount = page.locator('text=/Showing \\d+ of \\d+ insights/');
     await expect(resultCount).toBeVisible({ timeout: 10000 });
@@ -189,7 +189,7 @@ test.describe('Insights Page', () => {
   test('insight cards render with correct data', async ({ page }) => {
     await setupInsightsMocks(page);
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await expect(page.locator('text=AAPL Strong Momentum')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('text=TSLA Strong Buy Setup')).toBeVisible();
@@ -199,7 +199,7 @@ test.describe('Insights Page', () => {
   test('insight card shows confidence percentage', async ({ page }) => {
     await setupInsightsMocks(page);
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await expect(page.locator('text=AAPL Strong Momentum')).toBeVisible({ timeout: 10000 });
 
@@ -212,7 +212,7 @@ test.describe('Insights Page', () => {
   test('filter section has symbol search and dropdowns', async ({ page }) => {
     await setupInsightsMocks(page);
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const symbolInput = page.locator('input[placeholder*="Search by symbol"]');
     await expect(symbolInput).toBeVisible({ timeout: 10000 });
@@ -263,7 +263,7 @@ test.describe('Insights Page', () => {
     });
 
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await expect(page.locator('text=AAPL Strong Momentum')).toBeVisible({ timeout: 10000 });
 
@@ -303,7 +303,7 @@ test.describe('Insights Page', () => {
     });
 
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const emptyState = page.locator('text=No Insights Found');
     await expect(emptyState).toBeVisible({ timeout: 10000 });
@@ -312,7 +312,7 @@ test.describe('Insights Page', () => {
   test('statistical signals sidebar is visible', async ({ page }) => {
     await setupInsightsMocks(page);
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const signalsSidebar = page.locator('text=Statistical Signals');
     await expect(signalsSidebar).toBeVisible({ timeout: 10000 });
@@ -342,7 +342,7 @@ test.describe('Insights Page', () => {
     });
 
     await page.goto('/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const errorMessage = page.locator('text=Error Loading Insights');
     await expect(errorMessage).toBeVisible({ timeout: 10000 });
@@ -381,6 +381,6 @@ test.describe('Insights Page', () => {
     expect(skeletonCount).toBeGreaterThan(0);
 
     await navigationPromise;
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
   });
 });

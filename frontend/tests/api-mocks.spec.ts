@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('API Mock Tests', () => {
   test.beforeEach(async ({ page }) => {
@@ -62,7 +62,7 @@ test.describe('API Mock Tests', () => {
     });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Verify mocked data displays
     const testInsight = page.locator('text=Test Insight: AAPL Momentum Play');
@@ -111,7 +111,7 @@ test.describe('API Mock Tests', () => {
     });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Verify signals display
     const signalsCard = page.locator('text=Statistical Signals');
@@ -138,7 +138,7 @@ test.describe('API Mock Tests', () => {
     });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Should show error state
     const errorMessage = page.locator('text=/Error|Failed|Unable/i');
@@ -181,7 +181,7 @@ test.describe('API Mock Tests', () => {
 
     // Complete navigation
     await navigationPromise;
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
   });
 
   test('mock track record API', async ({ page }) => {
@@ -240,7 +240,7 @@ test.describe('API Mock Tests', () => {
     });
 
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Verify stats display
     const successRate = page.locator('text=/63\\.3%|633/');
@@ -280,7 +280,7 @@ test.describe('API Mock Tests', () => {
     });
 
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // The patterns page uses mock data by default, but this tests custom API mocking
     await page.screenshot({ path: 'test-results/api-mock-patterns.png', fullPage: true });
@@ -341,7 +341,7 @@ test.describe('API Mock Tests', () => {
     });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Wait for outcome badges to load
     await page.waitForTimeout(1000);
@@ -371,7 +371,7 @@ test.describe('API Mock Tests', () => {
     });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Should show empty state
     const emptyState = page.locator('text=/No Insights Found|No insights/i');
@@ -393,7 +393,7 @@ test.describe('API Mock Tests', () => {
 
     try {
       await page.goto('http://localhost:3000/insights');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
     } catch {
       // Expected to timeout
       console.log('Request timed out as expected');
@@ -413,7 +413,7 @@ test.describe('API Mock Tests', () => {
     });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Check for error handling
     const errorMessage = page.locator('text=/Unauthorized|Error|Failed/i');
@@ -435,7 +435,7 @@ test.describe('API Mock Tests', () => {
     });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Should handle parse error gracefully
     await page.screenshot({ path: 'test-results/api-mock-malformed.png', fullPage: true });
