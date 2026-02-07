@@ -104,7 +104,7 @@ logger = logging.getLogger(__name__)
 # The semaphore is lazily initialised so it is always bound to the running
 # event loop at first use.
 # ---------------------------------------------------------------------------
-MAX_CONCURRENT_LLM: int = 3  # Max simultaneous Claude SDK sessions
+MAX_CONCURRENT_LLM: int = 5  # Max simultaneous Claude SDK sessions
 _llm_semaphore: asyncio.Semaphore | None = None
 
 
@@ -279,25 +279,53 @@ class AutonomousDeepEngine:
         logger.info(f"Starting autonomous analysis {analysis_id}")
 
         try:
-            # ===== PHASE 1: Macro Scan =====
-            logger.info("Phase 1: Scanning macro environment...")
-            await self._update_task_progress(task_id, "macro_scan", 10, "Scanning macro environment...")
-            macro_result = await self._run_macro_scan()
+            # ===== PHASE 1 + PHASE 2: Macro Scan & Heatmap Fetch (concurrent) =====
+            # These two phases are independent -- only Phase 3 (HeatmapAnalysis)
+            # needs both results.  Running them concurrently saves wall-clock time.
+            logger.info("Phase 1+2: Scanning macro environment & fetching heatmap concurrently...")
+            await self._update_task_progress(task_id, "macro_scan", 10, "Scanning macro environment & fetching heatmap...")
+
+            macro_coro = self._run_macro_scan()
+            heatmap_coro = self._run_heatmap_fetch()
+            phase1_result, phase2_result = await asyncio.gather(
+                macro_coro, heatmap_coro, return_exceptions=True
+            )
+
+            # --- Handle Phase 1 (macro scan) result ---
+            if isinstance(phase1_result, BaseException):
+                raise phase1_result  # Macro scan is required; propagate failure
+            macro_result: MacroScanResult = phase1_result
             result.macro_result = macro_result
             result.phases_completed.append("macro_scan")
             logger.info(f"Macro scan complete. Regime: {macro_result.market_regime}")
 
-            # ===== PHASE 2+: Heatmap Pipeline (with legacy fallback) =====
-            try:
-                result = await self._run_heatmap_pipeline(
-                    result, macro_result, deep_dive_count, max_insights, task_id
-                )
-            except Exception as heatmap_err:
-                logger.warning(f"Heatmap pipeline failed, falling back to legacy: {heatmap_err}")
-                result.errors.append(f"Heatmap pipeline failed (using legacy fallback): {str(heatmap_err)}")
+            # --- Handle Phase 2 (heatmap fetch) result ---
+            if isinstance(phase2_result, BaseException):
+                logger.warning(f"Heatmap fetch failed (will use legacy fallback): {phase2_result}")
+                result.errors.append(f"Heatmap fetch failed (using legacy fallback): {str(phase2_result)}")
                 result = await self._run_legacy_pipeline(
                     result, macro_result, deep_dive_count, max_insights, task_id
                 )
+            else:
+                heatmap_data: HeatmapData = phase2_result
+                result.heatmap_data = heatmap_data
+                result.phases_completed.append("heatmap_fetch")
+                logger.info(
+                    f"Heatmap fetch complete. {len(heatmap_data.sectors)} sectors, "
+                    f"{len(heatmap_data.stocks)} stocks"
+                )
+
+                # ===== PHASE 3+: Heatmap Pipeline (with legacy fallback) =====
+                try:
+                    result = await self._run_heatmap_pipeline(
+                        result, macro_result, heatmap_data, deep_dive_count, max_insights, task_id
+                    )
+                except Exception as heatmap_err:
+                    logger.warning(f"Heatmap pipeline failed, falling back to legacy: {heatmap_err}")
+                    result.errors.append(f"Heatmap pipeline failed (using legacy fallback): {str(heatmap_err)}")
+                    result = await self._run_legacy_pipeline(
+                        result, macro_result, deep_dive_count, max_insights, task_id
+                    )
 
         except Exception as e:
             logger.error(f"Autonomous analysis failed: {e}")
@@ -321,18 +349,21 @@ class AutonomousDeepEngine:
         self,
         result: AutonomousAnalysisResult,
         macro_result: MacroScanResult,
+        heatmap_data: HeatmapData,
         deep_dive_count: int,
         max_insights: int,
         task_id: str | None,
     ) -> AutonomousAnalysisResult:
-        """Run the heatmap-driven pipeline (Phases 2-5).
+        """Run the heatmap-driven pipeline (Phases 3-5).
 
-        All types are non-Optional here since any failure propagates
-        to the caller which falls back to the legacy pipeline.
+        Heatmap data is already fetched by the caller and passed in.
+        Any failure propagates to the caller which falls back to
+        the legacy pipeline.
 
         Args:
             result: The in-progress result to populate.
             macro_result: Macro scan results from Phase 1.
+            heatmap_data: Heatmap data from Phase 2.
             deep_dive_count: Number of stocks to deep dive.
             max_insights: Max insights to generate.
             task_id: Optional task ID for progress tracking.
@@ -340,16 +371,6 @@ class AutonomousDeepEngine:
         Returns:
             Completed AutonomousAnalysisResult.
         """
-        # ===== PHASE 2: Heatmap Fetch =====
-        logger.info("Phase 2: Fetching market heatmap...")
-        await self._update_task_progress(task_id, "heatmap_fetch", 20, "Fetching market heatmap...")
-        heatmap_data = await self._run_heatmap_fetch()
-        result.heatmap_data = heatmap_data
-        result.phases_completed.append("heatmap_fetch")
-        logger.info(
-            f"Heatmap fetch complete. {len(heatmap_data.sectors)} sectors, "
-            f"{len(heatmap_data.stocks)} stocks"
-        )
 
         # ===== PHASE 3: Heatmap Analysis =====
         logger.info("Phase 3: Analyzing heatmap patterns...")
@@ -386,17 +407,25 @@ class AutonomousDeepEngine:
             macro_result, heatmap_analysis_result
         )
 
-        # Run all analysts in parallel for each symbol
+        # Run all symbols concurrently (semaphore gates actual LLM calls)
         analyst_reports: dict[str, dict[str, Any]] = {}
-        for symbol in symbols_to_analyze:
-            try:
-                symbol_reports = await self._run_analysts_for_symbol(
-                    symbol, discovery_context
-                )
+
+        async def _analyze_symbol(sym: str) -> tuple[str, dict[str, Any]]:
+            reports = await self._run_analysts_for_symbol(sym, discovery_context)
+            return sym, reports
+
+        gather_results = await asyncio.gather(
+            *[_analyze_symbol(sym) for sym in symbols_to_analyze],
+            return_exceptions=True,
+        )
+
+        for r in gather_results:
+            if isinstance(r, BaseException):
+                logger.error(f"Deep dive failed for a symbol: {r}")
+                result.errors.append(f"Deep dive: {str(r)}")
+            else:
+                symbol, symbol_reports = r
                 analyst_reports[symbol] = symbol_reports
-            except Exception as e:
-                logger.error(f"Deep dive failed for {symbol}: {e}")
-                result.errors.append(f"Deep dive {symbol}: {str(e)}")
 
         result.analyst_reports = analyst_reports
         result.phases_completed.append("deep_dive")
@@ -621,14 +650,21 @@ class AutonomousDeepEngine:
                 f"Analyzing {len(additional_symbols)} additional stocks (iteration {iteration})..."
             )
 
-            for symbol in additional_symbols:
-                try:
-                    symbol_reports = await self._run_analysts_for_symbol(
-                        symbol, discovery_context
-                    )
-                    analyst_reports[symbol] = symbol_reports
-                except Exception as e:
-                    logger.error(f"Additional deep dive failed for {symbol}: {e}")
+            async def _analyze_additional(sym: str) -> tuple[str, dict[str, Any]]:
+                reports = await self._run_analysts_for_symbol(sym, discovery_context)
+                return sym, reports
+
+            coverage_results = await asyncio.gather(
+                *[_analyze_additional(sym) for sym in additional_symbols],
+                return_exceptions=True,
+            )
+
+            for r in coverage_results:
+                if isinstance(r, BaseException):
+                    logger.error(f"Additional deep dive failed: {r}")
+                else:
+                    sym, sym_reports = r
+                    analyst_reports[sym] = sym_reports
 
         return analyst_reports
 

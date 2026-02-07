@@ -32,7 +32,7 @@ export interface KnowledgePattern {
 
 // Response type for pattern list endpoint
 export interface KnowledgePatternsResponse {
-  patterns: KnowledgePattern[];
+  items: KnowledgePattern[];
   total: number;
 }
 
@@ -80,7 +80,7 @@ export interface ConversationTheme {
 
 // Response type for themes list endpoint
 export interface ConversationThemesResponse {
-  themes: ConversationTheme[];
+  items: ConversationTheme[];
   total: number;
 }
 

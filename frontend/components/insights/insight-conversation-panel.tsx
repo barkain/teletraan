@@ -22,6 +22,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChatInput } from '@/components/chat/chat-input';
+import { renderMarkdown } from '@/components/chat/message-bubble';
 import { postApi, putApi } from '@/lib/api';
 import {
   useInsightChat,
@@ -404,13 +405,13 @@ function ConversationMessageBubble({
 
       <div
         className={cn(
-          'flex flex-col max-w-[85%]',
-          isUser ? 'items-end' : 'items-start'
+          'flex flex-col overflow-hidden',
+          isUser ? 'max-w-[85%] items-end' : 'max-w-[75%] items-start'
         )}
       >
         <div
           className={cn(
-            'rounded-2xl px-4 py-3',
+            'rounded-2xl px-4 py-3 overflow-hidden',
             isUser
               ? 'bg-primary text-primary-foreground rounded-tr-sm'
               : 'bg-muted rounded-tl-sm'
@@ -418,8 +419,12 @@ function ConversationMessageBubble({
         >
           {message.isStreaming && !message.content ? (
             <StreamingIndicator />
+          ) : isUser ? (
+            <p className="text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.content}</p>
           ) : (
-            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+            <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&>*]:my-0.5 [&>h2]:mt-2 [&>h3]:mt-2 [&>h4]:mt-2 [&>pre]:my-1.5 break-words [overflow-wrap:anywhere]">
+              {renderMarkdown(message.content)}
+            </div>
           )}
         </div>
 
@@ -525,7 +530,7 @@ export function InsightConversationPanel({
   const isError = connectionState === 'error';
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-3">
@@ -545,7 +550,7 @@ export function InsightConversationPanel({
       )}
 
       {/* Messages area */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {isLoadingConversation ? (
           <MessagesSkeleton />
         ) : messages.length === 0 ? (

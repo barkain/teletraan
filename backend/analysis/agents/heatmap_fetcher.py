@@ -13,7 +13,10 @@ Per-symbol errors are handled gracefully without failing the entire sector.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
 
@@ -26,6 +29,28 @@ from analysis.agents.heatmap_interfaces import (  # type: ignore[import-not-foun
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Module-level yfinance data cache (5-minute TTL)
+# ---------------------------------------------------------------------------
+_yf_cache: dict[str, tuple[float, Any]] = {}
+_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_cached(key: str) -> Any | None:
+    """Get cached data if within TTL."""
+    if key in _yf_cache:
+        ts, data = _yf_cache[key]
+        if time.time() - ts < _CACHE_TTL:
+            return data
+        del _yf_cache[key]
+    return None
+
+
+def _set_cache(key: str, data: Any) -> None:
+    """Cache data with current timestamp."""
+    _yf_cache[key] = (time.time(), data)
 
 
 # 11 GICS Sector SPDR ETFs
@@ -191,10 +216,22 @@ class SectorHeatmapFetcher:
     ) -> dict[str, Any]:
         """Batch download price history using yf.download() in executor.
 
+        Results are cached with a 5-minute TTL keyed on the sorted symbol
+        list and period to avoid redundant network calls.
+
         Returns:
             Dict mapping symbol -> pandas DataFrame of OHLCV data.
             Symbols that failed will be absent from the dict.
         """
+        cache_key = "batch:" + hashlib.sha256(
+            f"{sorted(symbols)}:{period}".encode()
+        ).hexdigest()[:16]
+
+        cached = _get_cached(cache_key)
+        if cached is not None:
+            logger.debug("Batch download cache hit (%d symbols)", len(symbols))
+            return cached
+
         loop = asyncio.get_event_loop()
 
         def _download() -> Any:
@@ -232,6 +269,7 @@ class SectorHeatmapFetcher:
                     logger.debug(f"Skipping symbol {sym} in batch result: {e}")
                     continue
 
+        _set_cache(cache_key, result)
         return result
 
     def _compute_metrics(
@@ -294,25 +332,35 @@ class SectorHeatmapFetcher:
     ) -> dict[str, float]:
         """Fetch market caps for symbols via yfinance Ticker.info.
 
-        Uses run_in_executor with batched sequential calls.
-        Returns market cap in billions USD. Failures return 0.0.
+        Uses a ThreadPoolExecutor with up to 20 workers to fetch market caps
+        in parallel rather than sequentially. Per-symbol results are cached
+        with a 5-minute TTL.
+
+        Returns market cap in billions USD. Symbols that fail are omitted.
         """
         loop = asyncio.get_event_loop()
 
-        def _get_caps() -> dict[str, float]:
-            caps: dict[str, float] = {}
-            for sym in symbols:
-                try:
-                    ticker = yf.Ticker(sym)
-                    info = ticker.info
-                    raw_cap = info.get("marketCap", 0)
-                    # Convert to billions
-                    caps[sym] = (raw_cap / 1_000_000_000) if raw_cap else 0.0
-                except Exception:
-                    caps[sym] = 0.0
-            return caps
+        def _get_single_cap(sym: str) -> tuple[str, float | None]:
+            cached = _get_cached(f"mcap:{sym}")
+            if cached is not None:
+                return sym, cached
+            try:
+                info = yf.Ticker(sym).info
+                raw_cap = info.get("marketCap")
+                if raw_cap:
+                    cap_billions = float(raw_cap) / 1_000_000_000
+                    _set_cache(f"mcap:{sym}", cap_billions)
+                    return sym, cap_billions
+                return sym, None
+            except Exception:
+                return sym, None
 
-        return await loop.run_in_executor(None, _get_caps)
+        def _get_all_caps() -> list[tuple[str, float | None]]:
+            with ThreadPoolExecutor(max_workers=20) as executor:
+                return list(executor.map(_get_single_cap, symbols))
+
+        results = await loop.run_in_executor(None, _get_all_caps)
+        return {sym: cap for sym, cap in results if cap is not None}
 
     @staticmethod
     def _determine_market_status() -> str:

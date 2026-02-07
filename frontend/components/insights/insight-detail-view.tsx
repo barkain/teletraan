@@ -539,7 +539,7 @@ function ConversationsPanel({
         </TabsContent>
 
         {/* Active Conversation */}
-        <TabsContent value="chat" className="flex-1 m-0">
+        <TabsContent value="chat" className="flex-1 min-h-0 overflow-hidden m-0">
           {selectedConversationId && (
             <InsightConversationPanel
               conversationId={selectedConversationId}

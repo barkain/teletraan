@@ -36,32 +36,53 @@ The platform features a **heatmap-driven stock discovery system** powered by Cla
 ![Teletraan System Architecture](docs/teletraan-architecture.png)
 
 ```mermaid
-flowchart TB
+graph TB
     subgraph Frontend["Frontend (TypeScript + React 19)"]
         UI["Next.js UI<br/>shadcn/ui + Recharts"]
-        Chat["WebSocket Chat<br/>Real-time Tool Calling"]
+        WSChat["WebSocket Chat<br/>Real-time Tool Calling"]
     end
+
+    Frontend -->|"HTTP/WebSocket"| API
 
     subgraph Backend["Backend (FastAPI + SQLAlchemy)"]
         API["REST API<br/>/api/v1/*"]
-        WS["WebSocket Handler<br/>Market Chat Agent"]
-    end
+        WSHandler["WebSocket Handler<br/>Market Chat Agent"]
 
-    subgraph AnalysisEngines["Analysis Engines"]
-        Deep["DeepAnalysisEngine<br/>5 Parallel Analysts"]
-        Auto["AutonomousDeepEngine<br/>6-Phase Heatmap Pipeline"]
-    end
+        API --- WSHandler
 
-    subgraph Agents["Multi-Agent Analysts"]
-        M["MacroScanner"]
-        SR["SectorRotator"]
-        OH["OpportunityHunter"]
-        T["Technical Analyst"]
-        SS["Sector Strategist"]
-        MA["Macro Economist"]
-        RA["Risk Analyst"]
-        CD["Correlation Detective"]
-        SL["Synthesis Lead"]
+        subgraph Engines["Analysis Engines"]
+            ADE["AutonomousDeepEngine<br/>6-Phase Heatmap Pipeline"]
+            DAE["DeepAnalysisEngine<br/>5 Parallel Analysts"]
+        end
+
+        API --> ADE
+        API --> DAE
+
+        subgraph Autonomous["Parallel Execution + Result Analysis"]
+            MS["MacroScanner"]
+            SR["SectorRotator"]
+            OH["OpportunityHunter"]
+        end
+
+        ADE --> MS
+        ADE --> SR
+        ADE --> OH
+
+        subgraph MultiAgent["Multi-Agent Analysts"]
+            TA["Technical Analyst"]
+            SS["Sector Strategist"]
+            CD["Correlation Detective"]
+            RA["Risk Analyst"]
+            ME["Macro Economist"]
+            SL["Synthesis Lead"]
+        end
+
+        DAE --> TA
+        DAE --> SS
+        DAE --> CD
+        DAE --> RA
+        DAE --> ME
+        SL -->|"Aggregation"| DAE
     end
 
     subgraph DataSources["Data Sources"]
@@ -70,29 +91,15 @@ flowchart TB
         FH["Finnhub"]
     end
 
-    Frontend -->|HTTP/WebSocket| Backend
-    API --> Deep
-    API --> Auto
-    WS --> Deep
-
-    Deep -->|Parallel Execution| T
-    Deep --> SS
-    Deep --> MA
-    Deep --> RA
-    Deep --> CD
-
-    Auto --> M
-    Auto --> SR
-    Auto --> OH
-    Auto -->|Result Analysis| T
-    Auto --> SL
-
-    T --> YF
-    SS --> YF
-    MA --> FRED
-    CD --> YF
-    Oh --> YF
-    SL --> |Aggregation| API
+    MS --> YF
+    SR --> YF
+    OH --> YF
+    TA --> YF
+    ME --> FRED
+    CD --> FH
+    WSHandler --> YF
+    WSHandler --> FRED
+    WSHandler --> FH
 ```
 
 ## Quick Start

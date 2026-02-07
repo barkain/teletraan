@@ -19,7 +19,7 @@ interface MessageBubbleProps {
 }
 
 // Simple markdown renderer for chat messages
-function renderMarkdown(content: string): React.ReactNode {
+export function renderMarkdown(content: string): React.ReactNode {
   const lines = content.split('\n');
   const elements: React.ReactNode[] = [];
   let inCodeBlock = false;

@@ -25,8 +25,8 @@ export default function PatternsPage() {
           knowledgeApi.themes.list(),
         ]);
 
-        setPatterns(patternsResponse.patterns || []);
-        setThemes(themesResponse.themes || []);
+        setPatterns(patternsResponse.items || []);
+        setThemes(themesResponse.items || []);
       } catch (err) {
         console.error('Failed to fetch knowledge data:', err);
         setError('Failed to load patterns and themes');

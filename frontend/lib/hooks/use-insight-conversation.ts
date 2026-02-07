@@ -23,8 +23,12 @@ export interface InsightConversation {
 
 export interface ConversationMessage {
   id: number;
-  role: 'user' | 'assistant';
+  conversation_id: number;
+  role: 'user' | 'assistant' | 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL';
   content: string;
+  content_type?: string;
+  metadata_?: Record<string, unknown> | null;
+  parent_message_id?: number | null;
   created_at: string;
 }
 
@@ -52,7 +56,9 @@ export type ChatMessage = {
 };
 
 export interface ConversationWithMessages extends InsightConversation {
-  messages: ConversationMessage[];
+  recent_messages: ConversationMessage[];
+  pending_modifications?: unknown[];
+  research_context?: Record<string, unknown> | null;
 }
 
 export interface InsightConversationListResponse {
@@ -223,7 +229,7 @@ export function useInsightConversation(conversationId: number | undefined) {
   return {
     ...query,
     conversation: query.data,
-    messages: query.data?.messages ?? [],
+    messages: query.data?.recent_messages ?? [],
     updateConversation: updateMutation.mutate,
     updateConversationAsync: updateMutation.mutateAsync,
     isUpdating: updateMutation.isPending,
@@ -235,7 +241,15 @@ export function useInsightConversation(conversationId: number | undefined) {
 // ============================================
 
 // WebSocket URL configuration
-const WS_BASE_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+const WS_BASE_URL = (() => {
+  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/api/v1/chat';
+  try {
+    const url = new URL(wsUrl);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return 'ws://localhost:8000';
+  }
+})();
 
 // Reconnection settings
 const RECONNECT_INTERVAL = 3000;
@@ -561,12 +575,17 @@ export function useInsightChat(conversationId: number | undefined) {
 
   // Load initial messages from conversation
   const loadInitialMessages = useCallback((conversationMessages: ConversationMessage[]) => {
-    const chatMessages: ChatMessage[] = conversationMessages.map((msg) => ({
-      id: String(msg.id),
-      role: msg.role,
-      content: msg.content,
-      timestamp: new Date(msg.created_at),
-    }));
+    const chatMessages: ChatMessage[] = conversationMessages
+      .filter((msg) => {
+        const role = msg.role.toLowerCase();
+        return role === 'user' || role === 'assistant';
+      })
+      .map((msg) => ({
+        id: String(msg.id),
+        role: msg.role.toLowerCase() as 'user' | 'assistant',
+        content: msg.content,
+        timestamp: new Date(msg.created_at),
+      }));
     setMessages(chatMessages);
   }, []);
 
