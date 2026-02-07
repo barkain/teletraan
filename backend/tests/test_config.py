@@ -27,7 +27,8 @@ from api.exceptions import (
 class TestSettingsDefaults:
     """Verify Settings loads correct default values."""
 
-    def test_database_url_default(self):
+    def test_database_url_default(self, monkeypatch):
+        monkeypatch.delenv("DATABASE_URL", raising=False)
         settings = Settings(
             _env_file=None,  # type: ignore[call-arg]
         )

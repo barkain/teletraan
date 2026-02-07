@@ -18,4 +18,10 @@ export default defineConfig({
     },
   ],
   outputDir: 'test-results',
+  webServer: {
+    command: 'npm start',
+    port: 3000,
+    reuseExistingServer: !process.env.CI,
+    timeout: 120000,
+  },
 });
