@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('Deep Analysis Enhancement Integration Tests', () => {
   test.beforeEach(async ({ page }) => {
@@ -16,7 +16,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
 
   test('insights page loads with signals sidebar', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Check main content area loads
     const pageTitle = page.locator('text=AI Insights');
@@ -32,7 +32,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
 
   test('clicking insight navigates to detail page', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -46,7 +46,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
     if (cardCount > 0) {
       // Click the first insight card
       await insightCards.first().click();
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       // Check if we navigated to a detail page
       const currentUrl = page.url();
@@ -63,7 +63,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
   test('dashboard tabs switch between sections', async ({ page }) => {
     // This tests navigation between different dashboard sections
     await page.goto('http://localhost:3000');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Check for main navigation elements
     const insightsLink = page.locator('a, button').filter({ hasText: /Insights/i });
@@ -81,32 +81,32 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
 
     // Navigate to Insights
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     expect(page.url()).toContain('/insights');
     await page.screenshot({ path: 'test-results/integration-nav-insights.png' });
 
     // Navigate to Patterns
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     expect(page.url()).toContain('/patterns');
     await page.screenshot({ path: 'test-results/integration-nav-patterns.png' });
 
     // Navigate to Track Record
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     expect(page.url()).toContain('/track-record');
     await page.screenshot({ path: 'test-results/integration-nav-track-record.png' });
 
     // Navigate to Signals
     await page.goto('http://localhost:3000/signals');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     expect(page.url()).toContain('/signals');
     await page.screenshot({ path: 'test-results/integration-nav-signals.png' });
   });
 
   test('filter state persists across navigation', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
 
@@ -118,11 +118,11 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
 
       // Navigate away
       await page.goto('http://localhost:3000');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       // Navigate back
       await page.goto('http://localhost:3000/insights');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       // Check if filter is preserved (depends on implementation)
       const inputValue = await symbolInput.inputValue();
@@ -139,7 +139,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
     });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Look for error states or fallback UI
     const errorMessages = page.locator('text=/Error|Failed|Unable to load/i');
@@ -177,7 +177,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
 
     // Wait for navigation to complete
     await navigationPromise;
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.unroute('**/api/**');
   });
@@ -186,7 +186,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
     await page.setViewportSize({ width: 768, height: 1024 });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
 
@@ -199,7 +199,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
 
   test('theme toggle works', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Look for theme toggle button
     const themeToggle = page.locator('button').filter({ has: page.locator('svg[class*="sun"], svg[class*="moon"]') });
@@ -216,7 +216,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
 
   test('keyboard navigation works', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
 
@@ -239,7 +239,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
 
   test('data refreshes correctly', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
 
@@ -258,7 +258,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
 
   test('symbol links navigate to stock page', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -274,7 +274,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
       console.log(`Clicking symbol: ${firstSymbol}`);
 
       await symbolBadges.first().click();
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       const currentUrl = page.url();
       console.log(`Navigated to: ${currentUrl}`);
@@ -304,7 +304,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
     for (const pagePath of pages) {
       try {
         const response = await page.goto(`http://localhost:3000${pagePath}`);
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
 
         const status = response?.status() || 'unknown';
         const hasError = await page.locator('text=/error|Error|404|500/i').count() > 0;
@@ -329,7 +329,7 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
 
   test('deep insight card shows all components', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=AI Insights', { timeout: 10000 });
     await page.waitForTimeout(1000);

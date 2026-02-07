@@ -326,9 +326,12 @@ export function StatisticalSignalsCard({
   const isError = symbol ? symbolFeatures.isError : activeSignals.isError;
 
   // Convert features to signal format for unified handling
+  const symbolFeaturesData = symbolFeatures?.features;
+  const activeSignalsData = activeSignals?.signals;
+
   const signals = useMemo(() => {
-    if (symbol && symbolFeatures?.features?.length) {
-      return symbolFeatures.features.map((f) => ({
+    if (symbol && symbolFeaturesData?.length) {
+      return symbolFeaturesData.map((f) => ({
         ...f,
         strength: ('strength' in f ? f.strength : 'moderate') as SignalStrength,
       }));
@@ -336,8 +339,8 @@ export function StatisticalSignalsCard({
     if (symbol) {
       return []; // Return empty array if no features data for symbol
     }
-    return activeSignals?.signals ?? [];
-  }, [symbol, symbolFeatures?.features, activeSignals?.signals]);
+    return activeSignalsData ?? [];
+  }, [symbol, symbolFeaturesData, activeSignalsData]);
 
   // Static list of all available signal types for the filter dropdown
   const allSignalTypes: SignalType[] = [

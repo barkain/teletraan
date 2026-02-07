@@ -33,6 +33,7 @@ export function useChat() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const connectRef = useRef<(() => void) | undefined>(undefined);
   const currentMessageRef = useRef<{
     id: string;
     content: string;
@@ -41,57 +42,6 @@ export function useChat() {
 
   // Generate unique message ID
   const generateId = useCallback(() => crypto.randomUUID(), []);
-
-  // Connect to WebSocket
-  const connect = useCallback(() => {
-    // Don't reconnect if already connected or connecting
-    if (wsRef.current?.readyState === WebSocket.OPEN ||
-        wsRef.current?.readyState === WebSocket.CONNECTING) {
-      return;
-    }
-
-    try {
-      const ws = new WebSocket(WS_URL);
-
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-        reconnectAttemptsRef.current = 0;
-        setState(prev => ({ ...prev, isConnected: true, error: null }));
-      };
-
-      ws.onclose = (event) => {
-        console.log('WebSocket closed:', event.code, event.reason);
-        setState(prev => ({ ...prev, isConnected: false }));
-        wsRef.current = null;
-
-        // Attempt to reconnect if not a normal closure
-        if (event.code !== 1000 && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-          reconnectAttemptsRef.current++;
-          console.log(`Reconnecting... attempt ${reconnectAttemptsRef.current}`);
-          reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_INTERVAL);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setState(prev => ({ ...prev, error: 'Connection error' }));
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data: WSMessage = JSON.parse(event.data);
-          handleWSMessage(data);
-        } catch (e) {
-          console.error('Failed to parse WebSocket message:', e);
-        }
-      };
-
-      wsRef.current = ws;
-    } catch (error) {
-      console.error('Failed to create WebSocket:', error);
-      setState(prev => ({ ...prev, error: 'Failed to connect' }));
-    }
-  }, []);
 
   // Handle incoming WebSocket messages
   const handleWSMessage = useCallback((data: WSMessage) => {
@@ -199,6 +149,62 @@ export function useChat() {
         break;
     }
   }, []);
+
+  // Connect to WebSocket
+  const connect = useCallback(() => {
+    // Don't reconnect if already connected or connecting
+    if (wsRef.current?.readyState === WebSocket.OPEN ||
+        wsRef.current?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+
+    try {
+      const ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        reconnectAttemptsRef.current = 0;
+        setState(prev => ({ ...prev, isConnected: true, error: null }));
+      };
+
+      ws.onclose = (event) => {
+        console.log('WebSocket closed:', event.code, event.reason);
+        setState(prev => ({ ...prev, isConnected: false }));
+        wsRef.current = null;
+
+        // Attempt to reconnect if not a normal closure
+        if (event.code !== 1000 && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+          reconnectAttemptsRef.current++;
+          console.log(`Reconnecting... attempt ${reconnectAttemptsRef.current}`);
+          reconnectTimeoutRef.current = setTimeout(() => connectRef.current?.(), RECONNECT_INTERVAL);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setState(prev => ({ ...prev, error: 'Connection error' }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data: WSMessage = JSON.parse(event.data);
+          handleWSMessage(data);
+        } catch (e) {
+          console.error('Failed to parse WebSocket message:', e);
+        }
+      };
+
+      wsRef.current = ws;
+    } catch (error) {
+      console.error('Failed to create WebSocket:', error);
+      setState(prev => ({ ...prev, error: 'Failed to connect' }));
+    }
+  }, [handleWSMessage]);
+
+  // Keep connectRef in sync so the reconnect timer can call the latest version
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {
@@ -342,7 +348,7 @@ export function useChat() {
 
   // Auto-connect on mount
   useEffect(() => {
-    connect();
+    queueMicrotask(() => connect());
 
     return () => {
       disconnect();

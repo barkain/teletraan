@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('App Debug', () => {
   test.beforeEach(async ({ page }) => {
@@ -17,7 +17,7 @@ test.describe('App Debug', () => {
   test('Dashboard loads', async ({ page }) => {
     const response = await page.goto('http://localhost:3000');
     console.log('Dashboard status:', response?.status());
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Take screenshot
     await page.screenshot({ path: 'test-results/dashboard.png', fullPage: true });
@@ -40,7 +40,7 @@ test.describe('App Debug', () => {
   test('Settings page loads', async ({ page }) => {
     const response = await page.goto('http://localhost:3000/settings');
     console.log('Settings status:', response?.status());
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await page.screenshot({ path: 'test-results/settings.png', fullPage: true });
 
     const bodyText = await page.locator('body').textContent();
@@ -55,7 +55,7 @@ test.describe('App Debug', () => {
   test('Insights page loads', async ({ page }) => {
     const response = await page.goto('http://localhost:3000/insights');
     console.log('Insights status:', response?.status());
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await page.screenshot({ path: 'test-results/insights.png', fullPage: true });
 
     const bodyText = await page.locator('body').textContent();
@@ -65,7 +65,7 @@ test.describe('App Debug', () => {
   test('Sectors page loads', async ({ page }) => {
     const response = await page.goto('http://localhost:3000/sectors');
     console.log('Sectors status:', response?.status());
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await page.screenshot({ path: 'test-results/sectors.png', fullPage: true });
 
     const bodyText = await page.locator('body').textContent();
@@ -75,7 +75,7 @@ test.describe('App Debug', () => {
   test('Chat page loads', async ({ page }) => {
     const response = await page.goto('http://localhost:3000/chat');
     console.log('Chat status:', response?.status());
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await page.screenshot({ path: 'test-results/chat.png', fullPage: true });
 
     const bodyText = await page.locator('body').textContent();
@@ -85,7 +85,7 @@ test.describe('App Debug', () => {
   test('Stocks page loads', async ({ page }) => {
     const response = await page.goto('http://localhost:3000/stocks');
     console.log('Stocks status:', response?.status());
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await page.screenshot({ path: 'test-results/stocks.png', fullPage: true });
 
     const bodyText = await page.locator('body').textContent();

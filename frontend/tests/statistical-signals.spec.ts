@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('Statistical Signals Card', () => {
   test.beforeEach(async ({ page }) => {
@@ -13,7 +13,7 @@ test.describe('Statistical Signals Card', () => {
 
   test('signals card renders on insights page', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Look for the Statistical Signals card
     const signalsCard = page.locator('text=Statistical Signals');
@@ -32,7 +32,7 @@ test.describe('Statistical Signals Card', () => {
     const skeletons = page.locator('.animate-pulse, [class*="skeleton"]');
 
     // Wait for content to load
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // After loading, signals card should be visible
     const signalsCard = page.locator('text=Statistical Signals');
@@ -41,7 +41,7 @@ test.describe('Statistical Signals Card', () => {
 
   test('signals are color-coded by type', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Wait for the signals card
     await page.waitForSelector('text=Statistical Signals', { timeout: 10000 });
@@ -68,7 +68,7 @@ test.describe('Statistical Signals Card', () => {
 
   test('filtering by signal type works', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Wait for signals card
     await page.waitForSelector('text=Statistical Signals', { timeout: 10000 });
@@ -96,7 +96,7 @@ test.describe('Statistical Signals Card', () => {
 
   test('empty state when no signals', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // The empty state shows "No active signals in your watchlist" or similar
     // This may not always be visible if there are signals
@@ -105,8 +105,8 @@ test.describe('Statistical Signals Card', () => {
 
     const signalCount = await signalItems.count();
     if (signalCount === 0) {
-      // Empty state should be visible
-      await expect(emptyState).toBeVisible();
+      // Empty state should be visible (use .first() since regex may match parent containers too)
+      await expect(emptyState.first()).toBeVisible();
       await page.screenshot({ path: 'test-results/signals-empty-state.png' });
     } else {
       console.log(`${signalCount} signals present, skipping empty state check`);
@@ -118,7 +118,7 @@ test.describe('Statistical Signals Card', () => {
     await page.setViewportSize({ width: 375, height: 667 });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // On mobile, the signals sidebar may be hidden or in a different layout
     const signalsCard = page.locator('text=Statistical Signals');
@@ -135,7 +135,7 @@ test.describe('Statistical Signals Card', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Signals card should be visible in sidebar
     const signalsCard = page.locator('text=Statistical Signals');
@@ -146,7 +146,7 @@ test.describe('Statistical Signals Card', () => {
 
   test('signal item expansion shows details', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Wait for signals to load
     await page.waitForSelector('text=Statistical Signals', { timeout: 10000 });
@@ -165,7 +165,7 @@ test.describe('Statistical Signals Card', () => {
 
   test('strength indicator displays correctly', async ({ page }) => {
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Look for strength indicators (Strong, Moderate, Weak)
     const strongIndicator = page.locator('text=Strong');

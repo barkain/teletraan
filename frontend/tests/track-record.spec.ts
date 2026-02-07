@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('Track Record Dashboard', () => {
   test.beforeEach(async ({ page }) => {
@@ -13,7 +13,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('dashboard renders with stats cards', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Look for Track Record header
     const trackRecordHeader = page.locator('text=Track Record');
@@ -36,7 +36,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('time period selector changes data', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
 
@@ -62,7 +62,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('charts render - success rate by type', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -84,7 +84,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('charts render - by action pie chart', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -106,7 +106,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('charts render - outcome category chart', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -122,7 +122,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('recent outcomes list populates', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -146,7 +146,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('empty state handling', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -162,7 +162,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('detailed statistics table renders', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -186,7 +186,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('table column sorting works', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -211,7 +211,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('export button is present', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
 
@@ -231,7 +231,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('monthly trend chart renders', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -257,7 +257,7 @@ test.describe('Track Record Dashboard', () => {
     await page.setViewportSize({ width: 375, height: 667 });
 
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Wait for page content
     await page.waitForTimeout(2000);
@@ -268,7 +268,7 @@ test.describe('Track Record Dashboard', () => {
 
   test('links to insight details work', async ({ page }) => {
     await page.goto('http://localhost:3000/track-record');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Track Record', { timeout: 10000 });
     await page.waitForTimeout(1000);

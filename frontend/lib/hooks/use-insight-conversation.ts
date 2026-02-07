@@ -258,6 +258,7 @@ export function useInsightChat(conversationId: number | undefined) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const connectRef = useRef<(() => void) | undefined>(undefined);
   const currentMessageRef = useRef<{
     id: string;
     content: string;
@@ -426,7 +427,7 @@ export function useInsightChat(conversationId: number | undefined) {
         if (event.code !== 1000 && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttemptsRef.current++;
           console.log(`Reconnecting... attempt ${reconnectAttemptsRef.current}`);
-          reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_INTERVAL);
+          reconnectTimeoutRef.current = setTimeout(() => connectRef.current?.(), RECONNECT_INTERVAL);
         }
       };
 
@@ -452,6 +453,11 @@ export function useInsightChat(conversationId: number | undefined) {
       setError('Failed to connect');
     }
   }, [wsUrl, conversationId, handleWSMessage]);
+
+  // Keep connectRef in sync so the reconnect timer can call the latest version
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {
@@ -567,7 +573,7 @@ export function useInsightChat(conversationId: number | undefined) {
   // Auto-connect on mount when conversationId is available
   useEffect(() => {
     if (conversationId) {
-      connect();
+      queueMicrotask(() => connect());
     }
 
     return () => {

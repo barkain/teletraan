@@ -116,7 +116,7 @@ export function SectorOverview({ sectors, isLoading }: SectorOverviewProps) {
       <CardHeader>
         <CardTitle>Sector Performance</CardTitle>
         <CardDescription>
-          Today's performance by market sector
+          Today&apos;s performance by market sector
         </CardDescription>
       </CardHeader>
       <CardContent>

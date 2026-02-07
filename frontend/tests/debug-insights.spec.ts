@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('Debug Deep Insights', () => {
   test('Check dashboard AI Insights section', async ({ page }) => {
@@ -11,7 +11,7 @@ test.describe('Debug Deep Insights', () => {
     });
 
     await page.goto('http://localhost:3000');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Screenshot dashboard
     await page.screenshot({ path: 'test-results/dashboard.png', fullPage: true });
@@ -34,7 +34,7 @@ test.describe('Debug Deep Insights', () => {
     page.on('requestfailed', request => console.log('FAILED:', request.url()));
 
     await page.goto('http://localhost:3000/insights');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.screenshot({ path: 'test-results/insights-page.png', fullPage: true });
 

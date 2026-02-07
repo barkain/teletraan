@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 test.describe('Pattern Library Panel', () => {
   test.beforeEach(async ({ page }) => {
@@ -13,7 +13,7 @@ test.describe('Pattern Library Panel', () => {
 
   test('pattern library renders', async ({ page }) => {
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Look for the Pattern Library header
     const patternLibrary = page.locator('text=Pattern Library');
@@ -25,7 +25,7 @@ test.describe('Pattern Library Panel', () => {
 
   test('patterns display with success rate badges', async ({ page }) => {
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Wait for patterns to load
     await page.waitForSelector('text=Pattern Library', { timeout: 10000 });
@@ -51,7 +51,7 @@ test.describe('Pattern Library Panel', () => {
 
   test('filtering by pattern type works', async ({ page }) => {
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Pattern Library', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -77,7 +77,7 @@ test.describe('Pattern Library Panel', () => {
 
   test('filtering by minimum success rate', async ({ page }) => {
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Pattern Library', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -104,7 +104,7 @@ test.describe('Pattern Library Panel', () => {
 
   test('pattern expansion shows full details', async ({ page }) => {
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Pattern Library', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -132,7 +132,7 @@ test.describe('Pattern Library Panel', () => {
 
   test('themes section renders', async ({ page }) => {
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Pattern Library', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -155,7 +155,7 @@ test.describe('Pattern Library Panel', () => {
 
   test('search functionality', async ({ page }) => {
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Pattern Library', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -186,7 +186,7 @@ test.describe('Pattern Library Panel', () => {
 
   test('view mode toggle grid vs list', async ({ page }) => {
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Pattern Library', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -208,7 +208,7 @@ test.describe('Pattern Library Panel', () => {
 
   test('pattern type badges have correct colors', async ({ page }) => {
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Pattern Library', { timeout: 10000 });
     await page.waitForTimeout(1000);
@@ -237,7 +237,7 @@ test.describe('Pattern Library Panel', () => {
 
   test('clear filters button works', async ({ page }) => {
     await page.goto('http://localhost:3000/patterns');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await page.waitForSelector('text=Pattern Library', { timeout: 10000 });
     await page.waitForTimeout(1000);

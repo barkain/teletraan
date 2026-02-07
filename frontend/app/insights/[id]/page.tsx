@@ -1,6 +1,7 @@
 'use client';
 
 import { use } from 'react';
+import Link from 'next/link';
 import { InsightDetailView } from '@/components/insights/insight-detail-view';
 
 interface InsightDetailPageProps {
@@ -21,9 +22,9 @@ export default function InsightDetailPage({ params }: InsightDetailPageProps) {
         <p className="text-muted-foreground">
           The insight ID &quot;{resolvedParams.id}&quot; is not valid.
         </p>
-        <a href="/insights" className="text-primary underline hover:no-underline">
+        <Link href="/insights" className="text-primary underline hover:no-underline">
           Return to Insights
-        </a>
+        </Link>
       </div>
     );
   }
