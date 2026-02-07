@@ -105,8 +105,8 @@ test.describe('Statistical Signals Card', () => {
 
     const signalCount = await signalItems.count();
     if (signalCount === 0) {
-      // Empty state should be visible
-      await expect(emptyState).toBeVisible();
+      // Empty state should be visible (use .first() since regex may match parent containers too)
+      await expect(emptyState.first()).toBeVisible();
       await page.screenshot({ path: 'test-results/signals-empty-state.png' });
     } else {
       console.log(`${signalCount} signals present, skipping empty state check`);
