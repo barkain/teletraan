@@ -83,7 +83,7 @@ export function Header() {
             <SheetHeader>
               <SheetTitle className="flex items-center gap-2">
                 <TrendingUp className="h-5 w-5 text-primary" />
-                Market Analyzer
+                Teletraan
               </SheetTitle>
             </SheetHeader>
 
@@ -186,7 +186,7 @@ export function Header() {
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 font-semibold">
           <TrendingUp className="h-5 w-5 text-primary" />
-          <span className="hidden sm:inline">Market Analyzer</span>
+          <span className="hidden sm:inline">Teletraan</span>
         </Link>
 
         {/* Desktop nav - Primary items */}

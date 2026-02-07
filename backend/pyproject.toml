@@ -1,7 +1,7 @@
 [project]
 name = "market-analyzer-backend"
 version = "0.1.0"
-description = "Market Analyzer Backend API"
+description = "Teletraan Backend API"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

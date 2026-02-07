@@ -2,7 +2,7 @@ import { Metadata } from 'next';
 import { ChatContainer } from '@/components/chat/chat-container';
 
 export const metadata: Metadata = {
-  title: 'Chat | Market Analyzer',
+  title: 'Chat | Teletraan',
   description: 'AI-powered market analysis chat interface',
 };
 

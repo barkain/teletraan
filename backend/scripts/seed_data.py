@@ -1,4 +1,4 @@
-"""Seed script to populate the Market Analyzer database with initial stock data.
+"""Seed script to populate the Teletraan database with initial stock data.
 
 This script fetches data for a small set of symbols to verify the database
 and data pipeline are working correctly.
@@ -173,7 +173,7 @@ async def get_table_counts() -> dict:
 async def main() -> None:
     """Main entry point for the seed script."""
     logger.info("=" * 60)
-    logger.info("Market Analyzer - Database Seed Script")
+    logger.info("Teletraan - Database Seed Script")
     logger.info("=" * 60)
 
     settings = get_settings()

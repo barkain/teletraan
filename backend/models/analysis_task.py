@@ -19,7 +19,10 @@ class AnalysisTaskStatus(str, enum.Enum):
     MACRO_SCAN = "macro_scan"
     SECTOR_ROTATION = "sector_rotation"
     OPPORTUNITY_HUNT = "opportunity_hunt"
+    HEATMAP_FETCH = "heatmap_fetch"
+    HEATMAP_ANALYSIS = "heatmap_analysis"
     DEEP_DIVE = "deep_dive"
+    COVERAGE_EVALUATION = "coverage_evaluation"
     SYNTHESIS = "synthesis"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -32,7 +35,10 @@ PHASE_PROGRESS = {
     AnalysisTaskStatus.MACRO_SCAN: 10,
     AnalysisTaskStatus.SECTOR_ROTATION: 25,
     AnalysisTaskStatus.OPPORTUNITY_HUNT: 45,
-    AnalysisTaskStatus.DEEP_DIVE: 70,
+    AnalysisTaskStatus.HEATMAP_FETCH: 20,
+    AnalysisTaskStatus.HEATMAP_ANALYSIS: 35,
+    AnalysisTaskStatus.DEEP_DIVE: 55,
+    AnalysisTaskStatus.COVERAGE_EVALUATION: 75,
     AnalysisTaskStatus.SYNTHESIS: 90,
     AnalysisTaskStatus.COMPLETED: 100,
     AnalysisTaskStatus.FAILED: -1,
@@ -45,7 +51,10 @@ PHASE_NAMES = {
     AnalysisTaskStatus.MACRO_SCAN: "Scanning macro environment",
     AnalysisTaskStatus.SECTOR_ROTATION: "Analyzing sector rotation",
     AnalysisTaskStatus.OPPORTUNITY_HUNT: "Discovering opportunities",
+    AnalysisTaskStatus.HEATMAP_FETCH: "Fetching market heatmap",
+    AnalysisTaskStatus.HEATMAP_ANALYSIS: "Analyzing heatmap patterns",
     AnalysisTaskStatus.DEEP_DIVE: "Running deep analysis",
+    AnalysisTaskStatus.COVERAGE_EVALUATION: "Evaluating coverage",
     AnalysisTaskStatus.SYNTHESIS: "Synthesizing insights",
     AnalysisTaskStatus.COMPLETED: "Analysis complete",
     AnalysisTaskStatus.FAILED: "Analysis failed",

@@ -177,7 +177,7 @@ async def verify_schema() -> dict:
 async def main() -> None:
     """Main entry point for the migration script."""
     logger.info("=" * 60)
-    logger.info("Market Analyzer - Database Migration Script")
+    logger.info("Teletraan - Database Migration Script")
     logger.info("=" * 60)
     logger.info("")
 

@@ -104,7 +104,14 @@ async def list_deep_insights(
     query = select(DeepInsight).order_by(desc(DeepInsight.created_at))
 
     if action:
-        query = query.where(DeepInsight.action == action)
+        # Group "strong" variants with their base action:
+        # BUY includes STRONG_BUY, SELL includes STRONG_SELL
+        action_groups = {
+            "BUY": ["BUY", "STRONG_BUY"],
+            "SELL": ["SELL", "STRONG_SELL"],
+        }
+        actions = action_groups.get(action, [action])
+        query = query.where(DeepInsight.action.in_(actions))
     if insight_type:
         query = query.where(DeepInsight.insight_type == insight_type)
     if symbol:
@@ -541,7 +548,10 @@ async def get_active_analysis(
         AnalysisTaskStatus.MACRO_SCAN.value,
         AnalysisTaskStatus.SECTOR_ROTATION.value,
         AnalysisTaskStatus.OPPORTUNITY_HUNT.value,
+        AnalysisTaskStatus.HEATMAP_FETCH.value,
+        AnalysisTaskStatus.HEATMAP_ANALYSIS.value,
         AnalysisTaskStatus.DEEP_DIVE.value,
+        AnalysisTaskStatus.COVERAGE_EVALUATION.value,
         AnalysisTaskStatus.SYNTHESIS.value,
     ]
 
@@ -622,7 +632,10 @@ async def cancel_analysis(
         AnalysisTaskStatus.MACRO_SCAN.value,
         AnalysisTaskStatus.SECTOR_ROTATION.value,
         AnalysisTaskStatus.OPPORTUNITY_HUNT.value,
+        AnalysisTaskStatus.HEATMAP_FETCH.value,
+        AnalysisTaskStatus.HEATMAP_ANALYSIS.value,
         AnalysisTaskStatus.DEEP_DIVE.value,
+        AnalysisTaskStatus.COVERAGE_EVALUATION.value,
         AnalysisTaskStatus.SYNTHESIS.value,
     ]
 
