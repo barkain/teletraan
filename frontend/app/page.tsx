@@ -493,15 +493,27 @@ export default function InsightHubPage() {
 
   return (
     <div className="space-y-6">
+      {/* Hero Banner */}
+      <div className="relative w-full max-h-96 rounded-xl overflow-hidden">
+        <img
+          src="/teletraan-hero.png"
+          alt="Teletraan Command Center — AI-powered market intelligence"
+          className="w-full h-64 md:h-96 object-cover"
+        />
+        {/* Gradient overlay for smooth transition to content below */}
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-background/20 to-transparent" />
+      </div>
+
       {/* Hero Section */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 -mt-4">
         <div className="space-y-1">
           <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold tracking-tight">Market Insight Engine</h1>
+            <h1 className="text-3xl font-bold tracking-tight">Teletraan</h1>
             <MarketStatusBadge />
           </div>
           <p className="text-muted-foreground">
-            AI-powered deep market analysis from our multi-agent analyst team
+            AI-Powered Market Intelligence -- multi-agent deep analysis
           </p>
           {lastAnalysisTime && (
             <p className="text-sm text-muted-foreground flex items-center gap-1">
@@ -531,7 +543,7 @@ export default function InsightHubPage() {
       </div>
 
       {/* Analysis Status Banner with Progress */}
-      {(isAnalysisRunning || isAnalysisComplete || isAnalysisFailed || isAnalysisCancelled) && (
+      {(isAnalysisRunning || isAnalysisComplete || isAnalysisFailed || isAnalysisCancelled || analysisError) && (
         <AnalysisStatusBanner
           isRunning={isAnalysisRunning}
           progress={task?.progress || 0}

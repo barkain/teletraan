@@ -1,6 +1,6 @@
-# Market Analyzer Backend
+# Teletraan Backend
 
-Backend API service for the Market Analyzer application.
+Backend API service for the Teletraan application.
 
 ## Setup
 

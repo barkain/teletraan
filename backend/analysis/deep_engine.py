@@ -64,6 +64,13 @@ from analysis.outcome_tracker import InsightOutcomeTracker
 
 logger = logging.getLogger(__name__)
 
+# Concurrency limit for simultaneous Claude SDK sessions.
+# With 5 analysts running in parallel via asyncio.gather(), this semaphore
+# ensures at most MAX_CONCURRENT_LLM sessions are active at once.
+# The remaining tasks queue up and proceed as slots become available.
+MAX_CONCURRENT_LLM = 3
+_llm_semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM)
+
 
 # Valid insight types and actions for validation
 VALID_INSIGHT_TYPES = {t.value for t in InsightType}
@@ -470,30 +477,33 @@ class DeepAnalysisEngine:
         response_text = ""
         message_count = 0
 
-        try:
-            logger.info(f"[DEEP] Creating ClaudeSDKClient for {agent_name}...")
-            async with ClaudeSDKClient(options=options) as client:
-                logger.info(f"[DEEP] Client connected for {agent_name}, sending query...")
-                await client.query(prompt)
-                logger.info(f"[DEEP] Query sent for {agent_name}, waiting for response...")
+        # Acquire semaphore to limit concurrent Claude SDK sessions
+        async with _llm_semaphore:
+            logger.info(f"[DEEP] Semaphore acquired for {agent_name} (max {MAX_CONCURRENT_LLM} concurrent)")
+            try:
+                logger.info(f"[DEEP] Creating ClaudeSDKClient for {agent_name}...")
+                async with ClaudeSDKClient(options=options) as client:
+                    logger.info(f"[DEEP] Client connected for {agent_name}, sending query...")
+                    await client.query(prompt)
+                    logger.info(f"[DEEP] Query sent for {agent_name}, waiting for response...")
 
-                async for msg in client.receive_response():
-                    message_count += 1
-                    logger.info(f"[DEEP] {agent_name} received message {message_count}: {type(msg).__name__}")
-                    if isinstance(msg, AssistantMessage):
-                        for block in msg.content:
-                            if isinstance(block, TextBlock):
-                                response_text += block.text
-                                logger.info(f"[DEEP] {agent_name} TextBlock: {len(block.text)} chars")
+                    async for msg in client.receive_response():
+                        message_count += 1
+                        logger.info(f"[DEEP] {agent_name} received message {message_count}: {type(msg).__name__}")
+                        if isinstance(msg, AssistantMessage):
+                            for block in msg.content:
+                                if isinstance(block, TextBlock):
+                                    response_text += block.text
+                                    logger.info(f"[DEEP] {agent_name} TextBlock: {len(block.text)} chars")
 
-            logger.info(f"[DEEP] {agent_name} complete: {len(response_text)} chars from {message_count} messages")
+                logger.info(f"[DEEP] {agent_name} complete: {len(response_text)} chars from {message_count} messages")
 
-        except asyncio.TimeoutError:
-            logger.error(f"[DEEP] TIMEOUT waiting for {agent_name} response")
-            raise
-        except Exception as e:
-            logger.exception(f"[DEEP] ERROR in {agent_name}: {type(e).__name__}: {e}")
-            raise
+            except asyncio.TimeoutError:
+                logger.error(f"[DEEP] TIMEOUT waiting for {agent_name} response")
+                raise
+            except Exception as e:
+                logger.exception(f"[DEEP] ERROR in {agent_name}: {type(e).__name__}: {e}")
+                raise
 
         return response_text
 

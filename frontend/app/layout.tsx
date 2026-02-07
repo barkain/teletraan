@@ -17,8 +17,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Market Analyzer',
-  description: 'AI-powered stock market analysis and insights',
+  title: 'Teletraan',
+  description: 'AI-Powered Market Intelligence',
 };
 
 export default function RootLayout({

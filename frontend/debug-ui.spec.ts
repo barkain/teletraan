@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Market Analyzer UI Debug', () => {
+test.describe('Teletraan UI Debug', () => {
   test.beforeEach(async ({ page }) => {
     // Capture console errors
     page.on('console', msg => {

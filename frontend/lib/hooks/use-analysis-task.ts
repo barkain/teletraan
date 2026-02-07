@@ -120,6 +120,9 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
   // Timer ref for elapsed time
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Ref to track if startAnalysis is in progress (guards against checkForActiveTask race)
+  const isStartingRef = useRef<boolean>(false);
+
   // Derived state
   const isRunning = task !== null && !['completed', 'failed', 'cancelled'].includes(task.status);
   const isComplete = task?.status === 'completed';
@@ -201,7 +204,16 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
   const startAnalysis = useCallback(
     async (params?: { max_insights?: number; deep_dive_count?: number }) => {
       try {
+        // Guard against checkForActiveTask race condition
+        isStartingRef.current = true;
+
+        // Reset timer and state immediately BEFORE the async call
+        // so no stale elapsed time is visible during the await
+        stopPolling();
         setError(null);
+        setElapsedSeconds(0);
+        setStartTime(null);
+
         const response = await startBackgroundAnalysis(params);
 
         // Save task ID to localStorage for persistence
@@ -237,9 +249,11 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
         const message = err instanceof Error ? err.message : 'Failed to start analysis';
         setError(message);
         onErrorRef.current?.(message);
+      } finally {
+        isStartingRef.current = false;
       }
     },
-    [startPolling]
+    [startPolling, stopPolling]
   );
 
   // Cancel running analysis
@@ -274,6 +288,9 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
       try {
         const status = await getTaskStatus(savedTaskId);
 
+        // Bail out if startAnalysis was called while we were awaiting
+        if (isStartingRef.current) return null;
+
         // If task is still running, resume polling
         if (!['completed', 'failed', 'cancelled'].includes(status.status)) {
           setTaskId(savedTaskId);
@@ -303,6 +320,10 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
 
     // Also check the server for any active task
     const activeTask = await getActiveTask();
+
+    // Bail out if startAnalysis was called while we were awaiting
+    if (isStartingRef.current) return null;
+
     if (activeTask) {
       localStorage.setItem(TASK_ID_STORAGE_KEY, activeTask.id);
       setTaskId(activeTask.id);
