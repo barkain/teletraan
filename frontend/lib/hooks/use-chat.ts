@@ -33,7 +33,7 @@ export function useChat() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const connectRef = useRef<() => void>();
+  const connectRef = useRef<(() => void) | undefined>(undefined);
   const currentMessageRef = useRef<{
     id: string;
     content: string;
@@ -202,7 +202,9 @@ export function useChat() {
   }, [handleWSMessage]);
 
   // Keep connectRef in sync so the reconnect timer can call the latest version
-  connectRef.current = connect;
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {
