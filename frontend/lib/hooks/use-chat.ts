@@ -42,57 +42,6 @@ export function useChat() {
   // Generate unique message ID
   const generateId = useCallback(() => crypto.randomUUID(), []);
 
-  // Connect to WebSocket
-  const connect = useCallback(() => {
-    // Don't reconnect if already connected or connecting
-    if (wsRef.current?.readyState === WebSocket.OPEN ||
-        wsRef.current?.readyState === WebSocket.CONNECTING) {
-      return;
-    }
-
-    try {
-      const ws = new WebSocket(WS_URL);
-
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-        reconnectAttemptsRef.current = 0;
-        setState(prev => ({ ...prev, isConnected: true, error: null }));
-      };
-
-      ws.onclose = (event) => {
-        console.log('WebSocket closed:', event.code, event.reason);
-        setState(prev => ({ ...prev, isConnected: false }));
-        wsRef.current = null;
-
-        // Attempt to reconnect if not a normal closure
-        if (event.code !== 1000 && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-          reconnectAttemptsRef.current++;
-          console.log(`Reconnecting... attempt ${reconnectAttemptsRef.current}`);
-          reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_INTERVAL);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setState(prev => ({ ...prev, error: 'Connection error' }));
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data: WSMessage = JSON.parse(event.data);
-          handleWSMessage(data);
-        } catch (e) {
-          console.error('Failed to parse WebSocket message:', e);
-        }
-      };
-
-      wsRef.current = ws;
-    } catch (error) {
-      console.error('Failed to create WebSocket:', error);
-      setState(prev => ({ ...prev, error: 'Failed to connect' }));
-    }
-  }, []);
-
   // Handle incoming WebSocket messages
   const handleWSMessage = useCallback((data: WSMessage) => {
     switch (data.type) {
@@ -199,6 +148,57 @@ export function useChat() {
         break;
     }
   }, []);
+
+  // Connect to WebSocket
+  const connect = useCallback(() => {
+    // Don't reconnect if already connected or connecting
+    if (wsRef.current?.readyState === WebSocket.OPEN ||
+        wsRef.current?.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+
+    try {
+      const ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        reconnectAttemptsRef.current = 0;
+        setState(prev => ({ ...prev, isConnected: true, error: null }));
+      };
+
+      ws.onclose = (event) => {
+        console.log('WebSocket closed:', event.code, event.reason);
+        setState(prev => ({ ...prev, isConnected: false }));
+        wsRef.current = null;
+
+        // Attempt to reconnect if not a normal closure
+        if (event.code !== 1000 && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+          reconnectAttemptsRef.current++;
+          console.log(`Reconnecting... attempt ${reconnectAttemptsRef.current}`);
+          reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_INTERVAL);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setState(prev => ({ ...prev, error: 'Connection error' }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data: WSMessage = JSON.parse(event.data);
+          handleWSMessage(data);
+        } catch (e) {
+          console.error('Failed to parse WebSocket message:', e);
+        }
+      };
+
+      wsRef.current = ws;
+    } catch (error) {
+      console.error('Failed to create WebSocket:', error);
+      setState(prev => ({ ...prev, error: 'Failed to connect' }));
+    }
+  }, [handleWSMessage]);
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {

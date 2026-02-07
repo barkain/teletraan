@@ -292,7 +292,7 @@ function ActionPieChart({ data }: ActionPieChartProps) {
           outerRadius={70}
           paddingAngle={2}
           dataKey="value"
-          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+          label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
           labelLine={false}
         >
           {chartData.map((entry, index) => (
@@ -451,6 +451,40 @@ function MonthlyTrendChart({ isLoading: parentLoading }: MonthlyTrendChartProps)
 // Stats Table Component
 // ============================================
 
+function SortableHeader({
+  field,
+  sortField,
+  sortDirection,
+  onSort,
+  children,
+}: {
+  field: SortField;
+  sortField: SortField;
+  sortDirection: SortDirection;
+  onSort: (field: SortField) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <TableHead
+      className="cursor-pointer hover:bg-muted/50 transition-colors"
+      onClick={() => onSort(field)}
+    >
+      <div className="flex items-center gap-1">
+        {children}
+        {sortField === field ? (
+          sortDirection === 'desc' ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : (
+            <ChevronUp className="h-3 w-3" />
+          )
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-30" />
+        )}
+      </div>
+    </TableHead>
+  );
+}
+
 interface StatsTableProps {
   byType: TrackRecordStats['by_type'];
   byAction: TrackRecordStats['by_action'];
@@ -501,26 +535,6 @@ function StatsTable({ byType, byAction, onRowClick }: StatsTableProps) {
     }
   };
 
-  const SortableHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
-    <TableHead
-      className="cursor-pointer hover:bg-muted/50 transition-colors"
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center gap-1">
-        {children}
-        {sortField === field ? (
-          sortDirection === 'desc' ? (
-            <ChevronDown className="h-3 w-3" />
-          ) : (
-            <ChevronUp className="h-3 w-3" />
-          )
-        ) : (
-          <ArrowUpDown className="h-3 w-3 opacity-30" />
-        )}
-      </div>
-    </TableHead>
-  );
-
   if (tableData.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
@@ -533,11 +547,11 @@ function StatsTable({ byType, byAction, onRowClick }: StatsTableProps) {
     <Table>
       <TableHeader>
         <TableRow>
-          <SortableHeader field="name">Type/Action</SortableHeader>
-          <SortableHeader field="total">Total</SortableHeader>
-          <SortableHeader field="successful">Successful</SortableHeader>
-          <SortableHeader field="rate">Rate</SortableHeader>
-          <SortableHeader field="avgReturn">Avg Return</SortableHeader>
+          <SortableHeader field="name" sortField={sortField} sortDirection={sortDirection} onSort={handleSort}>Type/Action</SortableHeader>
+          <SortableHeader field="total" sortField={sortField} sortDirection={sortDirection} onSort={handleSort}>Total</SortableHeader>
+          <SortableHeader field="successful" sortField={sortField} sortDirection={sortDirection} onSort={handleSort}>Successful</SortableHeader>
+          <SortableHeader field="rate" sortField={sortField} sortDirection={sortDirection} onSort={handleSort}>Rate</SortableHeader>
+          <SortableHeader field="avgReturn" sortField={sortField} sortDirection={sortDirection} onSort={handleSort}>Avg Return</SortableHeader>
         </TableRow>
       </TableHeader>
       <TableBody>

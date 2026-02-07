@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -129,15 +129,15 @@ export default function InsightsPage() {
   const [actionFilter, setActionFilter] = useState<InsightAction | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<DeepInsightType | 'all'>('all');
   const [symbolFilter, setSymbolFilter] = useState('');
-  const [showSignalsSidebar, setShowSignalsSidebar] = useState(true);
-
-  // Load sidebar preference from localStorage on mount
-  useEffect(() => {
-    const stored = localStorage.getItem(SIGNALS_SIDEBAR_KEY);
-    if (stored !== null) {
-      setShowSignalsSidebar(stored === 'true');
+  const [showSignalsSidebar, setShowSignalsSidebar] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(SIGNALS_SIDEBAR_KEY);
+      if (stored !== null) {
+        return stored === 'true';
+      }
     }
-  }, []);
+    return true;
+  });
 
   // Save sidebar preference to localStorage
   const handleToggleSignalsSidebar = (visible: boolean) => {

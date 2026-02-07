@@ -122,10 +122,10 @@ export interface InsightListParams {
 }
 
 // Insight List Response
-export interface InsightListResponse extends PaginatedResponse<Insight> {}
+export type InsightListResponse = PaginatedResponse<Insight>;
 
 // Insight Response
-export interface InsightResponse extends Insight {}
+export type InsightResponse = Insight;
 
 // Technical Analysis Response
 export interface TechnicalAnalysisResponse {
