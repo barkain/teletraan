@@ -205,6 +205,11 @@ export function OutcomeBadge({
     ? OUTCOME_CONFIG[outcome.outcome_category]
     : STATUS_CONFIG[outcome.tracking_status];
 
+  // Guard against unknown tracking_status or outcome_category values
+  if (!config) {
+    return null;
+  }
+
   const Icon = config.icon;
 
   // Build the badge content

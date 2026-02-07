@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/rules-of-hooks */
 import { test as base } from '@playwright/test';
 
 export const test = base.extend({
@@ -34,6 +35,13 @@ export const test = base.extend({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({}),
+      })
+    );
+    await page.route('**/api/v1/outcomes/**', route =>
+      route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Not found' }),
       })
     );
     await page.route('**/api/v1/knowledge/**', route =>
