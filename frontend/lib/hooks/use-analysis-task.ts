@@ -296,8 +296,10 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
           setTaskId(savedTaskId);
           setTask(status);
           // Calculate start time from task's started_at if available
+          // Backend returns UTC datetime without timezone suffix (e.g. "2026-02-08T10:30:00")
+          // so we must append 'Z' to ensure JS interprets it as UTC, not local time
           const existingStartTime = status.started_at
-            ? new Date(status.started_at).getTime()
+            ? new Date(status.started_at.endsWith('Z') ? status.started_at : status.started_at + 'Z').getTime()
             : undefined;
           startPolling(savedTaskId, existingStartTime);
           return status;
@@ -331,8 +333,9 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
 
       if (!['completed', 'failed', 'cancelled'].includes(activeTask.status)) {
         // Calculate start time from task's started_at if available
+        // Backend returns UTC datetime without timezone suffix — append 'Z' so JS parses as UTC
         const existingStartTime = activeTask.started_at
-          ? new Date(activeTask.started_at).getTime()
+          ? new Date(activeTask.started_at.endsWith('Z') ? activeTask.started_at : activeTask.started_at + 'Z').getTime()
           : undefined;
         startPolling(activeTask.id, existingStartTime);
       }
