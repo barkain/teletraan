@@ -348,6 +348,20 @@ export const api = {
     impact: () =>
       fetchApi<PortfolioImpact>('/api/v1/portfolio/impact'),
   },
+
+  // Research
+  research: {
+    list: (params?: ResearchListParams) =>
+      fetchApi<ResearchListResponse>('/api/v1/research', {
+        params: params as Record<string, string | number | boolean | undefined>,
+      }),
+    get: (id: number) =>
+      fetchApi<FollowUpResearch>(`/api/v1/research/${id}`),
+    create: (data: ResearchCreateRequest) =>
+      postApi<FollowUpResearch>('/api/v1/research', data),
+    cancel: (id: number) =>
+      deleteApi<void>(`/api/v1/research/${id}`),
+  },
 };
 
 // ============================================
@@ -406,6 +420,7 @@ export const chatApi = {
 // Import types
 import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact } from '@/types';
 import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
+import type { FollowUpResearch, ResearchListResponse, ResearchListParams, ResearchCreateRequest } from '@/lib/types/research';
 
 // ============================================
 // Data Refresh API

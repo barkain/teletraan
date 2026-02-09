@@ -56,6 +56,7 @@ from analysis.context_builder import market_context_builder
 from analysis.statistical_calculator import StatisticalFeatureCalculator
 from analysis.memory_service import InstitutionalMemoryService
 from analysis.outcome_tracker import InsightOutcomeTracker
+from analysis.pattern_extractor import PatternExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -491,6 +492,30 @@ class DeepAnalysisEngine:
             if stored:
                 await session.commit()
                 logger.info(f"Successfully stored {len(stored)} DeepInsight records")
+
+                # Extract patterns from each stored insight
+                try:
+                    pattern_extractor = PatternExtractor(session)
+                    for insight in stored:
+                        try:
+                            insight_dict = {
+                                "id": insight.id,
+                                "title": insight.title,
+                                "insight_type": insight.insight_type,
+                                "action": insight.action,
+                                "thesis": insight.thesis,
+                                "confidence": insight.confidence,
+                                "time_horizon": insight.time_horizon,
+                                "primary_symbol": insight.primary_symbol,
+                                "risk_factors": insight.risk_factors or [],
+                            }
+                            await pattern_extractor.extract_from_insight(insight_dict)
+                            logger.info(f"[DEEP] Pattern extraction completed for {insight.primary_symbol}")
+                        except Exception as pe:
+                            logger.warning(f"[DEEP] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                    await session.commit()
+                except Exception as e:
+                    logger.warning(f"[DEEP] Pattern extraction phase failed: {e}")
 
         return stored
 

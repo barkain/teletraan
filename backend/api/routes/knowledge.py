@@ -23,6 +23,8 @@ from schemas.knowledge import (
     ConversationThemeResponse,
     KnowledgePatternListResponse,
     KnowledgePatternResponse,
+    MonthlyDataPoint,
+    MonthlyTrendResponse,
     TrackRecordResponse,
     TypeBreakdown,
 )
@@ -381,4 +383,71 @@ async def get_track_record(
         by_action=by_action,
         avg_return_successful=round(avg_return_successful, 4),
         avg_return_failed=round(avg_return_failed, 4),
+    )
+
+
+@router.get("/track-record/monthly-trend", response_model=MonthlyTrendResponse)
+async def get_monthly_trend(
+    db: AsyncSession = Depends(get_db),
+    lookback_months: int = Query(
+        default=12, ge=1, le=36, description="Number of months to look back"
+    ),
+) -> MonthlyTrendResponse:
+    """Get monthly trend of insight success rates.
+
+    Returns per-month aggregated statistics for completed insight outcomes,
+    sorted from oldest to newest month.
+    """
+    from collections import defaultdict
+    from datetime import datetime
+    from dateutil.relativedelta import relativedelta
+
+    # Calculate the cutoff date: first day of the month N months ago
+    now = datetime.utcnow()
+    cutoff = (now - relativedelta(months=lookback_months)).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    )
+
+    # Query completed outcomes within the lookback window
+    query = select(InsightOutcome).where(
+        and_(
+            InsightOutcome.tracking_status == "COMPLETED",
+            InsightOutcome.thesis_validated.isnot(None),
+            InsightOutcome.tracking_end_date >= cutoff.date(),
+        )
+    )
+
+    result = await db.execute(query)
+    outcomes = result.scalars().all()
+
+    # Group outcomes by month using tracking_end_date
+    monthly_stats: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"total": 0, "successful": 0}
+    )
+
+    for outcome in outcomes:
+        month_key = outcome.tracking_end_date.strftime("%Y-%m")
+        monthly_stats[month_key]["total"] += 1
+        if outcome.thesis_validated:
+            monthly_stats[month_key]["successful"] += 1
+
+    # Build sorted data points (oldest to newest)
+    data_points: list[MonthlyDataPoint] = []
+    for month_key in sorted(monthly_stats.keys()):
+        stats = monthly_stats[month_key]
+        total = stats["total"]
+        successful = stats["successful"]
+        rate = successful / total if total > 0 else 0.0
+        data_points.append(
+            MonthlyDataPoint(
+                month=month_key,
+                rate=round(rate, 4),
+                total=total,
+                successful=successful,
+            )
+        )
+
+    return MonthlyTrendResponse(
+        data=data_points,
+        period_months=lookback_months,
     )

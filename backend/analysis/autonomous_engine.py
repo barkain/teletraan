@@ -95,6 +95,8 @@ from analysis.agents.synthesis_lead import (  # type: ignore[import-not-found]
 )
 from analysis.context_builder import MarketContextBuilder  # type: ignore[import-not-found]
 from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
+from analysis.pattern_extractor import PatternExtractor  # type: ignore[import-not-found]
+from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
 from llm.client_pool import pool_query_llm  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
@@ -909,6 +911,68 @@ class AutonomousDeepEngine:
             await session.commit()
             logger.info(f"Stored {len(stored)} insights to database")
 
+            # Extract patterns from each stored insight
+            try:
+                pattern_extractor = PatternExtractor(session)
+                for insight in stored:
+                    try:
+                        insight_dict = {
+                            "id": insight.id,
+                            "title": insight.title,
+                            "insight_type": insight.insight_type,
+                            "action": insight.action,
+                            "thesis": insight.thesis,
+                            "confidence": insight.confidence,
+                            "time_horizon": insight.time_horizon,
+                            "primary_symbol": insight.primary_symbol,
+                            "risk_factors": insight.risk_factors or [],
+                        }
+                        await pattern_extractor.extract_from_insight(insight_dict)
+                        logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
+                    except Exception as pe:
+                        logger.warning(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                await session.commit()
+            except Exception as e:
+                logger.warning(f"[AUTO] Pattern extraction phase failed: {e}")
+
+            # Auto-initiate outcome tracking for actionable insights
+            try:
+                actionable_actions = {"STRONG_BUY", "BUY", "SELL", "STRONG_SELL"}
+                action_to_direction = {
+                    "STRONG_BUY": "bullish",
+                    "BUY": "bullish",
+                    "SELL": "bearish",
+                    "STRONG_SELL": "bearish",
+                }
+                outcome_tracker = InsightOutcomeTracker(session)
+                tracked_count = 0
+                for insight in stored:
+                    try:
+                        if not insight.primary_symbol:
+                            continue
+                        if insight.action not in actionable_actions:
+                            continue
+                        predicted_direction = action_to_direction[insight.action]
+                        await outcome_tracker.start_tracking(
+                            insight_id=insight.id,
+                            symbol=insight.primary_symbol,
+                            predicted_direction=predicted_direction,
+                            tracking_days=20,
+                        )
+                        tracked_count += 1
+                        logger.info(
+                            f"[AUTO] Outcome tracking started for {insight.primary_symbol} "
+                            f"(action={insight.action}, direction={predicted_direction})"
+                        )
+                    except Exception as te:
+                        logger.warning(
+                            f"[AUTO] Outcome tracking failed for {insight.primary_symbol}: {te}"
+                        )
+                if tracked_count > 0:
+                    logger.info(f"[AUTO] Started outcome tracking for {tracked_count}/{len(stored)} heatmap insights")
+            except Exception as e:
+                logger.warning(f"[AUTO] Outcome tracking phase failed: {e}")
+
         return stored
 
     def _build_heatmap_discovery_summary(
@@ -1643,6 +1707,68 @@ class AutonomousDeepEngine:
         if stored:
             await session.commit()
             logger.info(f"Stored {len(stored)} insights to database")
+
+            # Extract patterns from each stored insight
+            try:
+                pattern_extractor = PatternExtractor(session)
+                for insight in stored:
+                    try:
+                        insight_dict = {
+                            "id": insight.id,
+                            "title": insight.title,
+                            "insight_type": insight.insight_type,
+                            "action": insight.action,
+                            "thesis": insight.thesis,
+                            "confidence": insight.confidence,
+                            "time_horizon": insight.time_horizon,
+                            "primary_symbol": insight.primary_symbol,
+                            "risk_factors": insight.risk_factors or [],
+                        }
+                        await pattern_extractor.extract_from_insight(insight_dict)
+                        logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
+                    except Exception as pe:
+                        logger.warning(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                await session.commit()
+            except Exception as e:
+                logger.warning(f"[AUTO] Pattern extraction phase failed: {e}")
+
+            # Auto-initiate outcome tracking for actionable insights
+            try:
+                actionable_actions = {"STRONG_BUY", "BUY", "SELL", "STRONG_SELL"}
+                action_to_direction = {
+                    "STRONG_BUY": "bullish",
+                    "BUY": "bullish",
+                    "SELL": "bearish",
+                    "STRONG_SELL": "bearish",
+                }
+                outcome_tracker = InsightOutcomeTracker(session)
+                tracked_count = 0
+                for insight in stored:
+                    try:
+                        if not insight.primary_symbol:
+                            continue
+                        if insight.action not in actionable_actions:
+                            continue
+                        predicted_direction = action_to_direction[insight.action]
+                        await outcome_tracker.start_tracking(
+                            insight_id=insight.id,
+                            symbol=insight.primary_symbol,
+                            predicted_direction=predicted_direction,
+                            tracking_days=20,
+                        )
+                        tracked_count += 1
+                        logger.info(
+                            f"[AUTO] Outcome tracking started for {insight.primary_symbol} "
+                            f"(action={insight.action}, direction={predicted_direction})"
+                        )
+                    except Exception as te:
+                        logger.warning(
+                            f"[AUTO] Outcome tracking failed for {insight.primary_symbol}: {te}"
+                        )
+                if tracked_count > 0:
+                    logger.info(f"[AUTO] Started outcome tracking for {tracked_count}/{len(stored)} legacy insights")
+            except Exception as e:
+                logger.warning(f"[AUTO] Outcome tracking phase failed: {e}")
 
         return stored
 

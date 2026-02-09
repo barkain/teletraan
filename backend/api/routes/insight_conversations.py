@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -22,6 +22,8 @@ from analysis.insight_conversation_agent import (
     ModificationProposal,
     ResearchRequest,
 )
+from analysis.pattern_extractor import PatternExtractor
+from database import async_session_factory
 from models.deep_insight import DeepInsight
 from models.insight_conversation import (
     InsightConversation,
@@ -160,6 +162,103 @@ def _format_conversation_response(
         closed_at=conversation.closed_at,
         summary=conversation.summary,
     )
+
+
+# =============================================================================
+# PATTERN EXTRACTION BACKGROUND TASK
+# =============================================================================
+
+
+async def _extract_patterns_from_conversation(
+    conversation_id: int,
+    deep_insight_id: int,
+) -> None:
+    """Background task to extract patterns when a conversation is resolved/archived.
+
+    Opens its own database session (the request session is closed by the time
+    background tasks run), loads the conversation summary and linked insight
+    data, then calls PatternExtractor to identify repeatable trading patterns.
+
+    Args:
+        conversation_id: ID of the conversation being closed.
+        deep_insight_id: ID of the linked DeepInsight.
+    """
+    logger.info(
+        f"Background pattern extraction starting for conversation {conversation_id}"
+    )
+
+    try:
+        async with async_session_factory() as session:
+            # Load conversation with messages
+            result = await session.execute(
+                select(InsightConversation)
+                .options(selectinload(InsightConversation.messages))
+                .where(InsightConversation.id == conversation_id)
+            )
+            conversation = result.scalar_one_or_none()
+
+            if not conversation:
+                logger.warning(
+                    f"Conversation {conversation_id} not found for pattern extraction"
+                )
+                return
+
+            # Build summary from conversation.summary or concatenated messages
+            summary = conversation.summary or ""
+            if not summary and conversation.messages:
+                message_texts = [
+                    f"{msg.role.value}: {msg.content}"
+                    for msg in sorted(
+                        conversation.messages, key=lambda m: m.created_at
+                    )
+                ]
+                summary = "\n".join(message_texts)
+
+            if not summary:
+                logger.info(
+                    f"No summary or messages for conversation {conversation_id}, "
+                    "skipping pattern extraction"
+                )
+                return
+
+            # Load the linked DeepInsight for insight context
+            insight_result = await session.execute(
+                select(DeepInsight).where(DeepInsight.id == deep_insight_id)
+            )
+            insight = insight_result.scalar_one_or_none()
+
+            # Build insights list from the linked DeepInsight
+            insights: list[dict[str, Any]] = []
+            if insight:
+                insights.append({
+                    "title": insight.title,
+                    "insight_type": insight.insight_type,
+                    "action": insight.action,
+                    "thesis": insight.thesis,
+                    "primary_symbol": insight.primary_symbol,
+                    "confidence": insight.confidence,
+                    "time_horizon": insight.time_horizon,
+                })
+
+            # Run pattern extraction
+            extractor = PatternExtractor(db_session=session)
+            patterns = await extractor.extract_from_conversation_summary(
+                conversation_id=uuid.UUID(int=conversation_id),
+                summary=summary,
+                insights=insights,
+            )
+
+            await session.commit()
+
+            logger.info(
+                f"Pattern extraction complete for conversation {conversation_id}: "
+                f"{len(patterns)} patterns created"
+            )
+
+    except Exception:
+        logger.exception(
+            f"Pattern extraction failed for conversation {conversation_id}"
+        )
 
 
 # =============================================================================
@@ -452,13 +551,19 @@ async def get_conversation(
 async def update_conversation(
     conversation_id: int,
     request: ConversationUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """Update a conversation's title or status.
 
+    When the status changes to RESOLVED or ARCHIVED, pattern extraction is
+    triggered as a background task to identify repeatable trading patterns
+    from the conversation content.
+
     Args:
         conversation_id: ID of the conversation.
         request: Update parameters.
+        background_tasks: FastAPI background tasks for async pattern extraction.
         db: Database session.
 
     Returns:
@@ -472,13 +577,27 @@ async def update_conversation(
     if request.title is not None:
         conversation.title = request.title
 
+    status_closing = False
     if request.status is not None:
         conversation.status = ConversationStatus(request.status.value)
         if request.status in (ConversationStatus.ARCHIVED, ConversationStatus.RESOLVED):
             conversation.closed_at = datetime.utcnow()
+            status_closing = True
 
     await db.commit()
     await db.refresh(conversation)
+
+    # Trigger pattern extraction in background when conversation closes
+    if status_closing:
+        background_tasks.add_task(
+            _extract_patterns_from_conversation,
+            conversation_id=conversation.id,
+            deep_insight_id=conversation.deep_insight_id,
+        )
+        logger.info(
+            f"Queued pattern extraction for conversation {conversation_id} "
+            f"(status -> {conversation.status.value})"
+        )
 
     # Get counts
     msg_count = await db.scalar(

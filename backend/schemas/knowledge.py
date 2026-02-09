@@ -109,6 +109,24 @@ class TrackRecordResponse(BaseModel):
     )
 
 
+class MonthlyDataPoint(BaseModel):
+    """A single month's track record data point."""
+
+    month: str = Field(..., description="Month label, e.g. '2026-01'")
+    rate: float = Field(..., ge=0.0, le=1.0, description="Success rate for the month")
+    total: int = Field(..., ge=0, description="Total completed outcomes in the month")
+    successful: int = Field(..., ge=0, description="Successful outcomes in the month")
+
+
+class MonthlyTrendResponse(BaseModel):
+    """Response schema for monthly trend data."""
+
+    data: list[MonthlyDataPoint] = Field(
+        default_factory=list, description="Monthly data points sorted oldest to newest"
+    )
+    period_months: int = Field(..., ge=1, description="Number of months in the response window")
+
+
 class MatchingConditions(BaseModel):
     """Query parameters for pattern matching endpoint."""
 
