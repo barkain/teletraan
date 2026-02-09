@@ -22,6 +22,7 @@ from .insight_conversation import (
 from .insight_outcome import InsightOutcome, OutcomeCategory, TrackingStatus
 from .insight_research_context import InsightResearchContext
 from .knowledge_pattern import KnowledgePattern, PatternType
+from .portfolio import Portfolio, PortfolioHolding
 from .price import PriceHistory
 from .settings import UserSettings
 from .analysis_task import AnalysisTask, AnalysisTaskStatus, PHASE_PROGRESS, PHASE_NAMES
@@ -68,4 +69,7 @@ __all__ = [
     "AnalysisTaskStatus",
     "PHASE_PROGRESS",
     "PHASE_NAMES",
+    # Portfolio models
+    "Portfolio",
+    "PortfolioHolding",
 ]

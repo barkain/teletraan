@@ -332,6 +332,22 @@ export const api = {
         putApi<WatchlistSettings>('/api/v1/settings/watchlist', { symbols }),
     },
   },
+
+  // Portfolio
+  portfolio: {
+    get: () =>
+      fetchApi<Portfolio>('/api/v1/portfolio'),
+    create: (data?: { name?: string; description?: string }) =>
+      postApi<Portfolio>('/api/v1/portfolio', data),
+    addHolding: (holding: HoldingCreate) =>
+      postApi<PortfolioHolding>('/api/v1/portfolio/holdings', holding),
+    updateHolding: (holdingId: number, data: HoldingUpdate) =>
+      putApi<PortfolioHolding>(`/api/v1/portfolio/holdings/${holdingId}`, data),
+    deleteHolding: (holdingId: number) =>
+      deleteApi<void>(`/api/v1/portfolio/holdings/${holdingId}`),
+    impact: () =>
+      fetchApi<PortfolioImpact>('/api/v1/portfolio/impact'),
+  },
 };
 
 // ============================================
@@ -388,7 +404,7 @@ export const chatApi = {
 };
 
 // Import types
-import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse } from '@/types';
+import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact } from '@/types';
 import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
 
 // ============================================

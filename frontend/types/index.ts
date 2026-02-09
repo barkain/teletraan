@@ -249,3 +249,62 @@ export interface StartAnalysisResponse {
   status: string;
   message: string;
 }
+
+// ============================================
+// Portfolio Types
+// ============================================
+
+export interface PortfolioHolding {
+  id: number;
+  portfolio_id: number;
+  symbol: string;
+  shares: number;
+  cost_basis: number;
+  notes?: string;
+  current_price?: number;
+  market_value?: number;
+  gain_loss?: number;
+  gain_loss_pct?: number;
+  allocation_pct?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface Portfolio {
+  id: number;
+  name: string;
+  description?: string;
+  holdings: PortfolioHolding[];
+  total_value?: number;
+  total_cost?: number;
+  total_gain_loss?: number;
+  total_gain_loss_pct?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface HoldingCreate {
+  symbol: string;
+  shares: number;
+  cost_basis: number;
+  notes?: string;
+}
+
+export interface HoldingUpdate {
+  shares?: number;
+  cost_basis?: number;
+  notes?: string;
+}
+
+export interface PortfolioImpact {
+  portfolio_value: number;
+  affected_holdings: Array<{
+    symbol: string;
+    allocation_pct: number;
+    insight_ids: number[];
+    impact_direction: 'bullish' | 'bearish' | 'neutral';
+  }>;
+  overall_bullish_exposure: number;
+  overall_bearish_exposure: number;
+  insight_count: number;
+}

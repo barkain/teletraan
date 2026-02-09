@@ -13,6 +13,7 @@ from api.routes.insight_modifications import router as insight_modifications_rou
 from api.routes.insights import router as insights_router
 from api.routes.knowledge import router as knowledge_router
 from api.routes.outcomes import router as outcomes_router
+from api.routes.portfolio import router as portfolio_router
 from api.routes.search import router as search_router
 from api.routes.settings import router as settings_router
 from api.routes.statistical_features import router as statistical_features_router
@@ -36,6 +37,7 @@ router.include_router(statistical_features_router, tags=["features"])
 router.include_router(stocks_router, tags=["stocks"])
 router.include_router(outcomes_router, tags=["outcomes"])
 router.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"])
+router.include_router(portfolio_router, prefix="/portfolio", tags=["portfolio"])
 router.include_router(export_router)
 
 __all__ = ["router"]
