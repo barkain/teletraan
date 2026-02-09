@@ -95,25 +95,9 @@ from analysis.agents.synthesis_lead import (  # type: ignore[import-not-found]
 )
 from analysis.context_builder import MarketContextBuilder  # type: ignore[import-not-found]
 from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
+from llm.client_pool import pool_query_llm  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# LLM concurrency limiter
-# Prevents too many simultaneous Claude SDK sessions (which can crash the host).
-# The semaphore is lazily initialised so it is always bound to the running
-# event loop at first use.
-# ---------------------------------------------------------------------------
-MAX_CONCURRENT_LLM: int = 5  # Max simultaneous Claude SDK sessions
-_llm_semaphore: asyncio.Semaphore | None = None
-
-
-def _get_llm_semaphore() -> asyncio.Semaphore:
-    """Return the module-level LLM semaphore, creating it lazily."""
-    global _llm_semaphore
-    if _llm_semaphore is None:
-        _llm_semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM)
-    return _llm_semaphore
 
 
 # Valid insight types and actions for validation
@@ -1725,12 +1709,9 @@ class AutonomousDeepEngine:
         self,
         system_prompt: str,
         user_prompt: str,
-        agent_name: str,
+        agent_name: str = "unknown",
     ) -> str:
-        """Query the LLM using ClaudeSDKClient.
-
-        Acquires the module-level semaphore so that at most
-        ``MAX_CONCURRENT_LLM`` sessions run simultaneously.
+        """Query the LLM using the shared client pool.
 
         Args:
             system_prompt: System prompt for the agent.
@@ -1740,41 +1721,7 @@ class AutonomousDeepEngine:
         Returns:
             LLM response text.
         """
-        sem = _get_llm_semaphore()
-
-        async with sem:
-            try:
-                from claude_agent_sdk import (  # type: ignore[import-not-found]
-                    ClaudeAgentOptions,
-                    ClaudeSDKClient,
-                    AssistantMessage,
-                    TextBlock,
-                )
-
-                logger.info(f"[AUTO] Querying {agent_name}, prompt length: {len(user_prompt)} chars")
-
-                response_text = ""
-
-                options = ClaudeAgentOptions(system_prompt=system_prompt)
-
-                async with ClaudeSDKClient(options=options) as client:
-                    await client.query(user_prompt)
-
-                    async for msg in client.receive_response():
-                        if isinstance(msg, AssistantMessage):
-                            for block in msg.content:
-                                if isinstance(block, TextBlock):
-                                    response_text += block.text
-
-                logger.info(f"[AUTO] {agent_name} complete: {len(response_text)} chars")
-                return response_text
-
-            except ImportError:
-                logger.error("ClaudeSDKClient not available")
-                raise ImportError(
-                    "claude_agent_sdk is required for LLM queries. "
-                    "Install it to use the autonomous analysis engine."
-                )
+        return await pool_query_llm(system_prompt, user_prompt, agent_name)
 
     async def get_more_insights(
         self,

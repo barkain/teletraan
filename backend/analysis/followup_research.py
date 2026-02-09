@@ -23,12 +23,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from claude_agent_sdk import (
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    AssistantMessage,
-    TextBlock,
-)
+from llm.client_pool import pool_query_llm
 
 from database import async_session_factory
 from models.deep_insight import DeepInsight, InsightType, InsightAction
@@ -562,28 +557,15 @@ class FollowUpResearchLauncher:
 
         logger.info(f"Running focused analyst: {focused_type.value}")
 
-        # Create SDK options
-        options = ClaudeAgentOptions(
-            system_prompt=system_prompt,
-        )
-
-        response_text = ""
-        message_count = 0
-
         try:
-            async with ClaudeSDKClient(options=options) as client:
-                await client.query(prompt)
-
-                async for msg in client.receive_response():
-                    message_count += 1
-                    if isinstance(msg, AssistantMessage):
-                        for block in msg.content:
-                            if isinstance(block, TextBlock):
-                                response_text += block.text
+            response_text = await pool_query_llm(
+                system_prompt=system_prompt,
+                user_prompt=prompt,
+                agent_name=f"followup_{focused_type.value}",
+            )
 
             logger.info(
-                f"Focused analyst response: {len(response_text)} chars, "
-                f"{message_count} messages"
+                f"Focused analyst response: {len(response_text)} chars"
             )
 
         except asyncio.TimeoutError:
