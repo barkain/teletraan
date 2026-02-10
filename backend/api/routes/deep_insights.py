@@ -1,5 +1,6 @@
 """Deep Insights API routes."""
 
+import logging
 from datetime import datetime
 from uuid import uuid4
 
@@ -15,6 +16,9 @@ from models.analysis_task import AnalysisTask, AnalysisTaskStatus, PHASE_NAMES
 from schemas.deep_insight import DeepInsightResponse, DeepInsightListResponse
 from analysis.deep_engine import deep_analysis_engine
 from analysis.autonomous_engine import get_autonomous_engine
+from api.routes.reports import _build_report_html, _publish_to_ghpages, _REPO_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class GenerateRequest(BaseModel):
@@ -346,6 +350,46 @@ async def get_discovery_context(
 # ===== BACKGROUND ANALYSIS ENDPOINTS =====
 
 
+async def _auto_publish_report(task_id: str) -> None:
+    """Auto-publish a completed analysis report to GitHub Pages.
+
+    Best-effort: any failure is logged as a warning and never propagated.
+    Called after the autonomous pipeline marks a task as completed.
+
+    Args:
+        task_id: The completed task ID to publish.
+    """
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(AnalysisTask).where(AnalysisTask.id == task_id)
+        )
+        task = result.scalar_one_or_none()
+        if not task:
+            logger.warning(f"Auto-publish: task {task_id} not found")
+            return
+
+        # Load associated insights for HTML generation
+        insights: list[DeepInsight] = []
+        if task.result_insight_ids:
+            insight_result = await session.execute(
+                select(DeepInsight).where(DeepInsight.id.in_(task.result_insight_ids))
+            )
+            db_insights = insight_result.scalars().all()
+            insight_map = {i.id: i for i in db_insights}
+            for iid in task.result_insight_ids:
+                ins = insight_map.get(iid)
+                if ins:
+                    insights.append(ins)
+
+        html_content = _build_report_html(task, insights)
+        published_url = await _publish_to_ghpages(task_id, html_content, _REPO_DIR)
+
+        # Persist the published URL on the task
+        task.published_url = published_url
+        await session.commit()
+        logger.info(f"Auto-published report {task_id} to {published_url}")
+
+
 async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_count: int) -> None:
     """Background task to run autonomous analysis with progress updates.
 
@@ -354,9 +398,6 @@ async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_co
         max_insights: Number of insights to generate.
         deep_dive_count: Number of opportunities to deep dive.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     try:
         # Update task to started
         async with async_session_factory() as session:
@@ -405,6 +446,12 @@ async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_co
 
                 await session.commit()
                 logger.info(f"Background analysis {task_id} completed successfully")
+
+                # Auto-publish to GitHub Pages (best-effort, never breaks pipeline)
+                try:
+                    await _auto_publish_report(task_id)
+                except Exception as pub_err:
+                    logger.warning(f"Auto-publish failed for task {task_id} (non-fatal): {pub_err}")
 
     except Exception as e:
         logger.error(f"Background analysis {task_id} failed: {e}")
