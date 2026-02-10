@@ -73,7 +73,7 @@ SECTOR_ETFS: dict[str, str] = {
 FALLBACK_HOLDINGS: dict[str, list[str]] = {
     "XLK": ["AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "CRM", "AMD", "ADBE", "CSCO", "ACN"],
     "XLF": ["BRK-B", "JPM", "V", "MA", "BAC", "WFC", "GS", "MS", "SPGI", "BLK"],
-    "XLE": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PXD", "PSX", "VLO", "OXY"],
+    "XLE": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO", "OXY", "DVN"],
     "XLV": ["UNH", "JNJ", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT", "DHR", "BMY"],
     "XLI": ["CAT", "UNP", "HON", "UPS", "BA", "RTX", "DE", "LMT", "GE", "MMM"],
     "XLP": ["PG", "KO", "PEP", "COST", "WMT", "PM", "MO", "MDLZ", "CL", "KMB"],
@@ -240,7 +240,7 @@ class SectorHeatmapFetcher:
                     tickers=symbols,
                     period=period,
                     group_by="ticker",
-                    threads=True,
+                    threads=False,
                     progress=False,
                 )
                 return data
@@ -356,7 +356,7 @@ class SectorHeatmapFetcher:
                 return sym, None
 
         def _get_all_caps() -> list[tuple[str, float | None]]:
-            with ThreadPoolExecutor(max_workers=20) as executor:
+            with ThreadPoolExecutor(max_workers=8) as executor:
                 return list(executor.map(_get_single_cap, symbols))
 
         results = await loop.run_in_executor(None, _get_all_caps)

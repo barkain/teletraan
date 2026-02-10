@@ -1,9 +1,16 @@
 """FastAPI application entry point."""
 
+import resource
 import logging
 import sys
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+
+# Raise the soft file-descriptor limit to avoid "Too many open files" (Errno 24)
+# under the autonomous analysis pipeline (Claude SDK subprocesses + yfinance
+# ThreadPoolExecutor + SQLite connections can exceed macOS default of 256).
+_soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 4096), _hard))
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
