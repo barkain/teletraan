@@ -138,6 +138,13 @@ class AnalysisTask(TimestampMixin, Base):
         nullable=True,
     )
 
+    # Publishing
+    published_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        default=None,
+    )
+
     # Error handling
     error_message: Mapped[str | None] = mapped_column(
         Text,
@@ -187,5 +194,6 @@ class AnalysisTask(TimestampMixin, Base):
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "elapsed_seconds": self.elapsed_seconds,
+            "published_url": self.published_url,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

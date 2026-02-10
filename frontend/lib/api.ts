@@ -362,6 +362,19 @@ export const api = {
     cancel: (id: number) =>
       deleteApi<void>(`/api/v1/research/${id}`),
   },
+
+  // Reports
+  reports: {
+    list: (params?: { limit?: number; offset?: number }) =>
+      fetchApi<ReportListResponse>('/api/v1/reports', {
+        params: params as Record<string, string | number | boolean | undefined>,
+      }),
+    get: (id: string) =>
+      fetchApi<ReportDetail>(`/api/v1/reports/${id}`),
+    htmlUrl: (id: string) => `${API_URL}/api/v1/reports/${id}/html`,
+    publish: (id: string) =>
+      postApi<PublishResponse>(`/api/v1/reports/${id}/publish`),
+  },
 };
 
 // ============================================
@@ -421,6 +434,7 @@ export const chatApi = {
 import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact } from '@/types';
 import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
 import type { FollowUpResearch, ResearchListResponse, ResearchListParams, ResearchCreateRequest } from '@/lib/types/research';
+import type { ReportListResponse, ReportDetail, PublishResponse } from '@/lib/types/report';
 
 // ============================================
 // Data Refresh API
