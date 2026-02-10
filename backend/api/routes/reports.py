@@ -985,6 +985,88 @@ def _build_insight_data_json(insights: list[DeepInsight]) -> str:
     return json.dumps(data)
 
 
+def _extract_sectors_from_summary(result_summary: str | None) -> list[str]:
+    """Extract sector data from executive summary text as a fallback.
+
+    Looks for patterns like:
+    - ``Sectors Scanned:`` followed by ``- SectorName: +X.X% ...``
+    - ``Sector Focus:`` followed by ``- SectorName (RS: +X.X%)``
+    - Inline ``SectorName: +X.X%`` or ``SectorName (+X.X%)``
+
+    Returns a list like ``["Energy +0.7%", "Technology +1.6%"]``.
+    """
+    if not result_summary:
+        return []
+
+    sectors: list[str] = []
+
+    # Known GICS sector names to look for
+    known_sectors = [
+        "Technology", "Financials", "Energy", "Healthcare", "Health Care",
+        "Consumer Discretionary", "Consumer Staples", "Industrials",
+        "Materials", "Utilities", "Real Estate", "Communication Services",
+        "Communications", "Telecom",
+    ]
+
+    # Pattern 1: Lines after "Sectors Scanned:" or "Sector Focus:"
+    # e.g. "- Technology: +1.6% (1D), breadth 70%"
+    # e.g. "- Energy (RS: +15.8%)"
+    section_pattern = re.compile(
+        r"(?:Sectors?\s+(?:Scanned|Focus|Rotation|Analysis))[\s:]*\n",
+        re.IGNORECASE,
+    )
+    section_match = section_pattern.search(result_summary)
+    if section_match:
+        after = result_summary[section_match.end():]
+        for line in after.split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                break
+            # Stop if we hit a new heading
+            if re.match(r"^#{1,4}\s+", stripped) or re.match(r"^[A-Z][a-z].*:$", stripped):
+                break
+            # "- SectorName: +X.X% ..." or "- SectorName (+X.X%)"
+            line_match = re.match(
+                r"^[-*]\s+(.+?)(?::\s*|\s*\()([+-]?\d+(?:\.\d+)?)%",
+                stripped,
+            )
+            if line_match:
+                name = line_match.group(1).strip().rstrip("(")
+                val = line_match.group(2)
+                sign = "+" if not val.startswith("-") and not val.startswith("+") else ""
+                sectors.append(f"{name} {sign}{val}%")
+
+    # If we found sectors from a section, return them
+    if sectors:
+        return sectors
+
+    # Pattern 2: Scan entire text for "KnownSector: +X.X%" or "KnownSector (+X.X%)"
+    for sector_name in known_sectors:
+        # "Technology: +1.6%" or "Technology: -0.3%"
+        p1 = re.search(
+            rf"\b{re.escape(sector_name)}\s*:\s*([+-]?\d+(?:\.\d+)?)%",
+            result_summary,
+            re.IGNORECASE,
+        )
+        if p1:
+            val = p1.group(1)
+            sign = "+" if not val.startswith("-") and not val.startswith("+") else ""
+            sectors.append(f"{sector_name} {sign}{val}%")
+            continue
+        # "Technology (+1.6%)" or "Technology (RS: +15.8%)"
+        p2 = re.search(
+            rf"\b{re.escape(sector_name)}\s*\([^)]*?([+-]?\d+(?:\.\d+)?)%\)",
+            result_summary,
+            re.IGNORECASE,
+        )
+        if p2:
+            val = p2.group(1)
+            sign = "+" if not val.startswith("-") and not val.startswith("+") else ""
+            sectors.append(f"{sector_name} {sign}{val}%")
+
+    return sectors
+
+
 def _build_sector_bars(sectors: list[str]) -> str:
     """Build sector bars with visual relative-strength indicators.
 
@@ -1260,11 +1342,17 @@ def _build_report_html(task: AnalysisTask, insights: list[DeepInsight]) -> str:
     action_colors_json = json.dumps(action_chart_colors)
 
     # --- Sector exposure for chart ---
+    # Use task.top_sectors if available; otherwise fall back to parsing the
+    # executive summary so that historical reports also show sector data.
+    effective_sectors = task.top_sectors or []
+    if not effective_sectors:
+        effective_sectors = _extract_sectors_from_summary(task.result_summary)
+
     sector_names_list: list[str] = []
     sector_values_list: list[float] = []
     sector_colors_list: list[str] = []
-    if task.top_sectors:
-        for s in task.top_sectors:
+    if effective_sectors:
+        for s in effective_sectors:
             m = re.search(r"([+-]?\d+(?:\.\d+)?)%", s)
             if m:
                 val = float(m.group(1))
@@ -1281,7 +1369,7 @@ def _build_report_html(task: AnalysisTask, insights: list[DeepInsight]) -> str:
     sector_colors_json = json.dumps(sector_colors_list)
 
     # --- Sectors ---
-    sectors_card_html = _build_sector_bars(task.top_sectors or [])
+    sectors_card_html = _build_sector_bars(effective_sectors)
 
     # --- Phases ---
     phases_html = _build_phase_timeline(task.phases_completed or [])
@@ -2198,7 +2286,7 @@ body {{
           dataLabels: {{
             name: {{ fontSize: '12px', color: '#94A3B8', offsetY: -4 }},
             value: {{ fontSize: '14px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,
-                      formatter: function(val, opts) {{ return confDist[opts.seriesIndex] + ' insights'; }} }}
+                      formatter: function(val, opts) {{ var idx = opts && opts.seriesIndex != null ? opts.seriesIndex : -1; var count = idx >= 0 && idx < confDist.length ? confDist[idx] : confTotal; return count + ' insight' + (count !== 1 ? 's' : ''); }} }}
           }}
         }}
       }},
