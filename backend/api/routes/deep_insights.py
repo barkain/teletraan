@@ -382,7 +382,7 @@ async def _auto_publish_report(task_id: str) -> None:
                     insights.append(ins)
 
         html_content = _build_report_html(task, insights)
-        published_url = await _publish_to_ghpages(task_id, html_content, _REPO_DIR)
+        published_url = await _publish_to_ghpages(task, html_content, _REPO_DIR)
 
         # Persist the published URL on the task
         task.published_url = published_url
