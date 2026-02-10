@@ -148,10 +148,91 @@
   .report-card:nth-child(4) { animation-delay: 0.15s; }
   .report-card:nth-child(5) { animation-delay: 0.2s; }
   .report-card:nth-child(6) { animation-delay: 0.25s; }
+  /* Date filter bar */
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+    padding: 16px 20px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+  }
+  .filter-bar label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #94A3B8;
+    white-space: nowrap;
+  }
+  .filter-bar input[type="date"] {
+    color-scheme: dark;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: #E2E8F0;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s ease;
+  }
+  .filter-bar input[type="date"]:focus {
+    border-color: rgba(99,102,241,0.5);
+  }
+  .filter-bar input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.7);
+    cursor: pointer;
+  }
+  .filter-clear-btn {
+    background: rgba(99,102,241,0.12);
+    color: #A5B4FC;
+    border: 1px solid rgba(99,102,241,0.25);
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+  .filter-clear-btn:hover {
+    background: rgba(99,102,241,0.2);
+    border-color: rgba(99,102,241,0.4);
+  }
+  .filter-count {
+    margin-left: auto;
+    font-size: 13px;
+    color: #64748B;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .report-card.hidden-by-filter {
+    display: none;
+  }
   @media (max-width: 640px) {
     .container { padding: 24px 16px; }
     .header h1 { font-size: 28px; }
     .card-grid { grid-template-columns: 1fr; }
+    .filter-bar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+    .filter-bar .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .filter-bar input[type="date"] {
+      flex: 1;
+    }
+    .filter-count {
+      margin-left: 0;
+      text-align: center;
+    }
   }
 </style>
 </head>
@@ -162,9 +243,22 @@
     <p>Published market analysis reports</p>
   </div>
 
-  <div class="card-grid">
+  <div class="filter-bar" id="filterBar">
+    <div class="filter-row">
+      <label for="dateFrom">From</label>
+      <input type="date" id="dateFrom" />
+    </div>
+    <div class="filter-row">
+      <label for="dateTo">To</label>
+      <input type="date" id="dateTo" />
+    </div>
+    <button class="filter-clear-btn" id="filterClear" type="button">Clear</button>
+    <span class="filter-count" id="filterCount"></span>
+  </div>
+
+  <div class="card-grid" id="cardGrid">
     
-        <a href="reports/2026-02-10-0557-transitional.html" class="report-card">
+        <a href="reports/2026-02-10-0557-transitional.html" class="report-card" data-date="2026-02-10">
           <div class="card-top-row">
             <div class="card-date">February 10, 2026</div>
             <span class="latest-badge">Latest</span>
@@ -176,7 +270,7 @@
           <div class="card-filename">2026-02-10-0557-transitional</div>
         </a>
 
-        <a href="reports/2026-02-10-0541-transitional.html" class="report-card">
+        <a href="reports/2026-02-10-0541-transitional.html" class="report-card" data-date="2026-02-10">
           <div class="card-top-row">
             <div class="card-date">February 10, 2026</div>
             
@@ -188,7 +282,7 @@
           <div class="card-filename">2026-02-10-0541-transitional</div>
         </a>
 
-        <a href="reports/2026-02-09-2057-transitional.html" class="report-card">
+        <a href="reports/2026-02-09-2057-transitional.html" class="report-card" data-date="2026-02-09">
           <div class="card-top-row">
             <div class="card-date">February 09, 2026</div>
             
@@ -200,7 +294,7 @@
           <div class="card-filename">2026-02-09-2057-transitional</div>
         </a>
 
-        <a href="reports/2026-02-08-0517-transitional.html" class="report-card">
+        <a href="reports/2026-02-08-0517-transitional.html" class="report-card" data-date="2026-02-08">
           <div class="card-top-row">
             <div class="card-date">February 08, 2026</div>
             
@@ -212,7 +306,7 @@
           <div class="card-filename">2026-02-08-0517-transitional</div>
         </a>
 
-        <a href="reports/2026-02-08-0513-transitional.html" class="report-card">
+        <a href="reports/2026-02-08-0513-transitional.html" class="report-card" data-date="2026-02-08">
           <div class="card-top-row">
             <div class="card-date">February 08, 2026</div>
             
@@ -224,7 +318,7 @@
           <div class="card-filename">2026-02-08-0513-transitional</div>
         </a>
 
-        <a href="reports/2026-02-07-1439-transitional.html" class="report-card">
+        <a href="reports/2026-02-07-1439-transitional.html" class="report-card" data-date="2026-02-07">
           <div class="card-top-row">
             <div class="card-date">February 07, 2026</div>
             
@@ -236,7 +330,7 @@
           <div class="card-filename">2026-02-07-1439-transitional</div>
         </a>
 
-        <a href="reports/2026-02-07-1005-transitional.html" class="report-card">
+        <a href="reports/2026-02-07-1005-transitional.html" class="report-card" data-date="2026-02-07">
           <div class="card-top-row">
             <div class="card-date">February 07, 2026</div>
             
@@ -248,7 +342,7 @@
           <div class="card-filename">2026-02-07-1005-transitional</div>
         </a>
 
-        <a href="reports/2026-02-07-0906-transitional.html" class="report-card">
+        <a href="reports/2026-02-07-0906-transitional.html" class="report-card" data-date="2026-02-07">
           <div class="card-top-row">
             <div class="card-date">February 07, 2026</div>
             
@@ -260,7 +354,7 @@
           <div class="card-filename">2026-02-07-0906-transitional</div>
         </a>
 
-        <a href="reports/2026-02-01-1315-transitional.html" class="report-card">
+        <a href="reports/2026-02-01-1315-transitional.html" class="report-card" data-date="2026-02-01">
           <div class="card-top-row">
             <div class="card-date">February 01, 2026</div>
             
@@ -278,5 +372,53 @@
     <p>Generated by <strong>Teletraan</strong></p>
   </div>
 </div>
+<script>
+(function() {
+  var fromEl = document.getElementById('dateFrom');
+  var toEl = document.getElementById('dateTo');
+  var clearBtn = document.getElementById('filterClear');
+  var countEl = document.getElementById('filterCount');
+  var cards = document.querySelectorAll('.report-card[data-date]');
+  var total = cards.length;
+
+  function updateCount(visible) {
+    if (visible === total) {
+      countEl.textContent = total + ' report' + (total !== 1 ? 's' : '');
+    } else {
+      countEl.textContent = 'Showing ' + visible + ' of ' + total + ' reports';
+    }
+  }
+
+  function applyFilter() {
+    var fromVal = fromEl.value;
+    var toVal = toEl.value;
+    var visible = 0;
+    for (var i = 0; i < cards.length; i++) {
+      var d = cards[i].getAttribute('data-date');
+      var show = true;
+      if (fromVal && d < fromVal) show = false;
+      if (toVal && d > toVal) show = false;
+      if (show) {
+        cards[i].classList.remove('hidden-by-filter');
+        visible++;
+      } else {
+        cards[i].classList.add('hidden-by-filter');
+      }
+    }
+    updateCount(visible);
+  }
+
+  clearBtn.addEventListener('click', function() {
+    fromEl.value = '';
+    toEl.value = '';
+    applyFilter();
+  });
+
+  fromEl.addEventListener('change', applyFilter);
+  toEl.addEventListener('change', applyFilter);
+
+  updateCount(total);
+})();
+</script>
 </body>
 </html>
