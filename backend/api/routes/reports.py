@@ -1346,7 +1346,7 @@ def _build_report_html(task: AnalysisTask, insights: list[DeepInsight]) -> str:
     # executive summary so that historical reports also show sector data.
     effective_sectors = task.top_sectors or []
     if not effective_sectors:
-        effective_sectors = _extract_sectors_from_summary(task.result_summary)
+        effective_sectors = _extract_sectors_from_summary(task.discovery_summary)
 
     sector_names_list: list[str] = []
     sector_values_list: list[float] = []
