@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teletraan Intelligence &mdash; February 07, 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* === RESET & BASE === */
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0;
+  background: #0B0F19;
+  background-image: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.08) 0%, transparent 60%);
+  color: #CBD5E1;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* === HEADER BAR (slim, fixed) === */
+.header-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(11,15,25,0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header-bar-brand {
+  font-size: 15px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.3px;
+}
+.header-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  color: #64748B;
+}
+.header-bar-regime {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 32px 24px 60px;
+}
+
+/* === KPI ROW === */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.kpi-card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 20px;
+  text-align: center;
+  transition: all 0.25s ease;
+}
+.kpi-card:hover {
+  background: rgba(255,255,255,0.05);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+}
+.kpi-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #64748B;
+  margin-bottom: 8px;
+}
+.kpi-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 28px;
+  font-weight: 700;
+  color: #F1F5F9;
+  line-height: 1.2;
+}
+.kpi-sub {
+  font-size: 12px;
+  color: #475569;
+  margin-top: 4px;
+}
+
+/* === CARDS (glassmorphism) === */
+.card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.card-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #6366F1;
+  margin-bottom: 12px;
+}
+
+/* === SUMMARY / EXECUTIVE BRIEFING === */
+.summary-card {
+  margin-bottom: 28px;
+}
+.summary-text {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #CBD5E1;
+}
+.summary-text .md-heading {
+  font-size: 16px;
+  font-weight: 700;
+  color: #E2E8F0;
+  margin: 20px 0 8px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.summary-text .md-para {
+  margin: 8px 0;
+}
+.summary-text .md-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  color: #CBD5E1;
+  line-height: 1.8;
+}
+.summary-text .md-list li {
+  margin-bottom: 4px;
+}
+.summary-text .md-kv {
+  margin: 4px 0;
+  font-size: 14px;
+}
+.summary-text .md-kv-key {
+  font-weight: 700;
+  color: #A5B4FC;
+}
+.summary-text .md-kv-value {
+  color: #E2E8F0;
+}
+.summary-text strong { color: #F1F5F9; }
+.summary-text .num-positive {
+  color: #10B981;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.summary-text .num-negative {
+  color: #EF4444;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+
+/* === TWO-COL GRID === */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+/* === SECTOR BARS === */
+.sector-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sector-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sector-bar-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94A3B8;
+  min-width: 90px;
+  flex-shrink: 0;
+}
+.sector-bar-track {
+  flex: 1;
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.sector-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s ease;
+}
+.sector-bar-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 56px;
+  text-align: right;
+}
+.num-positive { color: #10B981; }
+.num-negative { color: #EF4444; }
+
+/* === PHASE TIMELINE === */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 0;
+}
+.timeline-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  position: relative;
+  padding-bottom: 12px;
+}
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  border-radius: 50%;
+  background: #10B981;
+  margin-top: 5px;
+  box-shadow: 0 0 8px rgba(16,185,129,0.4);
+  position: relative;
+  z-index: 1;
+}
+.timeline-connector {
+  position: absolute;
+  left: 4px;
+  top: 15px;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(to bottom, rgba(16,185,129,0.4), rgba(16,185,129,0.1));
+}
+.timeline-label {
+  font-size: 13px;
+  color: #94A3B8;
+  font-weight: 500;
+  line-height: 1.5;
+  flex: 1;
+}
+.timeline-check {
+  color: #10B981;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+/* === DIVIDER === */
+.section-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.06);
+  margin: 8px 0 28px;
+}
+
+/* === FILTER BAR === */
+.insights-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #94A3B8;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+.filter-btn:hover {
+  background: rgba(255,255,255,0.08);
+  color: #E2E8F0;
+}
+.filter-btn.active {
+  background: rgba(99,102,241,0.15);
+  border-color: rgba(99,102,241,0.3);
+  color: #A5B4FC;
+}
+.sort-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #64748B;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sort-btn:hover {
+  color: #E2E8F0;
+  background: rgba(255,255,255,0.08);
+}
+.sort-btn.active {
+  color: #A5B4FC;
+  border-color: rgba(99,102,241,0.3);
+}
+
+/* === INSIGHT CARDS === */
+.insight-card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+.insight-card:hover {
+  border-color: rgba(255,255,255,0.10);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+}
+.insight-card.expanded {
+  border-color: rgba(99,102,241,0.20);
+  background: rgba(255,255,255,0.04);
+  transform: none;
+  box-shadow: 0 4px 32px rgba(99,102,241,0.08);
+}
+.insight-header {
+  padding: 20px 24px 16px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.insight-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.insight-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.action-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.symbol-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94A3B8;
+  background: rgba(255,255,255,0.05);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.symbol-tag.primary {
+  color: #E2E8F0;
+  background: rgba(255,255,255,0.08);
+  font-size: 13px;
+}
+.timeframe-badge {
+  font-size: 11px;
+  color: #64748B;
+  background: rgba(255,255,255,0.04);
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* Confidence gauge */
+.confidence-gauge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+}
+.gauge-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 60px;
+}
+.gauge-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+.gauge-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 36px;
+  text-align: right;
+}
+
+.insight-title {
+  margin: 0 0 6px 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #F1F5F9;
+  line-height: 1.4;
+}
+.insight-thesis-preview {
+  margin: 0;
+  font-size: 14px;
+  color: #94A3B8;
+  line-height: 1.6;
+}
+.expand-indicator {
+  text-align: center;
+  padding-top: 8px;
+}
+.chevron {
+  width: 20px;
+  height: 20px;
+  color: #475569;
+  transition: transform 0.3s ease;
+}
+.insight-card.expanded .chevron {
+  transform: rotate(180deg);
+}
+
+/* Expanded details */
+.insight-details {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s ease;
+  padding: 0 24px;
+}
+.insight-card.expanded .insight-details {
+  max-height: 3000px;
+  padding: 0 24px 24px;
+}
+.detail-section {
+  margin-bottom: 16px;
+}
+.detail-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #6366F1;
+  margin-bottom: 8px;
+}
+.detail-content {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #CBD5E1;
+}
+.detail-content strong { color: #F1F5F9; }
+.detail-content .md-heading {
+  font-size: 15px;
+  font-weight: 700;
+  color: #E2E8F0;
+  margin: 16px 0 8px 0;
+}
+.detail-content .md-para {
+  margin: 8px 0;
+}
+.detail-content .md-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  line-height: 1.8;
+}
+.detail-content .md-list li {
+  margin-bottom: 4px;
+}
+.detail-content .md-kv {
+  margin: 4px 0;
+}
+.detail-content .md-kv-key {
+  font-weight: 700;
+  color: #A5B4FC;
+}
+.detail-content .md-kv-value {
+  color: #E2E8F0;
+}
+.detail-content .num-positive {
+  color: #10B981;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.detail-content .num-negative {
+  color: #EF4444;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.detail-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #94A3B8;
+  line-height: 1.8;
+}
+.detail-list li { margin-bottom: 4px; }
+.detail-list strong { color: #CBD5E1; }
+
+/* Trading levels */
+.trading-levels {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 16px 0;
+}
+.level-box {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 10px 16px;
+  min-width: 100px;
+}
+.level-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #64748B;
+  margin-bottom: 2px;
+}
+.level-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: #E2E8F0;
+}
+
+/* Risk box */
+.risk-box {
+  background: rgba(245,158,11,0.06);
+  border: 1px solid rgba(245,158,11,0.12);
+  border-radius: 10px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.risk-box .detail-list {
+  color: #FCD34D;
+}
+
+/* Invalidation */
+.invalidation-box {
+  background: rgba(239,68,68,0.06);
+  border-left: 3px solid #EF4444;
+  border-radius: 0 10px 10px 0;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 13px;
+  color: #FCA5A5;
+}
+.invalidation-box strong { color: #F87171; }
+
+/* === SECTION TITLE === */
+.section-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #F1F5F9;
+  margin: 0 0 4px 0;
+}
+.section-subtitle {
+  font-size: 13px;
+  color: #64748B;
+  margin: 0 0 20px 0;
+}
+
+/* === EMPTY STATE === */
+.empty-state {
+  text-align: center;
+  padding: 60px 24px;
+  color: #475569;
+  font-size: 15px;
+}
+
+/* === FOOTER === */
+.report-footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.report-footer p {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+}
+.report-footer strong {
+  color: #475569;
+}
+.report-footer a {
+  color: #6366F1;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+.report-footer a:hover {
+  text-decoration: underline;
+}
+
+/* === RESPONSIVE === */
+@media (max-width: 768px) {
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .container { padding: 20px 16px 40px; }
+  .header-bar { padding: 10px 16px; flex-wrap: wrap; gap: 8px; }
+  .kpi-row { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .kpi-value { font-size: 22px; }
+  .two-col { grid-template-columns: 1fr; }
+  .insight-header { padding: 16px; }
+  .insight-details { padding: 0 16px; }
+  .insight-card.expanded .insight-details { padding: 0 16px 16px; }
+  .insights-toolbar { flex-direction: column; align-items: flex-start; }
+  .confidence-gauge { min-width: 100px; }
+  .trading-levels { flex-direction: column; }
+}
+
+/* === ANIMATIONS === */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.kpi-card {
+  animation: fadeInUp 0.4s ease both;
+}
+.kpi-card:nth-child(2) { animation-delay: 0.05s; }
+.kpi-card:nth-child(3) { animation-delay: 0.1s; }
+.kpi-card:nth-child(4) { animation-delay: 0.15s; }
+.insight-card {
+  animation: fadeInUp 0.4s ease both;
+}
+.insight-card:nth-child(2) { animation-delay: 0.05s; }
+.insight-card:nth-child(3) { animation-delay: 0.1s; }
+.insight-card:nth-child(4) { animation-delay: 0.15s; }
+.insight-card:nth-child(5) { animation-delay: 0.2s; }
+.insight-card:nth-child(6) { animation-delay: 0.25s; }
+.insight-card:nth-child(7) { animation-delay: 0.3s; }
+.insight-card:nth-child(8) { animation-delay: 0.35s; }
+</style>
+</head>
+<body>
+
+<!-- HEADER BAR (slim, fixed) -->
+<div class="header-bar">
+  <div class="header-bar-brand">Teletraan Intelligence</div>
+  <div class="header-bar-right">
+    <span>February 07, 2026 at 09:36 UTC</span>
+    <span class="header-bar-regime" style="background:rgba(255,255,255,0.04);color:#F59E0B;border:1px solid #F59E0B33;">
+      <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#F59E0B;box-shadow:0 0 6px #F59E0B;"></span>
+      Transitional
+    </span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- KPI ROW -->
+  <div class="kpi-row">
+    <div class="kpi-card">
+      <div class="kpi-label">Insights</div>
+      <div class="kpi-value">0</div>
+      <div class="kpi-sub">findings</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Regime</div>
+      <div class="kpi-value" style="font-size:20px;color:#F59E0B;">Transitional</div>
+      <div class="kpi-sub" style="margin-top:6px;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#F59E0B;box-shadow:0 0 6px #F59E0B;vertical-align:middle;"></span>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Duration</div>
+      <div class="kpi-value" style="font-size:22px;">30m 14s</div>
+      <div class="kpi-sub">analysis time</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Top Action</div>
+      <div class="kpi-value" style="font-size:20px;color:#6366F1;">--</div>
+      <div class="kpi-sub" style="font-family:'JetBrains Mono',monospace;">(0)</div>
+    </div>
+  </div>
+
+  <!-- EXECUTIVE BRIEFING -->
+  
+    <section class="card summary-card">
+      <div class="card-label">Executive Briefing</div>
+      <div class="summary-text"><h3 class="md-heading">How These Opportunities Were Discovered</h3>
+<p class="md-para"><strong>Market Regime:</strong> Transitional</p>
+<p class="md-para"><strong>Key Macro Themes:</strong></p>
+<ul class="md-list">
+<li>De-Risking Tech &amp; Growth Exposure: Clear rotation out of growth: Tech down <span class="num-negative">-3.43%</span>, Consumer Discretionary <span class="num-negative">-5.16%</span>, Comm Services <span class="num-negative">-1.82%</span> ...</li>
+<li>Defensive Rotation &amp; Inflation Hedge Positioning: Dramatic defensive rotation with Energy <span class="num-positive">+14.10%</span>, Staples <span class="num-positive">+10.97%</span>, Materials <span class="num-positive">+6.73%</span> leading. Gold at ...</li>
+<li>Yield Curve Dynamics &amp; Fed Policy Uncertainty: Yields declining across curve (10Y to 4.21%, 30Y to 4.86%) but Financials still down <span class="num-negative">-2.64%</span> suggesti...</li>
+</ul>
+<p class="md-para"><strong>Sector Focus:</strong></p>
+<ul class="md-list">
+<li>Energy (RS: <span class="num-positive">+14.1%</span>)</li>
+<li>Consumer Staples (RS: <span class="num-positive">+11.0%</span>)</li>
+<li>Materials (RS: <span class="num-positive">+6.7%</span>)</li>
+</ul>
+<p class="md-para"><strong>Candidates Screened:</strong> 50</p>
+<p class="md-para"><strong>Opportunities Identified:</strong> 15</p></div>
+    </section>
+
+
+  <!-- SECTORS + PHASES (two-column) -->
+  <div class="two-col">
+    <div class="card">
+      <div class="card-label">Sectors</div>
+      <div class="sector-bars">
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Energy</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Consumer Staples</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Materials</span>
+            </div></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Phases Completed</div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-connector"></div>
+          <div class="timeline-label">macro_scan</div>
+          <span class="timeline-check">&#10003;</span>
+        </div>
+
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-connector"></div>
+          <div class="timeline-label">sector_rotation</div>
+          <span class="timeline-check">&#10003;</span>
+        </div>
+
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-connector"></div>
+          <div class="timeline-label">opportunity_hunt</div>
+          <span class="timeline-check">&#10003;</span>
+        </div>
+
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-connector"></div>
+          <div class="timeline-label">deep_dive</div>
+          <span class="timeline-check">&#10003;</span>
+        </div>
+
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          
+          <div class="timeline-label">synthesis</div>
+          <span class="timeline-check">&#10003;</span>
+        </div>
+</div>
+    </div>
+  </div>
+
+  <div class="section-divider"></div>
+
+  <!-- ACTIONABLE INSIGHTS -->
+  <div>
+    <h2 class="section-title">Actionable Insights</h2>
+    <p class="section-subtitle">Click any insight to expand full analysis, risks, and trading levels.</p>
+
+    <div class="insights-toolbar">
+      <div class="filter-bar">
+        <button class="filter-btn active" data-action="ALL" onclick="filterInsights('ALL')">All</button>
+      </div>
+      <button class="sort-btn" onclick="toggleSort()" id="sort-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <polyline points="19 12 12 19 5 12"></polyline>
+        </svg>
+        Sort by confidence
+      </button>
+    </div>
+
+    <div id="insights-container">
+      <div class="empty-state">No insights generated for this report.</div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="report-footer">
+    <p>Generated by <strong>Teletraan Intelligence</strong> &middot; February 07, 2026 at 09:36 UTC</p>
+    <a href="../index.html">All Reports</a>
+  </footer>
+
+</div>
+
+<script>
+(function() {
+  // Insight data for filtering/sorting
+  var insightData = [];
+  var currentFilter = 'ALL';
+  var sortDescending = false;
+
+  // Toggle expand/collapse
+  window.toggleInsight = function(index) {
+    var card = document.querySelector('.insight-card[data-index="' + index + '"]');
+    if (card) {
+      card.classList.toggle('expanded');
+    }
+  };
+
+  // Filter insights by action
+  window.filterInsights = function(action) {
+    currentFilter = action;
+    // Update active button
+    document.querySelectorAll('.filter-btn').forEach(function(btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-action') === action);
+    });
+    applyFiltersAndSort();
+  };
+
+  // Toggle sort by confidence
+  window.toggleSort = function() {
+    sortDescending = !sortDescending;
+    var btn = document.getElementById('sort-btn');
+    btn.classList.toggle('active', sortDescending);
+    applyFiltersAndSort();
+  };
+
+  function applyFiltersAndSort() {
+    var container = document.getElementById('insights-container');
+    var cards = Array.from(container.querySelectorAll('.insight-card'));
+
+    // Build order array
+    var order = insightData.slice();
+
+    // Filter
+    if (currentFilter !== 'ALL') {
+      order = order.filter(function(d) { return d.action === currentFilter; });
+    }
+
+    // Sort
+    if (sortDescending) {
+      order.sort(function(a, b) { return b.confidence - a.confidence; });
+    }
+
+    var visibleIndices = new Set(order.map(function(d) { return d.index; }));
+
+    // Reorder DOM and show/hide
+    // First hide all
+    cards.forEach(function(card) {
+      var idx = parseInt(card.getAttribute('data-index'));
+      if (visibleIndices.has(idx)) {
+        card.style.display = '';
+      } else {
+        card.style.display = 'none';
+      }
+    });
+
+    // Reorder visible cards
+    if (sortDescending) {
+      order.forEach(function(d) {
+        var card = container.querySelector('.insight-card[data-index="' + d.index + '"]');
+        if (card) container.appendChild(card);
+      });
+    }
+  }
+})();
+</script>
+
+</body>
+</html>
