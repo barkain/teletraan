@@ -54,6 +54,9 @@ __all__ = [
     "ModificationStatus",
     "ResearchType",
     "ResearchStatus",
+    # Conversation theme models
+    "ConversationTheme",
+    "ThemeType",
     # Knowledge pattern models
     "KnowledgePattern",
     "PatternType",

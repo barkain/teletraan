@@ -26,10 +26,10 @@ from pathlib import Path
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
-from sqlalchemy import text  # type: ignore[import-not-found]
-from sqlalchemy.exc import OperationalError  # type: ignore[import-not-found]
+from sqlalchemy import text  # noqa: E402  # type: ignore[import-not-found]
+from sqlalchemy.exc import OperationalError  # noqa: E402  # type: ignore[import-not-found]
 
-from database import engine, init_db  # type: ignore[import-not-found]
+from database import engine, init_db  # noqa: E402  # type: ignore[import-not-found]
 
 # Configure logging
 logging.basicConfig(
