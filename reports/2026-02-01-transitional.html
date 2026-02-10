@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teletraan Intelligence &mdash; February 01, 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* === RESET & BASE === */
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0;
+  background: #0B0F19;
+  background-image: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.08) 0%, transparent 60%);
+  color: #CBD5E1;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 40px 24px 60px;
+}
+
+/* === HEADER === */
+.report-header {
+  text-align: center;
+  padding-bottom: 32px;
+  margin-bottom: 32px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.brand {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: #6366F1;
+}
+.report-header h1 {
+  margin: 0 0 16px 0;
+  font-size: 32px;
+  font-weight: 800;
+  color: #F1F5F9;
+  letter-spacing: -0.5px;
+}
+.header-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.header-date {
+  color: #64748B;
+  font-size: 14px;
+}
+.regime-badge-lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 16px;
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.meta-stat {
+  color: #475569;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.sector-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 16px;
+}
+.sector-badge {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 4px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  color: #94A3B8;
+  font-weight: 500;
+}
+
+/* === CARDS (glassmorphism) === */
+.card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.card-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #6366F1;
+  margin-bottom: 12px;
+}
+
+/* === SUMMARY === */
+.summary-card {
+  margin-bottom: 24px;
+}
+.summary-text {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #CBD5E1;
+}
+.summary-text p { margin: 8px 0; }
+.summary-text strong { color: #F1F5F9; }
+
+/* === TWO-COL GRID === */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+@media (max-width: 640px) {
+  .two-col { grid-template-columns: 1fr; }
+}
+
+/* === REGIME CARD === */
+.regime-display {
+  text-align: center;
+  padding: 16px 0;
+}
+.regime-big {
+  font-size: 28px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+/* === PHASE TIMELINE === */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 0;
+}
+.timeline-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  position: relative;
+  padding-bottom: 12px;
+}
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  border-radius: 50%;
+  background: #10B981;
+  margin-top: 5px;
+  box-shadow: 0 0 8px rgba(16,185,129,0.4);
+  position: relative;
+  z-index: 1;
+}
+.timeline-connector {
+  position: absolute;
+  left: 4px;
+  top: 15px;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(to bottom, rgba(16,185,129,0.4), rgba(16,185,129,0.1));
+}
+.timeline-label {
+  font-size: 13px;
+  color: #94A3B8;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* === PORTFOLIO IMPACT === */
+.portfolio-card {
+  margin-bottom: 24px;
+}
+.portfolio-symbols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.portfolio-symbol {
+  background: rgba(99,102,241,0.10);
+  color: #A5B4FC;
+  border: 1px solid rgba(99,102,241,0.20);
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* === FILTER BAR === */
+.insights-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #94A3B8;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+.filter-btn:hover {
+  background: rgba(255,255,255,0.08);
+  color: #E2E8F0;
+}
+.filter-btn.active {
+  background: rgba(99,102,241,0.15);
+  border-color: rgba(99,102,241,0.3);
+  color: #A5B4FC;
+}
+.sort-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #64748B;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sort-btn:hover {
+  color: #E2E8F0;
+  background: rgba(255,255,255,0.08);
+}
+.sort-btn.active {
+  color: #A5B4FC;
+  border-color: rgba(99,102,241,0.3);
+}
+
+/* === INSIGHT CARDS === */
+.insight-card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+.insight-card:hover {
+  border-color: rgba(255,255,255,0.10);
+}
+.insight-card.expanded {
+  border-color: rgba(99,102,241,0.20);
+  background: rgba(255,255,255,0.04);
+}
+.insight-header {
+  padding: 20px 24px 16px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.insight-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.insight-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.action-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.symbol-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94A3B8;
+  background: rgba(255,255,255,0.05);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.symbol-tag.primary {
+  color: #E2E8F0;
+  background: rgba(255,255,255,0.08);
+  font-size: 13px;
+}
+.timeframe-badge {
+  font-size: 11px;
+  color: #64748B;
+  background: rgba(255,255,255,0.04);
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* Confidence gauge */
+.confidence-gauge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+}
+.gauge-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 60px;
+}
+.gauge-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+.gauge-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 36px;
+  text-align: right;
+}
+
+.insight-title {
+  margin: 0 0 6px 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #F1F5F9;
+  line-height: 1.4;
+}
+.insight-thesis-preview {
+  margin: 0;
+  font-size: 14px;
+  color: #94A3B8;
+  line-height: 1.6;
+}
+.expand-indicator {
+  text-align: center;
+  padding-top: 8px;
+}
+.chevron {
+  width: 20px;
+  height: 20px;
+  color: #475569;
+  transition: transform 0.3s ease;
+}
+.insight-card.expanded .chevron {
+  transform: rotate(180deg);
+}
+
+/* Expanded details */
+.insight-details {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s ease;
+  padding: 0 24px;
+}
+.insight-card.expanded .insight-details {
+  max-height: 2000px;
+  padding: 0 24px 24px;
+}
+.detail-section {
+  margin-bottom: 16px;
+}
+.detail-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #6366F1;
+  margin-bottom: 8px;
+}
+.detail-content {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #CBD5E1;
+}
+.detail-content strong { color: #F1F5F9; }
+.detail-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #94A3B8;
+  line-height: 1.8;
+}
+.detail-list li { margin-bottom: 4px; }
+.detail-list strong { color: #CBD5E1; }
+
+/* Trading levels */
+.trading-levels {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.level-box {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 10px 16px;
+  min-width: 100px;
+}
+.level-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #64748B;
+  margin-bottom: 2px;
+}
+.level-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: #E2E8F0;
+}
+
+/* Risk box */
+.risk-box {
+  background: rgba(245,158,11,0.06);
+  border: 1px solid rgba(245,158,11,0.12);
+  border-radius: 10px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.risk-box .detail-list {
+  color: #FCD34D;
+}
+
+/* Invalidation */
+.invalidation-box {
+  background: rgba(239,68,68,0.06);
+  border-left: 3px solid #EF4444;
+  border-radius: 0 10px 10px 0;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 13px;
+  color: #FCA5A5;
+}
+.invalidation-box strong { color: #F87171; }
+
+/* === EMPTY STATE === */
+.empty-state {
+  text-align: center;
+  padding: 60px 24px;
+  color: #475569;
+  font-size: 15px;
+}
+
+/* === FOOTER === */
+.report-footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  text-align: center;
+}
+.report-footer p {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+}
+.report-footer strong {
+  color: #475569;
+}
+
+/* === SECTION TITLE === */
+.section-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #F1F5F9;
+  margin: 0 0 4px 0;
+}
+.section-subtitle {
+  font-size: 13px;
+  color: #64748B;
+  margin: 0 0 20px 0;
+}
+
+/* === RESPONSIVE === */
+@media (max-width: 640px) {
+  .container { padding: 24px 16px 40px; }
+  .report-header h1 { font-size: 24px; }
+  .header-meta { gap: 8px; }
+  .insight-header { padding: 16px; }
+  .insight-details { padding: 0 16px; }
+  .insight-card.expanded .insight-details { padding: 0 16px 16px; }
+  .insights-toolbar { flex-direction: column; align-items: flex-start; }
+  .confidence-gauge { min-width: 100px; }
+  .trading-levels { flex-direction: column; }
+}
+
+/* === ANIMATIONS === */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.insight-card {
+  animation: fadeInUp 0.4s ease both;
+}
+.insight-card:nth-child(2) { animation-delay: 0.05s; }
+.insight-card:nth-child(3) { animation-delay: 0.1s; }
+.insight-card:nth-child(4) { animation-delay: 0.15s; }
+.insight-card:nth-child(5) { animation-delay: 0.2s; }
+.insight-card:nth-child(6) { animation-delay: 0.25s; }
+.insight-card:nth-child(7) { animation-delay: 0.3s; }
+.insight-card:nth-child(8) { animation-delay: 0.35s; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- HEADER -->
+  <header class="report-header">
+    <div class="brand">Teletraan Intelligence</div>
+    <h1>Market Analysis Report</h1>
+    <div class="header-meta">
+      <span class="header-date">February 01, 2026 at 13:59 UTC</span>
+      <span class="regime-badge-lg" style="background:rgba(255,255,255,0.04);color:#F59E0B;border:1px solid #F59E0B33;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#F59E0B;box-shadow:0 0 6px #F59E0B;"></span>
+        Transitional
+      </span>
+      <span class="meta-stat">5 insights</span>
+      <span class="meta-stat">44m 1s</span>
+    </div>
+    
+  </header>
+
+  <!-- EXECUTIVE SUMMARY -->
+  
+    <section class="card summary-card">
+      <div class="card-label">Executive Summary</div>
+      <div class="summary-text"><p style='margin:8px 0;'>## How These Opportunities Were Discovered</p><p style='margin:8px 0;'><strong>Market Regime:</strong> Transitional</p><p style='margin:8px 0;'><strong>Key Macro Themes:</strong></p><ul style="margin:8px 0;padding-left:20px;color:#CBD5E1;"><li>Commodity-Driven Inflation Resurgence: Crude oil surging +13.76% and gold rallying +9.98% in 20 days signals renewed inflation concerns. Th...</li><li>Small-Cap Domestic Rotation: Russell 2000 outperforming (+4.21%) while Nasdaq/large-cap tech lags suggests investors rotating int...</li><li>Growth-to-Value Shift Amid Rate Uncertainty: Technology (XLK -0.29%) and Healthcare (XLV -0.50%) declining while defensive and commodity sectors ...</li></ul><p style='margin:8px 0;'><strong>Sector Focus:</strong></p><p style='margin:8px 0;'><strong>Candidates Screened:</strong> 50</p><p style='margin:8px 0;'><strong>Opportunities Identified:</strong> 15</p></div>
+    </section>
+
+
+  <!-- REGIME + PHASES -->
+  <div class="two-col">
+    <div class="card">
+      <div class="card-label">Market Regime</div>
+      <div class="regime-display">
+        <div class="regime-big" style="color:#F59E0B;">Transitional</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-label">Phases Completed</div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-connector"></div>
+          <div class="timeline-label">macro_scan</div>
+        </div>
+
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-connector"></div>
+          <div class="timeline-label">sector_rotation</div>
+        </div>
+
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-connector"></div>
+          <div class="timeline-label">opportunity_hunt</div>
+        </div>
+
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-connector"></div>
+          <div class="timeline-label">deep_dive</div>
+        </div>
+
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          
+          <div class="timeline-label">synthesis</div>
+        </div>
+</div>
+    </div>
+  </div>
+
+  <!-- PORTFOLIO IMPACT (all mentioned symbols) -->
+  
+  <div class="card portfolio-card">
+    <div class="card-label">Symbols Covered</div>
+    <div class="portfolio-symbols">
+      <span class="portfolio-symbol">AAPL</span><span class="portfolio-symbol">CL</span><span class="portfolio-symbol">CVX</span><span class="portfolio-symbol">DBC</span><span class="portfolio-symbol">EOG</span><span class="portfolio-symbol">GLD</span><span class="portfolio-symbol">IWM</span><span class="portfolio-symbol">MSFT</span><span class="portfolio-symbol">NVDA</span><span class="portfolio-symbol">PM</span><span class="portfolio-symbol">QQQ</span><span class="portfolio-symbol">SPY</span><span class="portfolio-symbol">T</span><span class="portfolio-symbol">TIP</span><span class="portfolio-symbol">VZ</span><span class="portfolio-symbol">XLE</span><span class="portfolio-symbol">XLK</span><span class="portfolio-symbol">XOM</span>
+    </div>
+  </div>
+  
+
+  <!-- INSIGHTS -->
+  <div>
+    <h2 class="section-title">Insights</h2>
+    <p class="section-subtitle">Click any insight to expand full analysis, risks, and trading levels.</p>
+
+    <div class="insights-toolbar">
+      <div class="filter-bar">
+        <button class="filter-btn active" data-action="ALL" onclick="filterInsights('ALL')">All</button><button class="filter-btn" data-action="BUY" onclick="filterInsights('BUY')" style="--btn-color:#10B981;">Buy</button><button class="filter-btn" data-action="HOLD" onclick="filterInsights('HOLD')" style="--btn-color:#F59E0B;">Hold</button><button class="filter-btn" data-action="SELL" onclick="filterInsights('SELL')" style="--btn-color:#EF4444;">Sell</button><button class="filter-btn" data-action="WATCH" onclick="filterInsights('WATCH')" style="--btn-color:#6366F1;">Watch</button>
+      </div>
+      <button class="sort-btn" onclick="toggleSort()" id="sort-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <polyline points="19 12 12 19 5 12"></polyline>
+        </svg>
+        Sort by confidence
+      </button>
+    </div>
+
+    <div id="insights-container">
+      
+    <div class="insight-card" data-index="0" data-action="BUY"
+         data-confidence="0.7">
+      <div class="insight-header" onclick="toggleInsight(0)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(16,185,129,0.10);color:#10B981;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">XLE</span><span class="symbol-tag">XOM</span><span class="symbol-tag">CVX</span><span class="symbol-tag">CL</span><span class="symbol-tag">EOG</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="confidence-gauge">
+            <div class="gauge-bar">
+              <div class="gauge-fill" style="width:70%;background:#F59E0B;"></div>
+            </div>
+            <span class="gauge-label" style="color:#F59E0B;">70%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">Energy Sector Breakout on Commodity Surge</h3>
+        <p class="insight-thesis-preview">XLE showing strong momentum (+11.83%) driven by crude oil rally (+13.76% in 20 days). Technical breakout confirmed by macro inflation concerns and commodity strength. Gold's +9.98%...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-0">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p style='margin:8px 0;'>XLE showing strong momentum (+11.83%) driven by crude oil rally (+13.76% in 20 days). Technical breakout confirmed by macro inflation concerns and commodity strength. Gold's +9.98% rally provides additional evidence of inflation hedge positioning. Energy sector represents rare convergence of technical momentum and fundamental commodity tailwinds.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">technical</strong>: XLE breakout above resistance</li><li><strong style="color:#A5B4FC;">macro</strong>: Commodity-driven inflation resurgence</li><li><strong style="color:#A5B4FC;">sector</strong>: Energy benefiting from growth-to-value rotation</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Crude oil price volatility</li><li>Potential demand destruction if inflation persists</li><li>Geopolitical risk in oil markets</li><li>Low technical analyst confidence (32%) creates setup uncertainty</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Crude oil breaking below $75/barrel or XLE closing below recent support at +5% gain level</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="1" data-action="BUY"
+         data-confidence="0.68">
+      <div class="insight-header" onclick="toggleInsight(1)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(16,185,129,0.10);color:#10B981;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">IWM</span><span class="symbol-tag">XOM</span><span class="symbol-tag">CVX</span><span class="symbol-tag">PM</span><span class="symbol-tag">VZ</span><span class="symbol-tag">T</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="confidence-gauge">
+            <div class="gauge-bar">
+              <div class="gauge-fill" style="width:68%;background:#F59E0B;"></div>
+            </div>
+            <span class="gauge-label" style="color:#F59E0B;">68%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">Small-Cap Domestic Rotation Accelerating</h3>
+        <p class="insight-thesis-preview">Russell 2000 (IWM +4.21%) outperforming large-cap indices signals meaningful rotation into domestic, small-cap names. This aligns with weak dollar trends and investors seeking dome...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-1">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p style='margin:8px 0;'>Russell 2000 (IWM +4.21%) outperforming large-cap indices signals meaningful rotation into domestic, small-cap names. This aligns with weak dollar trends and investors seeking domestic exposure amid rate uncertainty. Small-caps typically benefit from domestic economic strength and lower international exposure during commodity inflation periods.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">technical</strong>: IWM trend continuation signal</li><li><strong style="color:#A5B4FC;">sector</strong>: Small-cap domestic rotation theme active</li><li><strong style="color:#A5B4FC;">macro</strong>: Growth-to-value shift supports small-caps</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Small-caps more vulnerable to recession</li><li>Higher debt loads in small-cap universe sensitive to rates</li><li>Lower liquidity in risk-off environments</li><li>Rotation could reverse quickly if tech rebounds</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> IWM underperforming SPY by more than 2% over 5 trading days, or VIX breaking above 25</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="2" data-action="SELL"
+         data-confidence="0.72">
+      <div class="insight-header" onclick="toggleInsight(2)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(239,68,68,0.10);color:#EF4444;box-shadow:none;">
+              Sell
+            </span>
+            <span class="symbol-tag primary">XLK</span><span class="symbol-tag">AAPL</span><span class="symbol-tag">MSFT</span><span class="symbol-tag">NVDA</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="confidence-gauge">
+            <div class="gauge-bar">
+              <div class="gauge-fill" style="width:72%;background:#F59E0B;"></div>
+            </div>
+            <span class="gauge-label" style="color:#F59E0B;">72%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">Technology Sector Vulnerability to Rising Rates</h3>
+        <p class="insight-thesis-preview">XLK declining (-0.29%) alongside VIX spike indicates risk-off rotation out of growth. Rising commodity prices and inflation concerns create headwinds for high-multiple tech stocks....</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-2">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p style='margin:8px 0;'>XLK declining (-0.29%) alongside VIX spike indicates risk-off rotation out of growth. Rising commodity prices and inflation concerns create headwinds for high-multiple tech stocks. Nasdaq lagging while Russell 2000 leads confirms growth-to-value rotation. Low technical confidence (32%) suggests chart patterns unreliable, but fundamental macro pressures are clear.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">technical</strong>: XLK showing trend reversal signals</li><li><strong style="color:#A5B4FC;">macro</strong>: Growth-to-value shift amid rate uncertainty</li><li><strong style="color:#A5B4FC;">risk</strong>: Elevated volatility targeting growth stocks</li><li><strong style="color:#A5B4FC;">sector</strong>: Technology sector declining in rotation</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Tech earnings could reverse sentiment quickly</li><li>Oversold conditions may trigger bounce</li><li>AI narrative still supportive for mega-cap tech</li><li>Forced selling could create value opportunities</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> 10-year yield dropping below 4.0% or tech earnings surprising significantly to upside</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="3" data-action="WATCH"
+         data-confidence="0.65">
+      <div class="insight-header" onclick="toggleInsight(3)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(99,102,241,0.10);color:#6366F1;box-shadow:none;">
+              Watch
+            </span>
+            <span class="symbol-tag primary">GLD</span><span class="symbol-tag">XLE</span><span class="symbol-tag">CL</span><span class="symbol-tag">TIP</span><span class="symbol-tag">DBC</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="confidence-gauge">
+            <div class="gauge-bar">
+              <div class="gauge-fill" style="width:65%;background:#F59E0B;"></div>
+            </div>
+            <span class="gauge-label" style="color:#F59E0B;">65%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">Inflation Hedge Basket Activating - Monitor for Acceleration</h3>
+        <p class="insight-thesis-preview">Simultaneous rallies in crude oil (+13.76%), gold (+9.98%), and energy stocks (XLE +11.83%) signal markets pricing in renewed inflation concerns. This trifecta historically precede...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-3">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p style='margin:8px 0;'>Simultaneous rallies in crude oil (+13.76%), gold (+9.98%), and energy stocks (XLE +11.83%) signal markets pricing in renewed inflation concerns. This trifecta historically precedes Fed hawkish pivots or stagflation fears. Currently at WATCH status - needs confirmation from bond market (10-year yield breaking 4.5%) or CPI data to upgrade to actionable trade.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">macro</strong>: Commodity-driven inflation resurgence</li><li><strong style="color:#A5B4FC;">correlation</strong>: Classic inflation hedge correlation pattern</li><li><strong style="color:#A5B4FC;">sector</strong>: Defensive positioning increasing</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Commodity rallies can reverse sharply</li><li>Fed may already be priced in</li><li>China demand weakness could cap commodity upside</li><li>Seasonal factors may be temporary</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Crude oil reversing below $78/barrel or gold breaking below $2,600</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="4" data-action="HOLD"
+         data-confidence="0.7">
+      <div class="insight-header" onclick="toggleInsight(4)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(245,158,11,0.10);color:#F59E0B;box-shadow:none;">
+              Hold
+            </span>
+            <span class="symbol-tag primary">SPY</span><span class="symbol-tag">IWM</span><span class="symbol-tag">QQQ</span><span class="symbol-tag">XLE</span><span class="symbol-tag">XLK</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="confidence-gauge">
+            <div class="gauge-bar">
+              <div class="gauge-fill" style="width:70%;background:#F59E0B;"></div>
+            </div>
+            <span class="gauge-label" style="color:#F59E0B;">70%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">Transitional Regime Uncertainty - Reduce Position Sizes</h3>
+        <p class="insight-thesis-preview">Market regime classified as 'Transitional' with only 68% confidence. Low technical analyst confidence (32%) combined with sector rotation signals and VIX spike indicates elevated u...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-4">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p style='margin:8px 0;'>Market regime classified as 'Transitional' with only 68% confidence. Low technical analyst confidence (32%) combined with sector rotation signals and VIX spike indicates elevated uncertainty. Multiple conflicting signals: energy surging while tech declining, small-caps leading while mega-caps lag. Recommend reducing position sizes 20-30% until clearer regime emerges.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">risk</strong>: High market regime uncertainty</li><li><strong style="color:#A5B4FC;">technical</strong>: Very low analyst confidence</li><li><strong style="color:#A5B4FC;">correlation</strong>: Unusual cross-asset behavior</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Missing major move by being too cautious</li><li>Whipsaw risk if regime shifts quickly</li><li>Opportunity cost of reduced exposure</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Market regime confidence exceeding 80% or technical confidence returning above 60%</div>
+      </div>
+    </div>
+
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="report-footer">
+    <p>Generated by <strong>Teletraan Intelligence</strong> &middot; February 01, 2026 at 13:59 UTC</p>
+  </footer>
+
+</div>
+
+<script>
+(function() {
+  // Insight data for filtering/sorting
+  var insightData = [{"index": 0, "action": "BUY", "confidence": 0.7}, {"index": 1, "action": "BUY", "confidence": 0.68}, {"index": 2, "action": "SELL", "confidence": 0.72}, {"index": 3, "action": "WATCH", "confidence": 0.65}, {"index": 4, "action": "HOLD", "confidence": 0.7}];
+  var currentFilter = 'ALL';
+  var sortDescending = false;
+
+  // Toggle expand/collapse
+  window.toggleInsight = function(index) {
+    var card = document.querySelector('.insight-card[data-index="' + index + '"]');
+    if (card) {
+      card.classList.toggle('expanded');
+    }
+  };
+
+  // Filter insights by action
+  window.filterInsights = function(action) {
+    currentFilter = action;
+    // Update active button
+    document.querySelectorAll('.filter-btn').forEach(function(btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-action') === action);
+    });
+    applyFiltersAndSort();
+  };
+
+  // Toggle sort by confidence
+  window.toggleSort = function() {
+    sortDescending = !sortDescending;
+    var btn = document.getElementById('sort-btn');
+    btn.classList.toggle('active', sortDescending);
+    applyFiltersAndSort();
+  };
+
+  function applyFiltersAndSort() {
+    var container = document.getElementById('insights-container');
+    var cards = Array.from(container.querySelectorAll('.insight-card'));
+
+    // Build order array
+    var order = insightData.slice();
+
+    // Filter
+    if (currentFilter !== 'ALL') {
+      order = order.filter(function(d) { return d.action === currentFilter; });
+    }
+
+    // Sort
+    if (sortDescending) {
+      order.sort(function(a, b) { return b.confidence - a.confidence; });
+    }
+
+    var visibleIndices = new Set(order.map(function(d) { return d.index; }));
+
+    // Reorder DOM and show/hide
+    // First hide all
+    cards.forEach(function(card) {
+      var idx = parseInt(card.getAttribute('data-index'));
+      if (visibleIndices.has(idx)) {
+        card.style.display = '';
+      } else {
+        card.style.display = 'none';
+      }
+    });
+
+    // Reorder visible cards
+    if (sortDescending) {
+      order.forEach(function(d) {
+        var card = container.querySelector('.insight-card[data-index="' + d.index + '"]');
+        if (card) container.appendChild(card);
+      });
+    }
+  }
+})();
+</script>
+
+</body>
+</html>
