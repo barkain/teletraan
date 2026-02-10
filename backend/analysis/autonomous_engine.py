@@ -232,6 +232,91 @@ class AutonomousDeepEngine:
 
         self._last_analysis_time: datetime | None = None
 
+    async def _get_portfolio_holdings(self) -> dict[str, dict[str, float]]:
+        """Fetch portfolio holdings from the database.
+
+        Returns a dict mapping symbol to holding info, e.g.:
+        {"AAPL": {"shares": 50, "cost_basis": 150.0, "total_cost": 7500.0}}
+
+        Returns an empty dict if no portfolio exists or on any error.
+        Portfolio fetch failure must never break the analysis pipeline.
+        """
+        try:
+            from sqlalchemy import select  # type: ignore[import-not-found]
+            from models.portfolio import Portfolio  # type: ignore[import-not-found]
+
+            async with async_session_factory() as session:
+                result = await session.execute(select(Portfolio).limit(1))
+                portfolio = result.scalar_one_or_none()
+
+                if not portfolio or not portfolio.holdings:
+                    return {}
+
+                holdings: dict[str, dict[str, float]] = {}
+                for h in portfolio.holdings:
+                    holdings[h.symbol.upper()] = {
+                        "shares": h.shares,
+                        "cost_basis": h.cost_basis,
+                        "total_cost": h.shares * h.cost_basis,
+                    }
+
+                logger.info(
+                    f"Loaded {len(holdings)} portfolio holdings: "
+                    f"{', '.join(holdings.keys())}"
+                )
+                return holdings
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch portfolio holdings (non-fatal): {e}")
+            return {}
+
+    def _build_portfolio_synthesis_context(
+        self,
+        portfolio_holdings: dict[str, dict[str, float]],
+    ) -> str:
+        """Build portfolio context string for the synthesis prompt.
+
+        Args:
+            portfolio_holdings: Dict from _get_portfolio_holdings().
+
+        Returns:
+            Formatted portfolio context string, or empty string if no holdings.
+        """
+        if not portfolio_holdings:
+            return ""
+
+        total_cost = sum(h["total_cost"] for h in portfolio_holdings.values())
+
+        lines = [
+            "",
+            "## Portfolio Holdings",
+            "The user holds positions in the following stocks. "
+            "Consider how the analysis findings impact these holdings specifically. "
+            "Highlight any risks or opportunities directly relevant to held positions.",
+            "",
+        ]
+
+        for symbol, info in sorted(
+            portfolio_holdings.items(),
+            key=lambda x: x[1]["total_cost"],
+            reverse=True,
+        ):
+            allocation_pct = (
+                (info["total_cost"] / total_cost * 100) if total_cost > 0 else 0
+            )
+            lines.append(
+                f"- {symbol}: {info['shares']:.1f} shares @ "
+                f"${info['cost_basis']:.2f} cost basis "
+                f"({allocation_pct:.1f}% of portfolio)"
+            )
+
+        lines.append(
+            "\nPrioritize insights that directly affect held positions. "
+            "Flag any bearish signals on held stocks as portfolio risks."
+        )
+
+        return "\n".join(lines)
+
     async def run_autonomous_analysis(
         self,
         max_insights: int = 5,
@@ -358,6 +443,9 @@ class AutonomousDeepEngine:
             Completed AutonomousAnalysisResult.
         """
 
+        # ===== Load portfolio holdings (non-blocking) =====
+        portfolio_holdings = await self._get_portfolio_holdings()
+
         # ===== PHASE 3: Heatmap Analysis =====
         logger.info("Phase 3: Analyzing heatmap patterns...")
         await self._update_task_progress(task_id, "heatmap_analysis", 35, "Analyzing heatmap patterns...")
@@ -381,6 +469,20 @@ class AutonomousDeepEngine:
         symbols_to_analyze = [
             s.symbol for s in ordered_selections[:deep_dive_count]
         ]
+
+        # Merge portfolio holdings into deep dive list (max 10 extra)
+        if portfolio_holdings:
+            existing_symbols = set(symbols_to_analyze)
+            portfolio_additions = [
+                sym for sym in portfolio_holdings
+                if sym not in existing_symbols
+            ][:10]
+            if portfolio_additions:
+                symbols_to_analyze.extend(portfolio_additions)
+                logger.info(
+                    f"Added {len(portfolio_additions)} portfolio-held symbols "
+                    f"to deep dive: {portfolio_additions}"
+                )
 
         logger.info(f"Phase 4: Deep diving into {symbols_to_analyze}...")
         await self._update_task_progress(
@@ -441,6 +543,7 @@ class AutonomousDeepEngine:
             macro_context=macro_result,
             heatmap_analysis=heatmap_analysis_result,
             max_insights=max_insights,
+            portfolio_holdings=portfolio_holdings,
         )
         result.phases_completed.append("synthesis")
 
@@ -707,6 +810,7 @@ class AutonomousDeepEngine:
         macro_context: MacroScanResult,
         heatmap_analysis: HeatmapAnalysis,
         max_insights: int,
+        portfolio_holdings: dict[str, dict[str, float]] | None = None,
     ) -> list[dict[str, Any]]:
         """Run Phase 5: Synthesis Lead with heatmap context.
 
@@ -715,6 +819,7 @@ class AutonomousDeepEngine:
             macro_context: Macro scan results.
             heatmap_analysis: Heatmap analysis results.
             max_insights: Maximum insights to generate.
+            portfolio_holdings: Optional dict of user portfolio holdings.
 
         Returns:
             List of insight dictionaries.
@@ -748,12 +853,17 @@ class AutonomousDeepEngine:
             max_insights,
         )
 
+        # Add portfolio context if holdings exist
+        portfolio_context = self._build_portfolio_synthesis_context(
+            portfolio_holdings or {}
+        )
+
         # Format analyst reports for synthesis
         synthesis_context = format_synthesis_context(
             self._flatten_analyst_reports(analyst_reports)
         )
 
-        full_context = f"{autonomous_context}\n\n{synthesis_context}"
+        full_context = f"{autonomous_context}{portfolio_context}\n\n{synthesis_context}"
 
         # Query LLM
         response = await self._query_llm(enhanced_prompt, full_context, "synthesis")
@@ -1048,6 +1158,9 @@ class AutonomousDeepEngine:
         logger.info("Running legacy pipeline (sector rotation + opportunity hunt)...")
 
         try:
+            # ===== Load portfolio holdings (non-blocking) =====
+            portfolio_holdings = await self._get_portfolio_holdings()
+
             # ===== LEGACY PHASE 2: Sector Rotation =====
             logger.info("Legacy Phase 2: Analyzing sector rotation...")
             await self._update_task_progress(task_id, "sector_rotation", 25, "Analyzing sector rotation...")
@@ -1065,6 +1178,20 @@ class AutonomousDeepEngine:
             # ===== LEGACY PHASE 4: Deep Dive =====
             top_candidates = candidates.get_top_candidates(deep_dive_count)
             symbols_to_analyze = [c.symbol for c in top_candidates]
+
+            # Merge portfolio holdings into deep dive list (max 10 extra)
+            if portfolio_holdings:
+                existing_symbols = set(symbols_to_analyze)
+                portfolio_additions = [
+                    sym for sym in portfolio_holdings
+                    if sym not in existing_symbols
+                ][:10]
+                if portfolio_additions:
+                    symbols_to_analyze.extend(portfolio_additions)
+                    logger.info(
+                        f"[Legacy] Added {len(portfolio_additions)} portfolio-held "
+                        f"symbols to deep dive: {portfolio_additions}"
+                    )
 
             logger.info(f"Legacy Phase 4: Deep diving into {symbols_to_analyze}...")
             await self._update_task_progress(
@@ -1100,6 +1227,7 @@ class AutonomousDeepEngine:
                 sector_context=sector_result,
                 candidates=candidates,
                 max_insights=max_insights,
+                portfolio_holdings=portfolio_holdings,
             )
             result.phases_completed.append("synthesis")
 
@@ -1468,6 +1596,7 @@ class AutonomousDeepEngine:
         sector_context: SectorRotationResult,
         candidates: OpportunityList,
         max_insights: int,
+        portfolio_holdings: dict[str, dict[str, float]] | None = None,
     ) -> list[dict[str, Any]]:
         """Run Phase 5: Synthesis Lead (legacy pipeline).
 
@@ -1477,6 +1606,7 @@ class AutonomousDeepEngine:
             sector_context: Sector rotation results.
             candidates: Opportunity candidates.
             max_insights: Maximum insights to generate.
+            portfolio_holdings: Optional dict of user portfolio holdings.
 
         Returns:
             List of insight dictionaries.
@@ -1510,12 +1640,17 @@ class AutonomousDeepEngine:
             max_insights,
         )
 
+        # Add portfolio context if holdings exist
+        portfolio_context = self._build_portfolio_synthesis_context(
+            portfolio_holdings or {}
+        )
+
         # Format analyst reports for synthesis
         synthesis_context = format_synthesis_context(
             self._flatten_analyst_reports(analyst_reports)
         )
 
-        full_context = f"{autonomous_context}\n\n{synthesis_context}"
+        full_context = f"{autonomous_context}{portfolio_context}\n\n{synthesis_context}"
 
         # Query LLM
         response = await self._query_llm(enhanced_prompt, full_context, "synthesis")
