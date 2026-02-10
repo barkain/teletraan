@@ -224,6 +224,16 @@ async def run_autonomous_analysis(
         top_sectors: list[str] = []
         if result.sector_result:
             top_sectors = [s.sector_name for s in result.sector_result.top_sectors]
+        elif result.heatmap_data and result.heatmap_data.sectors:
+            sorted_sectors = sorted(
+                result.heatmap_data.sectors,
+                key=lambda s: abs(s.change_20d or s.change_5d or s.change_1d or 0),
+                reverse=True,
+            )
+            top_sectors = [
+                f"{s.name} {(s.change_20d or s.change_5d or s.change_1d or 0):+.1f}%"
+                for s in sorted_sectors[:6]
+            ]
 
         # Get market regime
         market_regime = ""
@@ -442,6 +452,16 @@ async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_co
                 if analysis_result.sector_result:
                     task.top_sectors = [
                         s.sector_name for s in analysis_result.sector_result.top_sectors
+                    ]
+                elif analysis_result.heatmap_data and analysis_result.heatmap_data.sectors:
+                    sorted_sectors = sorted(
+                        analysis_result.heatmap_data.sectors,
+                        key=lambda s: abs(s.change_20d or s.change_5d or s.change_1d or 0),
+                        reverse=True,
+                    )
+                    task.top_sectors = [
+                        f"{s.name} {(s.change_20d or s.change_5d or s.change_1d or 0):+.1f}%"
+                        for s in sorted_sectors[:6]
                     ]
 
                 await session.commit()
