@@ -6,7 +6,8 @@
 <title>Teletraan Intelligence &mdash; February 07, 2026</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
 <style>
 /* === RESET & BASE === */
 *, *::before, *::after { box-sizing: border-box; }
@@ -415,32 +416,22 @@ body {
   font-weight: 500;
 }
 
-/* Confidence gauge */
-.confidence-gauge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 120px;
+/* Mini radial gauge (ApexCharts) */
+.mini-radial-gauge {
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
 }
-.gauge-bar {
-  flex: 1;
-  height: 6px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 3px;
-  overflow: hidden;
-  min-width: 60px;
+
+/* Charts row */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
 }
-.gauge-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.6s ease;
-}
-.gauge-label {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-  font-weight: 600;
-  min-width: 36px;
-  text-align: right;
+.chart-container {
+  min-height: 220px;
 }
 
 .insight-title {
@@ -651,6 +642,7 @@ body {
 /* === RESPONSIVE === */
 @media (max-width: 768px) {
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .charts-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .container { padding: 20px 16px 40px; }
@@ -658,11 +650,11 @@ body {
   .kpi-row { grid-template-columns: 1fr 1fr; gap: 12px; }
   .kpi-value { font-size: 22px; }
   .two-col { grid-template-columns: 1fr; }
+  .charts-row { grid-template-columns: 1fr; }
   .insight-header { padding: 16px; }
   .insight-details { padding: 0 16px; }
   .insight-card.expanded .insight-details { padding: 0 16px 16px; }
   .insights-toolbar { flex-direction: column; align-items: flex-start; }
-  .confidence-gauge { min-width: 100px; }
   .trading-levels { flex-direction: column; }
 }
 
@@ -709,7 +701,7 @@ body {
   <div class="kpi-row">
     <div class="kpi-card">
       <div class="kpi-label">Insights</div>
-      <div class="kpi-value">0</div>
+      <div class="kpi-value">5</div>
       <div class="kpi-sub">findings</div>
     </div>
     <div class="kpi-card">
@@ -726,8 +718,24 @@ body {
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Top Action</div>
-      <div class="kpi-value" style="font-size:20px;color:#6366F1;">--</div>
-      <div class="kpi-sub" style="font-family:'JetBrains Mono',monospace;">(0)</div>
+      <div class="kpi-value" style="font-size:20px;color:#DC2626;">Strong Sell</div>
+      <div class="kpi-sub" style="font-family:'JetBrains Mono',monospace;">(1)</div>
+    </div>
+  </div>
+
+  <!-- CHARTS ROW -->
+  <div class="charts-row">
+    <div class="card">
+      <div class="card-label">Confidence Distribution</div>
+      <div class="chart-container" id="chart-confidence"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Action Breakdown</div>
+      <div class="chart-container" id="chart-actions"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Sector Exposure</div>
+      <div class="chart-container" id="chart-sectors"></div>
     </div>
   </div>
 
@@ -832,7 +840,7 @@ body {
 
     <div class="insights-toolbar">
       <div class="filter-bar">
-        <button class="filter-btn active" data-action="ALL" onclick="filterInsights('ALL')">All</button>
+        <button class="filter-btn active" data-action="ALL" onclick="filterInsights('ALL')">All</button><button class="filter-btn" data-action="BUY" onclick="filterInsights('BUY')" style="--btn-color:#10B981;">Buy</button><button class="filter-btn" data-action="HOLD" onclick="filterInsights('HOLD')" style="--btn-color:#F59E0B;">Hold</button><button class="filter-btn" data-action="SELL" onclick="filterInsights('SELL')" style="--btn-color:#EF4444;">Sell</button><button class="filter-btn" data-action="STRONG_SELL" onclick="filterInsights('STRONG_SELL')" style="--btn-color:#DC2626;">Strong Sell</button><button class="filter-btn" data-action="WATCH" onclick="filterInsights('WATCH')" style="--btn-color:#6366F1;">Watch</button>
       </div>
       <button class="sort-btn" onclick="toggleSort()" id="sort-btn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -845,7 +853,152 @@ body {
     </div>
 
     <div id="insights-container">
-      <div class="empty-state">No insights generated for this report.</div>
+      
+    <div class="insight-card" data-index="0" data-action="STRONG_SELL"
+         data-confidence="0.77"
+         style="border-left:4px solid #DC2626;">
+      <div class="insight-header" onclick="toggleInsight(0)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(220,38,38,0.12);color:#DC2626;box-shadow:0 0 12px rgba(220,38,38,0.4);">
+              Strong Sell
+            </span>
+            <span class="symbol-tag primary">AMZN</span><span class="symbol-tag">XLY</span><span class="symbol-tag">SPY</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-0"
+               data-value="77" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Amazon Capitulation Event - High-Conviction Exit Signal</h3>
+        <p class="insight-thesis-preview">AMZN's -5.55% collapse on 4x volume represents a clear negative catalyst or capitulation event. Technical breakdown confirmed by risk analyst's 8.5% max drawdown assessment with po...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-0">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">AMZN's <span class="num-negative">-5.55%</span> collapse on 4x volume represents a clear negative catalyst or capitulation event. Technical breakdown confirmed by risk analyst's 8.5% max drawdown assessment with poor 0.3x risk/reward. The 6% divergence from Consumer Discretionary sector (<span class="num-positive">+0.41%</span>) indicates company-specific issues rather than sector weakness. With defensive rotation accelerating and mega-cap tech under pressure, this is a high-conviction exit signal.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">technical</strong>: Breakdown on 4x volume - capitulation signal</li><li><strong style="color:#A5B4FC;">risk</strong>: Poor risk/reward at 0.3x with 8.5% drawdown potential</li><li><strong style="color:#A5B4FC;">sector</strong>: Massive divergence from Consumer Discretionary sector</li><li><strong style="color:#A5B4FC;">correlation</strong>: Mega-cap tech weakness pattern confirmed across AMZN/GOOG</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Potential dead-cat bounce</li><li>Earnings catalyst unknown</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Strong reversal above yesterday's close on declining volume would suggest overreaction</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="1" data-action="HOLD"
+         data-confidence="0.78"
+         style="border-left:4px solid #F59E0B;">
+      <div class="insight-header" onclick="toggleInsight(1)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(245,158,11,0.10);color:#F59E0B;box-shadow:none;">
+              Hold
+            </span>
+            <span class="symbol-tag primary">XLE</span><span class="symbol-tag">CAT</span><span class="symbol-tag">XLI</span><span class="symbol-tag">VLO</span><span class="symbol-tag">MPC</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-1"
+               data-value="78" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Defensive Rotation Maturing - Trim Extended Energy/Industrials</h3>
+        <p class="insight-thesis-preview">The defensive rotation into Energy (+17.99% 20D), Industrials (+8.94% 20D), and Materials (+6.73%) with 100% breadth is well-established but showing signs of maturity. Risk analyst...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-1">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">The defensive rotation into Energy (<span class="num-positive">+17.99%</span> 20D), Industrials (<span class="num-positive">+8.94%</span> 20D), and Materials (<span class="num-positive">+6.73%</span>) with 100% breadth is well-established but showing signs of maturity. Risk analyst warns Energy is EXTENDED despite strong momentum. Macro economist (74% confidence) and sector strategist (82% confidence) confirm transitional regime. With VIX at 20.37 and gold surging <span class="num-positive">+10.26%</span>, the defensive trade is consensus. Recommendation: HOLD existing positions but TRIM 25<span class="num-negative">-30%</span> of extended winners and rotate into laggards within defensive sectors.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">sector</strong>: 100% breadth in Industrials/Energy confirms rotation strength</li><li><strong style="color:#A5B4FC;">risk</strong>: Energy sector EXTENDED - trim positions despite momentum</li><li><strong style="color:#A5B4FC;">macro</strong>: Inflationary pressures resurface supporting commodity sectors</li><li><strong style="color:#A5B4FC;">correlation</strong>: Cross-asset defensive correlation confirmed</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Rotation reversal if risk-on returns</li><li>Crude oil breakdown below $60</li><li>Late-cycle sector exhaustion</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> VIX collapse below 15 with crude oil breaking $60 would signal rotation reversal</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="2" data-action="BUY"
+         data-confidence="0.75"
+         style="border-left:4px solid #10B981;">
+      <div class="insight-header" onclick="toggleInsight(2)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(16,185,129,0.10);color:#10B981;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">NEM</span><span class="symbol-tag">GLD</span><span class="symbol-tag">GDX</span><span class="symbol-tag">GOLD</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-2"
+               data-value="75" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Gold Miners Inflation Hedge - NEM Leading Cross-Sector Theme</h3>
+        <p class="insight-thesis-preview">NEM's +6.26% surge aligns perfectly with gold's +10.26% rally to $4,951 and crude oil's +7.49% jump, confirming resurfacing inflationary pressures. Technical analyst sees 65% confi...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-2">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">NEM's <span class="num-positive">+6.26%</span> surge aligns perfectly with gold's <span class="num-positive">+10.26%</span> rally to $4,951 and crude oil's <span class="num-positive">+7.49%</span> jump, confirming resurfacing inflationary pressures. Technical analyst sees 65% confidence breakout, risk analyst assigns favorable 2.2x risk/reward with 5% max drawdown (lowest among all analyzed stocks). Correlation detective confirms cross-asset defensive positioning. This is a clean inflation hedge play with multiple confirming signals and attractive risk profile. Position as 3<span class="num-negative">-5%</span> portfolio allocation.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">technical</strong>: Breakout pattern on strong relative strength</li><li><strong style="color:#A5B4FC;">risk</strong>: Best risk/reward in analysis at 2.2x with only 5% drawdown</li><li><strong style="color:#A5B4FC;">macro</strong>: Inflationary pressures theme confirmed by commodity surge</li><li><strong style="color:#A5B4FC;">correlation</strong>: Cross-asset inflation correlation firing</li><li><strong style="color:#A5B4FC;">sector</strong>: Cross-sector inflation hedge pattern identified</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Gold reversal if inflation fears subside</li><li>VIX collapse below 15</li><li>Fed pivot to dovish stance</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Gold breaking below $4,700 or VIX collapsing below 15 would invalidate inflation thesis</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="3" data-action="WATCH"
+         data-confidence="0.55"
+         style="border-left:4px solid #6366F1;">
+      <div class="insight-header" onclick="toggleInsight(3)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(99,102,241,0.10);color:#6366F1;box-shadow:none;">
+              Watch
+            </span>
+            <span class="symbol-tag primary">SPGI</span><span class="symbol-tag">MCO</span><span class="symbol-tag">MSCI</span><span class="symbol-tag">XLF</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-3"
+               data-value="55" data-color="#EF4444"></div>
+        </div>
+        <h3 class="insight-title">SPGI Severe Breakdown - Contrarian Value Setup or Falling Knife?</h3>
+        <p class="insight-thesis-preview">SPGI's -16.77% (5D) collapse on 2.1x volume while Financials sector gains +1.82% represents extreme divergence. Technical analyst assigns 75% confidence SELL with severe damage. Ho...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-3">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">SPGI's <span class="num-negative">-16.77%</span> (5D) collapse on 2.1x volume while Financials sector gains <span class="num-positive">+1.82%</span> represents extreme divergence. Technical analyst assigns 75% confidence SELL with severe damage. However, risk analyst identifies potential 3.5x risk/reward contrarian opportunity IF fundamentals remain intact. This conflict requires resolution: the breakdown is technical fact, but the valuation opportunity depends on unknown catalyst. WATCH for stabilization and fundamental clarity before acting. Current rating: WATCH, upgrade to BUY if volume subsides and sector divergence narrows.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">technical</strong>: Severe technical damage - breakdown pattern</li><li><strong style="color:#A5B4FC;">sector</strong>: Extreme sector divergence signals company-specific issue</li><li><strong style="color:#A5B4FC;">risk</strong>: Contrarian value play with 3.5x R/R if fundamentals intact</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Unknown negative catalyst</li><li>Continued selling pressure</li><li>Sector rotation away from quality</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Breakdown below next psychological support with volume spike - wait for stabilization first</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="4" data-action="SELL"
+         data-confidence="0.68"
+         style="border-left:4px solid #EF4444;">
+      <div class="insight-header" onclick="toggleInsight(4)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(239,68,68,0.10);color:#EF4444;box-shadow:none;">
+              Sell
+            </span>
+            <span class="symbol-tag primary">AMD</span><span class="symbol-tag">AVGO</span><span class="symbol-tag">XLK</span><span class="symbol-tag">NVDA</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-4"
+               data-value="68" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Tech Bounce Likely Dead-Cat Rally - Fade AMD/AVGO Strength</h3>
+        <p class="insight-thesis-preview">Technology's +4.06% (1D) rebound led by AMD +8.28% and AVGO +7.22% appears to be a dead-cat bounce or short-covering rally rather than trend reversal. Sector shows -1.91% (5D) and ...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-4">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Technology's <span class="num-positive">+4.06%</span> (1D) rebound led by AMD <span class="num-positive">+8.28%</span> and AVGO <span class="num-positive">+7.22%</span> appears to be a dead-cat bounce or short-covering rally rather than trend reversal. Sector shows <span class="num-negative">-1.91%</span> (5D) and <span class="num-negative">-3.69%</span> (20D) weakness, and technical analyst assigns only 55% confidence NEUTRAL rating. Macro headwinds persist with defensive rotation accelerating and Communication Services weakness (<span class="num-negative">-0.39%</span>) dragging mega-cap tech. Risk analyst recommends only 1<span class="num-negative">-2%</span> speculative position with tight stops. Consensus: FADE this strength - either avoid or use as exit opportunity for existing longs.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">technical</strong>: Potential reversal bounce but low conviction at 55%</li><li><strong style="color:#A5B4FC;">sector</strong>: Tech sector showing structural weakness despite 1D bounce</li><li><strong style="color:#A5B4FC;">risk</strong>: High risk with 12% max drawdown - speculative only</li><li><strong style="color:#A5B4FC;">macro</strong>: Growth/Tech derating accelerating theme</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Short covering could extend bounce 1-2 days</li><li>Semiconductor strength may persist</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> AMD holding gains for 2+ sessions with declining volume would suggest genuine reversal</div>
+      </div>
+    </div>
+
     </div>
   </div>
 
@@ -860,7 +1013,7 @@ body {
 <script>
 (function() {
   // Insight data for filtering/sorting
-  var insightData = [];
+  var insightData = [{"index": 0, "action": "STRONG_SELL", "confidence": 0.77}, {"index": 1, "action": "HOLD", "confidence": 0.78}, {"index": 2, "action": "BUY", "confidence": 0.75}, {"index": 3, "action": "WATCH", "confidence": 0.55}, {"index": 4, "action": "SELL", "confidence": 0.68}];
   var currentFilter = 'ALL';
   var sortDescending = false;
 
@@ -875,7 +1028,6 @@ body {
   // Filter insights by action
   window.filterInsights = function(action) {
     currentFilter = action;
-    // Update active button
     document.querySelectorAll('.filter-btn').forEach(function(btn) {
       btn.classList.toggle('active', btn.getAttribute('data-action') === action);
     });
@@ -893,34 +1045,18 @@ body {
   function applyFiltersAndSort() {
     var container = document.getElementById('insights-container');
     var cards = Array.from(container.querySelectorAll('.insight-card'));
-
-    // Build order array
     var order = insightData.slice();
-
-    // Filter
     if (currentFilter !== 'ALL') {
       order = order.filter(function(d) { return d.action === currentFilter; });
     }
-
-    // Sort
     if (sortDescending) {
       order.sort(function(a, b) { return b.confidence - a.confidence; });
     }
-
     var visibleIndices = new Set(order.map(function(d) { return d.index; }));
-
-    // Reorder DOM and show/hide
-    // First hide all
     cards.forEach(function(card) {
       var idx = parseInt(card.getAttribute('data-index'));
-      if (visibleIndices.has(idx)) {
-        card.style.display = '';
-      } else {
-        card.style.display = 'none';
-      }
+      card.style.display = visibleIndices.has(idx) ? '' : 'none';
     });
-
-    // Reorder visible cards
     if (sortDescending) {
       order.forEach(function(d) {
         var card = container.querySelector('.insight-card[data-index="' + d.index + '"]');
@@ -928,6 +1064,176 @@ body {
       });
     }
   }
+
+  // === ApexCharts === //
+  var darkTheme = {
+    mode: 'dark',
+    palette: 'palette1',
+    monochrome: { enabled: false }
+  };
+
+  // Confidence Distribution (radialBar)
+  var confDist = [0, 4, 1];
+  var confTotal = confDist[0] + confDist[1] + confDist[2];
+  if (confTotal > 0) {
+    var confPcts = confDist.map(function(v) { return Math.round(v / confTotal * 100); });
+    new ApexCharts(document.querySelector('#chart-confidence'), {
+      chart: { type: 'radialBar', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      plotOptions: {
+        radialBar: {
+          hollow: { size: '30%' },
+          track: { background: 'rgba(255,255,255,0.06)' },
+          dataLabels: {
+            name: { fontSize: '12px', color: '#94A3B8', offsetY: -4 },
+            value: { fontSize: '14px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,
+                      formatter: function(val, opts) { return confDist[opts.seriesIndex] + ' insights'; } }
+          }
+        }
+      },
+      series: confPcts,
+      labels: ['High (>80%)', 'Medium (60-80%)', 'Low (<60%)'],
+      colors: ['#10B981', '#F59E0B', '#EF4444'],
+      stroke: { lineCap: 'round' }
+    }).render();
+  } else {
+    document.querySelector('#chart-confidence').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No confidence data</div>';
+  }
+
+  // Action Breakdown (donut)
+  var actionLabels = ["Buy", "Hold", "Sell", "Strong Sell", "Watch"];
+  var actionValues = [1, 1, 1, 1, 1];
+  var actionColors = ["#10B981", "#F59E0B", "#EF4444", "#DC2626", "#6366F1"];
+  if (actionValues.length > 0) {
+    new ApexCharts(document.querySelector('#chart-actions'), {
+      chart: { type: 'donut', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      series: actionValues,
+      labels: actionLabels,
+      colors: actionColors,
+      plotOptions: {
+        pie: {
+          donut: {
+            size: '60%',
+            labels: {
+              show: true,
+              total: {
+                show: true,
+                label: 'Total',
+                fontSize: '13px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 600,
+                color: '#94A3B8',
+                formatter: function(w) { return w.globals.seriesTotals.reduce(function(a,b){ return a+b; }, 0); }
+              },
+              value: {
+                fontSize: '20px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 700,
+                color: '#F1F5F9'
+              }
+            }
+          }
+        }
+      },
+      dataLabels: { enabled: false },
+      legend: {
+        position: 'bottom',
+        fontSize: '12px',
+        fontFamily: 'Inter, sans-serif',
+        fontWeight: 600,
+        labels: { colors: '#94A3B8' },
+        markers: { radius: 3 }
+      },
+      stroke: { width: 2, colors: ['#0B0F19'] }
+    }).render();
+  } else {
+    document.querySelector('#chart-actions').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No action data</div>';
+  }
+
+  // Sector Exposure (horizontal bar)
+  var sectorNames = [];
+  var sectorValues = [];
+  var sectorColors = [];
+  if (sectorNames.length > 0) {
+    new ApexCharts(document.querySelector('#chart-sectors'), {
+      chart: { type: 'bar', height: 220, background: 'transparent', toolbar: { show: false } },
+      theme: darkTheme,
+      series: [{ name: 'Performance', data: sectorValues }],
+      plotOptions: {
+        bar: {
+          horizontal: true,
+          borderRadius: 4,
+          barHeight: '60%',
+          distributed: true,
+          colors: {
+            ranges: [
+              { from: -100, to: -0.001, color: '#EF4444' },
+              { from: 0, to: 100, color: '#10B981' }
+            ]
+          }
+        }
+      },
+      colors: sectorColors,
+      dataLabels: {
+        enabled: true,
+        formatter: function(val) { return (val >= 0 ? '+' : '') + val.toFixed(1) + '%'; },
+        style: { fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, colors: ['#E2E8F0'] },
+        offsetX: 6
+      },
+      xaxis: {
+        categories: sectorNames,
+        labels: {
+          style: { colors: '#64748B', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' },
+          formatter: function(val) { return val.toFixed(0) + '%'; }
+        },
+        axisBorder: { color: 'rgba(255,255,255,0.06)' },
+        axisTicks: { color: 'rgba(255,255,255,0.06)' }
+      },
+      yaxis: {
+        labels: { style: { colors: '#94A3B8', fontSize: '12px', fontWeight: 600 } }
+      },
+      grid: { borderColor: 'rgba(255,255,255,0.04)', xaxis: { lines: { show: true } }, yaxis: { lines: { show: false } } },
+      legend: { show: false },
+      tooltip: { enabled: false }
+    }).render();
+  } else {
+    document.querySelector('#chart-sectors').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No sector data</div>';
+  }
+
+  // Mini radial gauges for insight cards
+  document.querySelectorAll('.mini-radial-gauge').forEach(function(el) {
+    var val = parseInt(el.getAttribute('data-value'));
+    var color = el.getAttribute('data-color');
+    new ApexCharts(el, {
+      chart: { type: 'radialBar', height: 60, width: 60, sparkline: { enabled: true } },
+      series: [val],
+      colors: [color],
+      plotOptions: {
+        radialBar: {
+          hollow: { size: '40%' },
+          track: { background: 'rgba(255,255,255,0.06)' },
+          dataLabels: {
+            name: { show: false },
+            value: {
+              show: true,
+              fontSize: '11px',
+              fontFamily: 'JetBrains Mono, monospace',
+              fontWeight: 700,
+              color: color,
+              offsetY: 4,
+              formatter: function(v) { return v + '%'; }
+            }
+          }
+        }
+      },
+      stroke: { lineCap: 'round' }
+    }).render();
+  });
+
 })();
 </script>
 

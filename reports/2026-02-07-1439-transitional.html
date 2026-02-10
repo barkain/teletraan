@@ -6,7 +6,8 @@
 <title>Teletraan Intelligence &mdash; February 07, 2026</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
 <style>
 /* === RESET & BASE === */
 *, *::before, *::after { box-sizing: border-box; }
@@ -415,32 +416,22 @@ body {
   font-weight: 500;
 }
 
-/* Confidence gauge */
-.confidence-gauge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 120px;
+/* Mini radial gauge (ApexCharts) */
+.mini-radial-gauge {
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
 }
-.gauge-bar {
-  flex: 1;
-  height: 6px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 3px;
-  overflow: hidden;
-  min-width: 60px;
+
+/* Charts row */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
 }
-.gauge-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.6s ease;
-}
-.gauge-label {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-  font-weight: 600;
-  min-width: 36px;
-  text-align: right;
+.chart-container {
+  min-height: 220px;
 }
 
 .insight-title {
@@ -651,6 +642,7 @@ body {
 /* === RESPONSIVE === */
 @media (max-width: 768px) {
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .charts-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .container { padding: 20px 16px 40px; }
@@ -658,11 +650,11 @@ body {
   .kpi-row { grid-template-columns: 1fr 1fr; gap: 12px; }
   .kpi-value { font-size: 22px; }
   .two-col { grid-template-columns: 1fr; }
+  .charts-row { grid-template-columns: 1fr; }
   .insight-header { padding: 16px; }
   .insight-details { padding: 0 16px; }
   .insight-card.expanded .insight-details { padding: 0 16px 16px; }
   .insights-toolbar { flex-direction: column; align-items: flex-start; }
-  .confidence-gauge { min-width: 100px; }
   .trading-levels { flex-direction: column; }
 }
 
@@ -728,6 +720,22 @@ body {
       <div class="kpi-label">Top Action</div>
       <div class="kpi-value" style="font-size:20px;color:#6366F1;">--</div>
       <div class="kpi-sub" style="font-family:'JetBrains Mono',monospace;">(0)</div>
+    </div>
+  </div>
+
+  <!-- CHARTS ROW -->
+  <div class="charts-row">
+    <div class="card">
+      <div class="card-label">Confidence Distribution</div>
+      <div class="chart-container" id="chart-confidence"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Action Breakdown</div>
+      <div class="chart-container" id="chart-actions"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Sector Exposure</div>
+      <div class="chart-container" id="chart-sectors"></div>
     </div>
   </div>
 
@@ -826,7 +834,6 @@ body {
   // Filter insights by action
   window.filterInsights = function(action) {
     currentFilter = action;
-    // Update active button
     document.querySelectorAll('.filter-btn').forEach(function(btn) {
       btn.classList.toggle('active', btn.getAttribute('data-action') === action);
     });
@@ -844,34 +851,18 @@ body {
   function applyFiltersAndSort() {
     var container = document.getElementById('insights-container');
     var cards = Array.from(container.querySelectorAll('.insight-card'));
-
-    // Build order array
     var order = insightData.slice();
-
-    // Filter
     if (currentFilter !== 'ALL') {
       order = order.filter(function(d) { return d.action === currentFilter; });
     }
-
-    // Sort
     if (sortDescending) {
       order.sort(function(a, b) { return b.confidence - a.confidence; });
     }
-
     var visibleIndices = new Set(order.map(function(d) { return d.index; }));
-
-    // Reorder DOM and show/hide
-    // First hide all
     cards.forEach(function(card) {
       var idx = parseInt(card.getAttribute('data-index'));
-      if (visibleIndices.has(idx)) {
-        card.style.display = '';
-      } else {
-        card.style.display = 'none';
-      }
+      card.style.display = visibleIndices.has(idx) ? '' : 'none';
     });
-
-    // Reorder visible cards
     if (sortDescending) {
       order.forEach(function(d) {
         var card = container.querySelector('.insight-card[data-index="' + d.index + '"]');
@@ -879,6 +870,176 @@ body {
       });
     }
   }
+
+  // === ApexCharts === //
+  var darkTheme = {
+    mode: 'dark',
+    palette: 'palette1',
+    monochrome: { enabled: false }
+  };
+
+  // Confidence Distribution (radialBar)
+  var confDist = [0, 0, 0];
+  var confTotal = confDist[0] + confDist[1] + confDist[2];
+  if (confTotal > 0) {
+    var confPcts = confDist.map(function(v) { return Math.round(v / confTotal * 100); });
+    new ApexCharts(document.querySelector('#chart-confidence'), {
+      chart: { type: 'radialBar', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      plotOptions: {
+        radialBar: {
+          hollow: { size: '30%' },
+          track: { background: 'rgba(255,255,255,0.06)' },
+          dataLabels: {
+            name: { fontSize: '12px', color: '#94A3B8', offsetY: -4 },
+            value: { fontSize: '14px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,
+                      formatter: function(val, opts) { return confDist[opts.seriesIndex] + ' insights'; } }
+          }
+        }
+      },
+      series: confPcts,
+      labels: ['High (>80%)', 'Medium (60-80%)', 'Low (<60%)'],
+      colors: ['#10B981', '#F59E0B', '#EF4444'],
+      stroke: { lineCap: 'round' }
+    }).render();
+  } else {
+    document.querySelector('#chart-confidence').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No confidence data</div>';
+  }
+
+  // Action Breakdown (donut)
+  var actionLabels = [];
+  var actionValues = [];
+  var actionColors = [];
+  if (actionValues.length > 0) {
+    new ApexCharts(document.querySelector('#chart-actions'), {
+      chart: { type: 'donut', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      series: actionValues,
+      labels: actionLabels,
+      colors: actionColors,
+      plotOptions: {
+        pie: {
+          donut: {
+            size: '60%',
+            labels: {
+              show: true,
+              total: {
+                show: true,
+                label: 'Total',
+                fontSize: '13px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 600,
+                color: '#94A3B8',
+                formatter: function(w) { return w.globals.seriesTotals.reduce(function(a,b){ return a+b; }, 0); }
+              },
+              value: {
+                fontSize: '20px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 700,
+                color: '#F1F5F9'
+              }
+            }
+          }
+        }
+      },
+      dataLabels: { enabled: false },
+      legend: {
+        position: 'bottom',
+        fontSize: '12px',
+        fontFamily: 'Inter, sans-serif',
+        fontWeight: 600,
+        labels: { colors: '#94A3B8' },
+        markers: { radius: 3 }
+      },
+      stroke: { width: 2, colors: ['#0B0F19'] }
+    }).render();
+  } else {
+    document.querySelector('#chart-actions').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No action data</div>';
+  }
+
+  // Sector Exposure (horizontal bar)
+  var sectorNames = [];
+  var sectorValues = [];
+  var sectorColors = [];
+  if (sectorNames.length > 0) {
+    new ApexCharts(document.querySelector('#chart-sectors'), {
+      chart: { type: 'bar', height: 220, background: 'transparent', toolbar: { show: false } },
+      theme: darkTheme,
+      series: [{ name: 'Performance', data: sectorValues }],
+      plotOptions: {
+        bar: {
+          horizontal: true,
+          borderRadius: 4,
+          barHeight: '60%',
+          distributed: true,
+          colors: {
+            ranges: [
+              { from: -100, to: -0.001, color: '#EF4444' },
+              { from: 0, to: 100, color: '#10B981' }
+            ]
+          }
+        }
+      },
+      colors: sectorColors,
+      dataLabels: {
+        enabled: true,
+        formatter: function(val) { return (val >= 0 ? '+' : '') + val.toFixed(1) + '%'; },
+        style: { fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, colors: ['#E2E8F0'] },
+        offsetX: 6
+      },
+      xaxis: {
+        categories: sectorNames,
+        labels: {
+          style: { colors: '#64748B', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' },
+          formatter: function(val) { return val.toFixed(0) + '%'; }
+        },
+        axisBorder: { color: 'rgba(255,255,255,0.06)' },
+        axisTicks: { color: 'rgba(255,255,255,0.06)' }
+      },
+      yaxis: {
+        labels: { style: { colors: '#94A3B8', fontSize: '12px', fontWeight: 600 } }
+      },
+      grid: { borderColor: 'rgba(255,255,255,0.04)', xaxis: { lines: { show: true } }, yaxis: { lines: { show: false } } },
+      legend: { show: false },
+      tooltip: { enabled: false }
+    }).render();
+  } else {
+    document.querySelector('#chart-sectors').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No sector data</div>';
+  }
+
+  // Mini radial gauges for insight cards
+  document.querySelectorAll('.mini-radial-gauge').forEach(function(el) {
+    var val = parseInt(el.getAttribute('data-value'));
+    var color = el.getAttribute('data-color');
+    new ApexCharts(el, {
+      chart: { type: 'radialBar', height: 60, width: 60, sparkline: { enabled: true } },
+      series: [val],
+      colors: [color],
+      plotOptions: {
+        radialBar: {
+          hollow: { size: '40%' },
+          track: { background: 'rgba(255,255,255,0.06)' },
+          dataLabels: {
+            name: { show: false },
+            value: {
+              show: true,
+              fontSize: '11px',
+              fontFamily: 'JetBrains Mono, monospace',
+              fontWeight: 700,
+              color: color,
+              offsetY: 4,
+              formatter: function(v) { return v + '%'; }
+            }
+          }
+        }
+      },
+      stroke: { lineCap: 'round' }
+    }).render();
+  });
+
 })();
 </script>
 

@@ -6,7 +6,8 @@
 <title>Teletraan Intelligence &mdash; February 10, 2026</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
 <style>
 /* === RESET & BASE === */
 *, *::before, *::after { box-sizing: border-box; }
@@ -415,32 +416,22 @@ body {
   font-weight: 500;
 }
 
-/* Confidence gauge */
-.confidence-gauge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 120px;
+/* Mini radial gauge (ApexCharts) */
+.mini-radial-gauge {
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
 }
-.gauge-bar {
-  flex: 1;
-  height: 6px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 3px;
-  overflow: hidden;
-  min-width: 60px;
+
+/* Charts row */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
 }
-.gauge-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.6s ease;
-}
-.gauge-label {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-  font-weight: 600;
-  min-width: 36px;
-  text-align: right;
+.chart-container {
+  min-height: 220px;
 }
 
 .insight-title {
@@ -651,6 +642,7 @@ body {
 /* === RESPONSIVE === */
 @media (max-width: 768px) {
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .charts-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .container { padding: 20px 16px 40px; }
@@ -658,11 +650,11 @@ body {
   .kpi-row { grid-template-columns: 1fr 1fr; gap: 12px; }
   .kpi-value { font-size: 22px; }
   .two-col { grid-template-columns: 1fr; }
+  .charts-row { grid-template-columns: 1fr; }
   .insight-header { padding: 16px; }
   .insight-details { padding: 0 16px; }
   .insight-card.expanded .insight-details { padding: 0 16px 16px; }
   .insights-toolbar { flex-direction: column; align-items: flex-start; }
-  .confidence-gauge { min-width: 100px; }
   .trading-levels { flex-direction: column; }
 }
 
@@ -709,7 +701,7 @@ body {
   <div class="kpi-row">
     <div class="kpi-card">
       <div class="kpi-label">Insights</div>
-      <div class="kpi-value">0</div>
+      <div class="kpi-value">5</div>
       <div class="kpi-sub">findings</div>
     </div>
     <div class="kpi-card">
@@ -726,8 +718,24 @@ body {
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Top Action</div>
-      <div class="kpi-value" style="font-size:20px;color:#6366F1;">--</div>
-      <div class="kpi-sub" style="font-family:'JetBrains Mono',monospace;">(0)</div>
+      <div class="kpi-value" style="font-size:20px;color:#10B981;">Buy</div>
+      <div class="kpi-sub" style="font-family:'JetBrains Mono',monospace;">(3)</div>
+    </div>
+  </div>
+
+  <!-- CHARTS ROW -->
+  <div class="charts-row">
+    <div class="card">
+      <div class="card-label">Confidence Distribution</div>
+      <div class="chart-container" id="chart-confidence"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Action Breakdown</div>
+      <div class="chart-container" id="chart-actions"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Sector Exposure</div>
+      <div class="chart-container" id="chart-sectors"></div>
     </div>
   </div>
 
@@ -826,7 +834,7 @@ body {
 
     <div class="insights-toolbar">
       <div class="filter-bar">
-        <button class="filter-btn active" data-action="ALL" onclick="filterInsights('ALL')">All</button>
+        <button class="filter-btn active" data-action="ALL" onclick="filterInsights('ALL')">All</button><button class="filter-btn" data-action="BUY" onclick="filterInsights('BUY')" style="--btn-color:#10B981;">Buy</button><button class="filter-btn" data-action="HOLD" onclick="filterInsights('HOLD')" style="--btn-color:#F59E0B;">Hold</button><button class="filter-btn" data-action="WATCH" onclick="filterInsights('WATCH')" style="--btn-color:#6366F1;">Watch</button>
       </div>
       <button class="sort-btn" onclick="toggleSort()" id="sort-btn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -839,7 +847,152 @@ body {
     </div>
 
     <div id="insights-container">
-      <div class="empty-state">No insights generated for this report.</div>
+      
+    <div class="insight-card" data-index="0" data-action="BUY"
+         data-confidence="0.65"
+         style="border-left:4px solid #10B981;">
+      <div class="insight-header" onclick="toggleInsight(0)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(16,185,129,0.10);color:#10B981;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">XLE</span><span class="symbol-tag">XLP</span><span class="symbol-tag">XLB</span><span class="symbol-tag">IWM</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-0"
+               data-value="65" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Risk-Off Defensive Rotation with Commodity Strength</h3>
+        <p class="insight-thesis-preview">Market is exhibiting a clear defensive rotation with Energy (+15.75%), Consumer Staples (+9.04%), and Materials (+7.54%) leading while Technology and Communication Services lag. Th...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-0">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Market is exhibiting a clear defensive rotation with Energy (<span class="num-positive">+15.75%</span>), Consumer Staples (<span class="num-positive">+9.04%</span>), and Materials (<span class="num-positive">+7.54%</span>) leading while Technology and Communication Services lag. This pattern, combined with USD weakness (<span class="num-negative">-2.30%</span>), suggests investors are rotating into inflation hedges and defensive plays. The simultaneous small-cap outperformance (Russell 2000 <span class="num-positive">+2.02%</span> vs NASDAQ <span class="num-negative">-2.09%</span>) indicates a growth-to-value rotation consistent with late-cycle or transitional regime behavior.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">sector</strong>: Energy leading with +15.75% relative strength</li><li><strong style="color:#A5B4FC;">macro</strong>: Dollar weakness creating commodity tailwinds</li><li><strong style="color:#A5B4FC;">sector</strong>: Defensive sectors outperforming growth</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Oil price reversal if geopolitical tensions ease</li><li>Dollar rebound would hurt commodities</li><li>Sector rotation could reverse quickly in transitional regime</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> DXY breaks above recent highs or Energy sector shows relative weakness vs S&amp;P 500</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="1" data-action="BUY"
+         data-confidence="0.6"
+         style="border-left:4px solid #10B981;">
+      <div class="insight-header" onclick="toggleInsight(1)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(16,185,129,0.10);color:#10B981;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">IWM</span><span class="symbol-tag">VTV</span><span class="symbol-tag">XLF</span><span class="symbol-tag">XLI</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-1"
+               data-value="60" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Growth-to-Value Rotation: Small-Cap Revival</h3>
+        <p class="insight-thesis-preview">Russell 2000 outperforming NASDAQ by over 4% (+2.02% vs -2.09%) signals a classic growth-to-value rotation. Small caps typically benefit from weaker dollar (better international co...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-1">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Russell 2000 outperforming NASDAQ by over 4% (<span class="num-positive">+2.02%</span> vs <span class="num-negative">-2.09%</span>) signals a classic growth-to-value rotation. Small caps typically benefit from weaker dollar (better international competitiveness) and rotation out of mega-cap tech. This setup is consistent with the transitional market regime where investors reassess concentrated tech positions.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">sector</strong>: Small-cap outperformance vs large-cap growth</li><li><strong style="color:#A5B4FC;">macro</strong>: Weak dollar benefits small-caps</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Small caps more sensitive to recession risk</li><li>Higher interest rates hurt small-cap valuations disproportionately</li><li>Liquidity concerns in market stress</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Russell 2000 underperforms NASDAQ on 3+ consecutive days or breaks key support levels</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="2" data-action="WATCH"
+         data-confidence="0.7"
+         style="border-left:4px solid #6366F1;">
+      <div class="insight-header" onclick="toggleInsight(2)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(99,102,241,0.10);color:#6366F1;box-shadow:none;">
+              Watch
+            </span>
+            <span class="symbol-tag primary">SPY</span><span class="symbol-tag">VIX</span><span class="symbol-tag">TLT</span><span class="symbol-tag">GLD</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-2"
+               data-value="70" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Transitional Regime Uncertainty - Elevated Reversal Risk</h3>
+        <p class="insight-thesis-preview">Market regime classified as 'Transitional' with only 70% confidence indicates uncertainty about next directional move. While defensive rotation is clear, transitional regimes are p...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-2">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Market regime classified as 'Transitional' with only 70% confidence indicates uncertainty about next directional move. While defensive rotation is clear, transitional regimes are prone to whipsaws and false signals. The lack of confirmed analyst reports (all at 0% confidence) adds to uncertainty. Current sector rotation could reverse quickly if macro data shifts.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">risk</strong>: Transitional regime with 70% confidence</li><li><strong style="color:#A5B4FC;">correlation</strong>: No analyst reports available for confirmation</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Regime could shift to risk-on or risk-off rapidly</li><li>Sector rotation reversals common in transitional phases</li><li>Lack of technical/correlation confirmation increases uncertainty</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Market regime confidence rises above 85% or clear directional trend establishes</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="3" data-action="BUY"
+         data-confidence="0.68"
+         style="border-left:4px solid #10B981;">
+      <div class="insight-header" onclick="toggleInsight(3)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(16,185,129,0.10);color:#10B981;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">XLP</span><span class="symbol-tag">PG</span><span class="symbol-tag">KO</span><span class="symbol-tag">WMT</span><span class="symbol-tag">COST</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-3"
+               data-value="68" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Consumer Staples Defensive Play with Inflation Hedge</h3>
+        <p class="insight-thesis-preview">Consumer Staples sector (+9.04%) showing second-strongest performance in clear risk-off rotation. Staples benefit from both defensive positioning and pricing power in inflationary ...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-3">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Consumer Staples sector (<span class="num-positive">+9.04%</span>) showing second-strongest performance in clear risk-off rotation. Staples benefit from both defensive positioning and pricing power in inflationary environments. Combined with dollar weakness benefiting international consumer goods companies, this sector offers attractive risk-adjusted returns in uncertain regime.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">sector</strong>: Consumer Staples second-best performer</li><li><strong style="color:#A5B4FC;">macro</strong>: Dollar weakness benefits international consumer brands</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Limited upside in defensive sectors during strong rallies</li><li>Vulnerable to demand destruction in severe recession</li><li>Relative performance may lag if market shifts to risk-on</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> XLP shows relative weakness vs SPY for 5+ consecutive days or breaks below 50-day MA</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="4" data-action="HOLD"
+         data-confidence="0.55"
+         style="border-left:4px solid #F59E0B;">
+      <div class="insight-header" onclick="toggleInsight(4)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(245,158,11,0.10);color:#F59E0B;box-shadow:none;">
+              Hold
+            </span>
+            <span class="symbol-tag primary">SPY</span><span class="symbol-tag">XLE</span><span class="symbol-tag">XLP</span><span class="symbol-tag">XLK</span><span class="symbol-tag">XLC</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-4"
+               data-value="55" data-color="#EF4444"></div>
+        </div>
+        <h3 class="insight-title">Monitor for Regime Resolution Before Aggressive Positioning</h3>
+        <p class="insight-thesis-preview">With market regime only 70% confident as 'Transitional' and all specialist analysts reporting 0% confidence (no analysis available), this is a time for measured positioning rather ...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-4">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">With market regime only 70% confident as 'Transitional' and all specialist analysts reporting 0% confidence (no analysis available), this is a time for measured positioning rather than aggressive bets. Current defensive rotation is clear but lacks technical and correlation confirmation. Recommended approach: modest overweight to defensives (Energy, Staples, Materials), underweight to growth (Tech, Comm Services), but maintain flexibility for quick repositioning.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">risk</strong>: Transitional regime with moderate confidence</li><li><strong style="color:#A5B4FC;">sector</strong>: Clear rotation but lacks multi-analyst validation</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Premature commitment before regime clarifies</li><li>Whipsaw risk in transitional markets</li><li>Missing technical and correlation analysis creates blind spots</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Regime confidence exceeds 85% or specialist analysts provide high-confidence analysis</div>
+      </div>
+    </div>
+
     </div>
   </div>
 
@@ -854,7 +1007,7 @@ body {
 <script>
 (function() {
   // Insight data for filtering/sorting
-  var insightData = [];
+  var insightData = [{"index": 0, "action": "BUY", "confidence": 0.65}, {"index": 1, "action": "BUY", "confidence": 0.6}, {"index": 2, "action": "WATCH", "confidence": 0.7}, {"index": 3, "action": "BUY", "confidence": 0.68}, {"index": 4, "action": "HOLD", "confidence": 0.55}];
   var currentFilter = 'ALL';
   var sortDescending = false;
 
@@ -869,7 +1022,6 @@ body {
   // Filter insights by action
   window.filterInsights = function(action) {
     currentFilter = action;
-    // Update active button
     document.querySelectorAll('.filter-btn').forEach(function(btn) {
       btn.classList.toggle('active', btn.getAttribute('data-action') === action);
     });
@@ -887,34 +1039,18 @@ body {
   function applyFiltersAndSort() {
     var container = document.getElementById('insights-container');
     var cards = Array.from(container.querySelectorAll('.insight-card'));
-
-    // Build order array
     var order = insightData.slice();
-
-    // Filter
     if (currentFilter !== 'ALL') {
       order = order.filter(function(d) { return d.action === currentFilter; });
     }
-
-    // Sort
     if (sortDescending) {
       order.sort(function(a, b) { return b.confidence - a.confidence; });
     }
-
     var visibleIndices = new Set(order.map(function(d) { return d.index; }));
-
-    // Reorder DOM and show/hide
-    // First hide all
     cards.forEach(function(card) {
       var idx = parseInt(card.getAttribute('data-index'));
-      if (visibleIndices.has(idx)) {
-        card.style.display = '';
-      } else {
-        card.style.display = 'none';
-      }
+      card.style.display = visibleIndices.has(idx) ? '' : 'none';
     });
-
-    // Reorder visible cards
     if (sortDescending) {
       order.forEach(function(d) {
         var card = container.querySelector('.insight-card[data-index="' + d.index + '"]');
@@ -922,6 +1058,176 @@ body {
       });
     }
   }
+
+  // === ApexCharts === //
+  var darkTheme = {
+    mode: 'dark',
+    palette: 'palette1',
+    monochrome: { enabled: false }
+  };
+
+  // Confidence Distribution (radialBar)
+  var confDist = [0, 4, 1];
+  var confTotal = confDist[0] + confDist[1] + confDist[2];
+  if (confTotal > 0) {
+    var confPcts = confDist.map(function(v) { return Math.round(v / confTotal * 100); });
+    new ApexCharts(document.querySelector('#chart-confidence'), {
+      chart: { type: 'radialBar', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      plotOptions: {
+        radialBar: {
+          hollow: { size: '30%' },
+          track: { background: 'rgba(255,255,255,0.06)' },
+          dataLabels: {
+            name: { fontSize: '12px', color: '#94A3B8', offsetY: -4 },
+            value: { fontSize: '14px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,
+                      formatter: function(val, opts) { return confDist[opts.seriesIndex] + ' insights'; } }
+          }
+        }
+      },
+      series: confPcts,
+      labels: ['High (>80%)', 'Medium (60-80%)', 'Low (<60%)'],
+      colors: ['#10B981', '#F59E0B', '#EF4444'],
+      stroke: { lineCap: 'round' }
+    }).render();
+  } else {
+    document.querySelector('#chart-confidence').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No confidence data</div>';
+  }
+
+  // Action Breakdown (donut)
+  var actionLabels = ["Buy", "Hold", "Watch"];
+  var actionValues = [3, 1, 1];
+  var actionColors = ["#10B981", "#F59E0B", "#6366F1"];
+  if (actionValues.length > 0) {
+    new ApexCharts(document.querySelector('#chart-actions'), {
+      chart: { type: 'donut', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      series: actionValues,
+      labels: actionLabels,
+      colors: actionColors,
+      plotOptions: {
+        pie: {
+          donut: {
+            size: '60%',
+            labels: {
+              show: true,
+              total: {
+                show: true,
+                label: 'Total',
+                fontSize: '13px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 600,
+                color: '#94A3B8',
+                formatter: function(w) { return w.globals.seriesTotals.reduce(function(a,b){ return a+b; }, 0); }
+              },
+              value: {
+                fontSize: '20px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 700,
+                color: '#F1F5F9'
+              }
+            }
+          }
+        }
+      },
+      dataLabels: { enabled: false },
+      legend: {
+        position: 'bottom',
+        fontSize: '12px',
+        fontFamily: 'Inter, sans-serif',
+        fontWeight: 600,
+        labels: { colors: '#94A3B8' },
+        markers: { radius: 3 }
+      },
+      stroke: { width: 2, colors: ['#0B0F19'] }
+    }).render();
+  } else {
+    document.querySelector('#chart-actions').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No action data</div>';
+  }
+
+  // Sector Exposure (horizontal bar)
+  var sectorNames = ["Energy", "Consumer Staples", "Materials"];
+  var sectorValues = [0, 0, 0];
+  var sectorColors = ["#6366F1", "#6366F1", "#6366F1"];
+  if (sectorNames.length > 0) {
+    new ApexCharts(document.querySelector('#chart-sectors'), {
+      chart: { type: 'bar', height: 220, background: 'transparent', toolbar: { show: false } },
+      theme: darkTheme,
+      series: [{ name: 'Performance', data: sectorValues }],
+      plotOptions: {
+        bar: {
+          horizontal: true,
+          borderRadius: 4,
+          barHeight: '60%',
+          distributed: true,
+          colors: {
+            ranges: [
+              { from: -100, to: -0.001, color: '#EF4444' },
+              { from: 0, to: 100, color: '#10B981' }
+            ]
+          }
+        }
+      },
+      colors: sectorColors,
+      dataLabels: {
+        enabled: true,
+        formatter: function(val) { return (val >= 0 ? '+' : '') + val.toFixed(1) + '%'; },
+        style: { fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, colors: ['#E2E8F0'] },
+        offsetX: 6
+      },
+      xaxis: {
+        categories: sectorNames,
+        labels: {
+          style: { colors: '#64748B', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' },
+          formatter: function(val) { return val.toFixed(0) + '%'; }
+        },
+        axisBorder: { color: 'rgba(255,255,255,0.06)' },
+        axisTicks: { color: 'rgba(255,255,255,0.06)' }
+      },
+      yaxis: {
+        labels: { style: { colors: '#94A3B8', fontSize: '12px', fontWeight: 600 } }
+      },
+      grid: { borderColor: 'rgba(255,255,255,0.04)', xaxis: { lines: { show: true } }, yaxis: { lines: { show: false } } },
+      legend: { show: false },
+      tooltip: { enabled: false }
+    }).render();
+  } else {
+    document.querySelector('#chart-sectors').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No sector data</div>';
+  }
+
+  // Mini radial gauges for insight cards
+  document.querySelectorAll('.mini-radial-gauge').forEach(function(el) {
+    var val = parseInt(el.getAttribute('data-value'));
+    var color = el.getAttribute('data-color');
+    new ApexCharts(el, {
+      chart: { type: 'radialBar', height: 60, width: 60, sparkline: { enabled: true } },
+      series: [val],
+      colors: [color],
+      plotOptions: {
+        radialBar: {
+          hollow: { size: '40%' },
+          track: { background: 'rgba(255,255,255,0.06)' },
+          dataLabels: {
+            name: { show: false },
+            value: {
+              show: true,
+              fontSize: '11px',
+              fontFamily: 'JetBrains Mono, monospace',
+              fontWeight: 700,
+              color: color,
+              offsetY: 4,
+              formatter: function(v) { return v + '%'; }
+            }
+          }
+        }
+      },
+      stroke: { lineCap: 'round' }
+    }).render();
+  });
+
 })();
 </script>
 

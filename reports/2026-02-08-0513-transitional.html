@@ -6,7 +6,8 @@
 <title>Teletraan Intelligence &mdash; February 08, 2026</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
 <style>
 /* === RESET & BASE === */
 *, *::before, *::after { box-sizing: border-box; }
@@ -415,32 +416,22 @@ body {
   font-weight: 500;
 }
 
-/* Confidence gauge */
-.confidence-gauge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 120px;
+/* Mini radial gauge (ApexCharts) */
+.mini-radial-gauge {
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
 }
-.gauge-bar {
-  flex: 1;
-  height: 6px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 3px;
-  overflow: hidden;
-  min-width: 60px;
+
+/* Charts row */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
 }
-.gauge-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.6s ease;
-}
-.gauge-label {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-  font-weight: 600;
-  min-width: 36px;
-  text-align: right;
+.chart-container {
+  min-height: 220px;
 }
 
 .insight-title {
@@ -651,6 +642,7 @@ body {
 /* === RESPONSIVE === */
 @media (max-width: 768px) {
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .charts-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .container { padding: 20px 16px 40px; }
@@ -658,11 +650,11 @@ body {
   .kpi-row { grid-template-columns: 1fr 1fr; gap: 12px; }
   .kpi-value { font-size: 22px; }
   .two-col { grid-template-columns: 1fr; }
+  .charts-row { grid-template-columns: 1fr; }
   .insight-header { padding: 16px; }
   .insight-details { padding: 0 16px; }
   .insight-card.expanded .insight-details { padding: 0 16px 16px; }
   .insights-toolbar { flex-direction: column; align-items: flex-start; }
-  .confidence-gauge { min-width: 100px; }
   .trading-levels { flex-direction: column; }
 }
 
@@ -709,7 +701,7 @@ body {
   <div class="kpi-row">
     <div class="kpi-card">
       <div class="kpi-label">Insights</div>
-      <div class="kpi-value">0</div>
+      <div class="kpi-value">5</div>
       <div class="kpi-sub">findings</div>
     </div>
     <div class="kpi-card">
@@ -726,8 +718,24 @@ body {
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Top Action</div>
-      <div class="kpi-value" style="font-size:20px;color:#6366F1;">--</div>
-      <div class="kpi-sub" style="font-family:'JetBrains Mono',monospace;">(0)</div>
+      <div class="kpi-value" style="font-size:20px;color:#10B981;">Buy</div>
+      <div class="kpi-sub" style="font-family:'JetBrains Mono',monospace;">(2)</div>
+    </div>
+  </div>
+
+  <!-- CHARTS ROW -->
+  <div class="charts-row">
+    <div class="card">
+      <div class="card-label">Confidence Distribution</div>
+      <div class="chart-container" id="chart-confidence"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Action Breakdown</div>
+      <div class="chart-container" id="chart-actions"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Sector Exposure</div>
+      <div class="chart-container" id="chart-sectors"></div>
     </div>
   </div>
 
@@ -832,7 +840,7 @@ body {
 
     <div class="insights-toolbar">
       <div class="filter-bar">
-        <button class="filter-btn active" data-action="ALL" onclick="filterInsights('ALL')">All</button>
+        <button class="filter-btn active" data-action="ALL" onclick="filterInsights('ALL')">All</button><button class="filter-btn" data-action="BUY" onclick="filterInsights('BUY')" style="--btn-color:#10B981;">Buy</button><button class="filter-btn" data-action="SELL" onclick="filterInsights('SELL')" style="--btn-color:#EF4444;">Sell</button><button class="filter-btn" data-action="STRONG_BUY" onclick="filterInsights('STRONG_BUY')" style="--btn-color:#22c55e;">Strong Buy</button><button class="filter-btn" data-action="WATCH" onclick="filterInsights('WATCH')" style="--btn-color:#6366F1;">Watch</button>
       </div>
       <button class="sort-btn" onclick="toggleSort()" id="sort-btn">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -845,7 +853,152 @@ body {
     </div>
 
     <div id="insights-container">
-      <div class="empty-state">No insights generated for this report.</div>
+      
+    <div class="insight-card" data-index="0" data-action="STRONG_BUY"
+         data-confidence="0.82"
+         style="border-left:4px solid #22c55e;">
+      <div class="insight-header" onclick="toggleInsight(0)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(34,197,94,0.12);color:#22c55e;box-shadow:0 0 12px rgba(34,197,94,0.4);">
+              Strong Buy
+            </span>
+            <span class="symbol-tag primary">XLI</span><span class="symbol-tag">XLE</span><span class="symbol-tag">DIA</span><span class="symbol-tag">IWM</span><span class="symbol-tag">CAT</span><span class="symbol-tag">NEM</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-0"
+               data-value="82" data-color="#10B981"></div>
+        </div>
+        <h3 class="insight-title">Cyclical Leadership Rotation: Industrials/Energy Breakout with Macro Tailwinds</h3>
+        <p class="insight-thesis-preview">Multiple analysts converge on a clear risk-on rotation into cyclical sectors. Technical shows DIA and IWM breaking to new 20-period highs with massive volume expansion (+28% on DIA...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-0">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Multiple analysts converge on a clear risk-on rotation into cyclical sectors. Technical shows DIA and IWM breaking to new 20-period highs with massive volume expansion (<span class="num-positive">+28%</span> on DIA, <span class="num-positive">+3.59%</span> on IWM). Sector strategist confirms Industrials (100% breadth, <span class="num-positive">+2.86%</span> 1D, <span class="num-positive">+8.94%</span> 20D) and Energy (100% breadth, <span class="num-positive">+17.99%</span> 20D) have exceptional momentum. Risk analyst validates with strong risk/reward ratios (XLE 3.2x, XLI 2.8x). The rotation is supported by commodity reflation theme with gold at $5000 (<span class="num-positive">+10.90%</span>) and oil <span class="num-positive">+7.49%</span>, declining yields signaling Fed pause, and small-cap outperformance indicating broad market participation. This is a high-conviction structural rotation, not just a tactical bounce.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">technical</strong>: DIA breakout to new 20-period high with 28% volume expansion</li><li><strong style="color:#A5B4FC;">technical</strong>: IWM breakout confirming small-cap leadership</li><li><strong style="color:#A5B4FC;">sector</strong>: Industrials 100% breadth with sustained 20D momentum</li><li><strong style="color:#A5B4FC;">sector</strong>: Energy 100% breadth with explosive 20D performance</li><li><strong style="color:#A5B4FC;">risk</strong>: XLI risk/reward 2.8x, XLE 3.2x with manageable drawdowns</li><li><strong style="color:#A5B4FC;">macro</strong>: Commodity reflation theme confirmed by gold/oil surge</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Fed pivot could reverse if inflation reaccelerates</li><li>Geopolitical escalation could disrupt commodity thesis</li><li>Momentum exhaustion after strong 20D runs</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> DIA close below $492 or XLI break below $169.50 on high volume; oil reversal below recent support</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="1" data-action="SELL"
+         data-confidence="0.79"
+         style="border-left:4px solid #EF4444;">
+      <div class="insight-header" onclick="toggleInsight(1)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(239,68,68,0.10);color:#EF4444;box-shadow:none;">
+              Sell
+            </span>
+            <span class="symbol-tag primary">AMZN</span><span class="symbol-tag">GOOGL</span><span class="symbol-tag">SPGI</span><span class="symbol-tag">XLY</span><span class="symbol-tag">XLK</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-1"
+               data-value="79" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Mega-Cap Tech Capitulation: AMZN Distribution Event Signals Quality Breakdown</h3>
+        <p class="insight-thesis-preview">CRITICAL DIVERGENCE: AMZN suffered a -5.55% catastrophic decline on 4.0x volume while its Consumer Discretionary sector was +0.41% (6% divergence). This is not normal profit-taking...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-1">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><div class="md-kv"><span class="md-kv-key">CRITICAL DIVERGENCE:</span> <span class="md-kv-value">AMZN suffered a <span class="num-negative">-5.55%</span> catastrophic decline on 4.0x volume while its Consumer Discretionary sector was <span class="num-positive">+0.41%</span> (6% divergence). This is not normal profit-taking but institutional distribution. Sector strategist identifies this as 'mega-cap quality divergence' with SPGI showing similar pattern (<span class="num-negative">-2.75%</span> on 2.1x volume). Communication Services shows 'catastrophic 40% breadth' with GOOGL <span class="num-negative">-2.53%</span> on 1.6x volume. Risk analyst has already invalidated XLY positions and warns of tech sector 7.6% max drawdown risk. While Technical shows XLK <span class="num-positive">+4.06%</span> bounce, this is characterized as 'volatility expansion' with only 52% confidence and 'violent whipsaw' language. The bounce is a TRAP - Friday short-covering before weekend risk, not a reversal. Correlation detective would likely flag the divergence between sector performance and mega-cap constituent performance as a bearish signal.</span></div></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">sector</strong>: AMZN -5.55% vs sector +0.41%, 6% divergence on 4.0x volume</li><li><strong style="color:#A5B4FC;">sector</strong>: Communication Services 40% breadth catastrophic</li><li><strong style="color:#A5B4FC;">risk</strong>: XLY already invalidated, AVOID or 1% max position</li><li><strong style="color:#A5B4FC;">technical</strong>: XLK bounce is 'volatility expansion' not reversal</li><li><strong style="color:#A5B4FC;">sector</strong>: SPGI similar mega-cap quality breakdown</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Continued institutional distribution</li><li>Earnings disappointments in mega-cap tech</li><li>Rotation away from quality into cyclicals leaves gap risk</li><li>AI/tech bubble deflation risk</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> AMZN reclaim of $230 on normal volume with sector confirming strength; VIX decline below 15</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="2" data-action="BUY"
+         data-confidence="0.72"
+         style="border-left:4px solid #10B981;">
+      <div class="insight-header" onclick="toggleInsight(2)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(16,185,129,0.10);color:#10B981;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">XLV</span><span class="symbol-tag">LLY</span><span class="symbol-tag">PFE</span><span class="symbol-tag">UNH</span><span class="symbol-tag">JNJ</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-2"
+               data-value="72" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Defensive Healthcare Positioning: Perfect Breadth Amid Market Turmoil</h3>
+        <p class="insight-thesis-preview">Healthcare shows unique defensive characteristics: 100% breadth with +1.85% gain while maintaining stability. Sector strategist specifically notes this 'contrasts with weak Utiliti...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-2">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><div class="md-kv"><span class="md-kv-key">Healthcare shows unique defensive characteristics:</span> <span class="md-kv-value">100% breadth with <span class="num-positive">+1.85%</span> gain while maintaining stability. Sector strategist specifically notes this 'contrasts with weak Utilities (56% breadth) despite traditional defensive pairing' - meaning investors are selectively rotating into higher-quality defensives, not just hiding. This is sophisticated institutional positioning ahead of potential volatility. With tech showing distribution (AMZN/GOOGL), Healthcare offers quality growth exposure without the valuation risk. The perfect breadth indicates broad-based buying across the sector, not just a few names. Risk characteristics are favorable for current transitional regime (70% confidence). Macro backdrop of Fed pause supports rate-sensitive healthcare names, while commodity inflation benefits pharma pricing power.</span></div></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">sector</strong>: Healthcare perfect 100% breadth with +1.85% gain</li><li><strong style="color:#A5B4FC;">sector</strong>: Selective defensive rotation, not panic flight to safety</li><li><strong style="color:#A5B4FC;">macro</strong>: Fed dovish shift supports rate-sensitive sectors</li><li><strong style="color:#A5B4FC;">risk</strong>: Transitional regime favors quality defensives</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Healthcare typically lags in strong risk-on rallies</li><li>Regulatory risks from policy changes</li><li>Relative underperformance if cyclical rotation accelerates</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Breadth breakdown below 70% or underperformance vs SPY by &gt;2% on risk-on days</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="3" data-action="WATCH"
+         data-confidence="0.58"
+         style="border-left:4px solid #6366F1;">
+      <div class="insight-header" onclick="toggleInsight(3)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(99,102,241,0.10);color:#6366F1;box-shadow:none;">
+              Watch
+            </span>
+            <span class="symbol-tag primary">AMD</span><span class="symbol-tag">NVDA</span><span class="symbol-tag">ORCL</span><span class="symbol-tag">XLK</span><span class="symbol-tag">SMH</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-3"
+               data-value="57" data-color="#EF4444"></div>
+        </div>
+        <h3 class="insight-title">Semiconductor Mean Reversion Setup: AMD Oversold Bounce Requires Confirmation</h3>
+        <p class="insight-thesis-preview">AMD shows classic oversold bounce characteristics: +8.28% recovery after severe 5D loss of -11.95%, participating in broader XLK +4.06% rebound. Sector strategist identifies this a...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-3">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><div class="md-kv"><span class="md-kv-key">AMD shows classic oversold bounce characteristics:</span> <span class="md-kv-value"><span class="num-positive">+8.28%</span> recovery after severe 5D loss of <span class="num-negative">-11.95%</span>, participating in broader XLK <span class="num-positive">+4.06%</span> rebound. Sector strategist identifies this as 'statistical outlier' with mean reversion potential. However, Technical analyst only assigns 58% confidence to QQQ 'oversold_bounce' and warns QQQ 'still trading <span class="num-negative">-3.12%</span> below 20-period average' despite V-shaped recovery. Risk analyst is cautious on tech: XLK position size reduced to 1<span class="num-negative">-2%</span> (vs normal 3<span class="num-negative">-5%</span>) with invalidation at $137 close. The setup is compelling but UNCONFIRMED. We need Monday follow-through above today's highs on normal-to-declining volume to confirm this is accumulation, not just short-covering. The macro backdrop (declining yields, Fed pause) is supportive, but the mega-cap distribution (AMZN/GOOGL) creates sector headwinds. This is a WATCH for confirmation, not immediate entry.</span></div></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">sector</strong>: AMD +8.28% statistical outlier after -11.95% 5D decline</li><li><strong style="color:#A5B4FC;">technical</strong>: XLK +4.06% bounce but 'volatility expansion' warning</li><li><strong style="color:#A5B4FC;">technical</strong>: QQQ oversold bounce lacks conviction</li><li><strong style="color:#A5B4FC;">risk</strong>: XLK position size reduced, tight stop at $137</li><li><strong style="color:#A5B4FC;">macro</strong>: Declining yields support growth/tech</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Friday short-cover bounce may reverse Monday</li><li>Mega-cap distribution creates sector drag</li><li>No confirmation of trend reversal yet</li><li>High beta amplifies downside if tech resumes decline</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Failure to hold today's gains on Monday, or XLK close below $137 invalidates setup immediately</div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="4" data-action="BUY"
+         data-confidence="0.74"
+         style="border-left:4px solid #10B981;">
+      <div class="insight-header" onclick="toggleInsight(4)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(16,185,129,0.10);color:#10B981;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">NEM</span><span class="symbol-tag">GLD</span><span class="symbol-tag">GDX</span><span class="symbol-tag">GOLD</span><span class="symbol-tag">AEM</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="mini-radial-gauge" id="mini-gauge-4"
+               data-value="74" data-color="#F59E0B"></div>
+        </div>
+        <h3 class="insight-title">Gold Miner Leverage Play: NEM Captures $5000 Gold Breakout with Operational Gearing</h3>
+        <p class="insight-thesis-preview">Gold surge to near $5000 (+10.90%) represents a macro regime shift - either inflation fears or geopolitical risk premium expansion. NEM provides leveraged exposure: +6.26% 1D captu...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-4">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Gold surge to near $5000 (<span class="num-positive">+10.90%</span>) represents a macro regime shift - either inflation fears or geopolitical risk premium expansion. NEM provides leveraged exposure: <span class="num-positive">+6.26%</span> 1D captures only partial upside potential as gold miners typically deliver 2-3x the metal's move once operational leverage kicks in. Sector strategist identifies Materials sector with 86% breadth and <span class="num-positive">+10.35%</span> 20D momentum. Macro economist flags 'Commodity Reflation/Supply Concerns' as key theme. The gold move appears to be early-stage given normal volume on NEM (not climactic exhaustion). Technical setup is clean: momentum leader in strong sector. Risk/reward favors entry here as $5000 gold is a psychological level that could trigger further FOMO buying and central bank accumulation. Declining yields (<span class="num-negative">-0.84%</span> on 10Y) paradoxically support gold, suggesting this is NOT just an inflation play but a monetary debasement/safe-haven bid.</p></div></div><div class="detail-section"><div class="detail-label">Key Factors</div><ul class="detail-list"><li><strong style="color:#A5B4FC;">macro</strong>: Gold surging +10.90% to $5000 signals regime shift</li><li><strong style="color:#A5B4FC;">sector</strong>: NEM +6.26% 1D, Materials sector +10.35% 20D with 86% breadth</li><li><strong style="color:#A5B4FC;">macro</strong>: Declining yields paradoxically support gold</li><li><strong style="color:#A5B4FC;">sector</strong>: Normal volume suggests early-stage move, not exhaustion</li></ul></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Gold mean reversion if geopolitical risks ease</li><li>Miner operational issues can break correlation</li><li>USD strength could cap gold upside</li><li>Momentum exhaustion after vertical move</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Gold close below $4800 or NEM break below recent support with volume spike</div>
+      </div>
+    </div>
+
     </div>
   </div>
 
@@ -860,7 +1013,7 @@ body {
 <script>
 (function() {
   // Insight data for filtering/sorting
-  var insightData = [];
+  var insightData = [{"index": 0, "action": "STRONG_BUY", "confidence": 0.82}, {"index": 1, "action": "SELL", "confidence": 0.79}, {"index": 2, "action": "BUY", "confidence": 0.72}, {"index": 3, "action": "WATCH", "confidence": 0.58}, {"index": 4, "action": "BUY", "confidence": 0.74}];
   var currentFilter = 'ALL';
   var sortDescending = false;
 
@@ -875,7 +1028,6 @@ body {
   // Filter insights by action
   window.filterInsights = function(action) {
     currentFilter = action;
-    // Update active button
     document.querySelectorAll('.filter-btn').forEach(function(btn) {
       btn.classList.toggle('active', btn.getAttribute('data-action') === action);
     });
@@ -893,34 +1045,18 @@ body {
   function applyFiltersAndSort() {
     var container = document.getElementById('insights-container');
     var cards = Array.from(container.querySelectorAll('.insight-card'));
-
-    // Build order array
     var order = insightData.slice();
-
-    // Filter
     if (currentFilter !== 'ALL') {
       order = order.filter(function(d) { return d.action === currentFilter; });
     }
-
-    // Sort
     if (sortDescending) {
       order.sort(function(a, b) { return b.confidence - a.confidence; });
     }
-
     var visibleIndices = new Set(order.map(function(d) { return d.index; }));
-
-    // Reorder DOM and show/hide
-    // First hide all
     cards.forEach(function(card) {
       var idx = parseInt(card.getAttribute('data-index'));
-      if (visibleIndices.has(idx)) {
-        card.style.display = '';
-      } else {
-        card.style.display = 'none';
-      }
+      card.style.display = visibleIndices.has(idx) ? '' : 'none';
     });
-
-    // Reorder visible cards
     if (sortDescending) {
       order.forEach(function(d) {
         var card = container.querySelector('.insight-card[data-index="' + d.index + '"]');
@@ -928,6 +1064,176 @@ body {
       });
     }
   }
+
+  // === ApexCharts === //
+  var darkTheme = {
+    mode: 'dark',
+    palette: 'palette1',
+    monochrome: { enabled: false }
+  };
+
+  // Confidence Distribution (radialBar)
+  var confDist = [1, 3, 1];
+  var confTotal = confDist[0] + confDist[1] + confDist[2];
+  if (confTotal > 0) {
+    var confPcts = confDist.map(function(v) { return Math.round(v / confTotal * 100); });
+    new ApexCharts(document.querySelector('#chart-confidence'), {
+      chart: { type: 'radialBar', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      plotOptions: {
+        radialBar: {
+          hollow: { size: '30%' },
+          track: { background: 'rgba(255,255,255,0.06)' },
+          dataLabels: {
+            name: { fontSize: '12px', color: '#94A3B8', offsetY: -4 },
+            value: { fontSize: '14px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,
+                      formatter: function(val, opts) { return confDist[opts.seriesIndex] + ' insights'; } }
+          }
+        }
+      },
+      series: confPcts,
+      labels: ['High (>80%)', 'Medium (60-80%)', 'Low (<60%)'],
+      colors: ['#10B981', '#F59E0B', '#EF4444'],
+      stroke: { lineCap: 'round' }
+    }).render();
+  } else {
+    document.querySelector('#chart-confidence').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No confidence data</div>';
+  }
+
+  // Action Breakdown (donut)
+  var actionLabels = ["Strong Buy", "Buy", "Sell", "Watch"];
+  var actionValues = [1, 2, 1, 1];
+  var actionColors = ["#22c55e", "#10B981", "#EF4444", "#6366F1"];
+  if (actionValues.length > 0) {
+    new ApexCharts(document.querySelector('#chart-actions'), {
+      chart: { type: 'donut', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      series: actionValues,
+      labels: actionLabels,
+      colors: actionColors,
+      plotOptions: {
+        pie: {
+          donut: {
+            size: '60%',
+            labels: {
+              show: true,
+              total: {
+                show: true,
+                label: 'Total',
+                fontSize: '13px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 600,
+                color: '#94A3B8',
+                formatter: function(w) { return w.globals.seriesTotals.reduce(function(a,b){ return a+b; }, 0); }
+              },
+              value: {
+                fontSize: '20px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 700,
+                color: '#F1F5F9'
+              }
+            }
+          }
+        }
+      },
+      dataLabels: { enabled: false },
+      legend: {
+        position: 'bottom',
+        fontSize: '12px',
+        fontFamily: 'Inter, sans-serif',
+        fontWeight: 600,
+        labels: { colors: '#94A3B8' },
+        markers: { radius: 3 }
+      },
+      stroke: { width: 2, colors: ['#0B0F19'] }
+    }).render();
+  } else {
+    document.querySelector('#chart-actions').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No action data</div>';
+  }
+
+  // Sector Exposure (horizontal bar)
+  var sectorNames = [];
+  var sectorValues = [];
+  var sectorColors = [];
+  if (sectorNames.length > 0) {
+    new ApexCharts(document.querySelector('#chart-sectors'), {
+      chart: { type: 'bar', height: 220, background: 'transparent', toolbar: { show: false } },
+      theme: darkTheme,
+      series: [{ name: 'Performance', data: sectorValues }],
+      plotOptions: {
+        bar: {
+          horizontal: true,
+          borderRadius: 4,
+          barHeight: '60%',
+          distributed: true,
+          colors: {
+            ranges: [
+              { from: -100, to: -0.001, color: '#EF4444' },
+              { from: 0, to: 100, color: '#10B981' }
+            ]
+          }
+        }
+      },
+      colors: sectorColors,
+      dataLabels: {
+        enabled: true,
+        formatter: function(val) { return (val >= 0 ? '+' : '') + val.toFixed(1) + '%'; },
+        style: { fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, colors: ['#E2E8F0'] },
+        offsetX: 6
+      },
+      xaxis: {
+        categories: sectorNames,
+        labels: {
+          style: { colors: '#64748B', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' },
+          formatter: function(val) { return val.toFixed(0) + '%'; }
+        },
+        axisBorder: { color: 'rgba(255,255,255,0.06)' },
+        axisTicks: { color: 'rgba(255,255,255,0.06)' }
+      },
+      yaxis: {
+        labels: { style: { colors: '#94A3B8', fontSize: '12px', fontWeight: 600 } }
+      },
+      grid: { borderColor: 'rgba(255,255,255,0.04)', xaxis: { lines: { show: true } }, yaxis: { lines: { show: false } } },
+      legend: { show: false },
+      tooltip: { enabled: false }
+    }).render();
+  } else {
+    document.querySelector('#chart-sectors').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No sector data</div>';
+  }
+
+  // Mini radial gauges for insight cards
+  document.querySelectorAll('.mini-radial-gauge').forEach(function(el) {
+    var val = parseInt(el.getAttribute('data-value'));
+    var color = el.getAttribute('data-color');
+    new ApexCharts(el, {
+      chart: { type: 'radialBar', height: 60, width: 60, sparkline: { enabled: true } },
+      series: [val],
+      colors: [color],
+      plotOptions: {
+        radialBar: {
+          hollow: { size: '40%' },
+          track: { background: 'rgba(255,255,255,0.06)' },
+          dataLabels: {
+            name: { show: false },
+            value: {
+              show: true,
+              fontSize: '11px',
+              fontFamily: 'JetBrains Mono, monospace',
+              fontWeight: 700,
+              color: color,
+              offsetY: 4,
+              formatter: function(v) { return v + '%'; }
+            }
+          }
+        }
+      },
+      stroke: { lineCap: 'round' }
+    }).render();
+  });
+
 })();
 </script>
 
