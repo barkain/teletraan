@@ -22,12 +22,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from claude_agent_sdk import (
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    AssistantMessage,
-    TextBlock,
-)
+from llm.client_pool import pool_query_llm
 
 from models.knowledge_pattern import KnowledgePattern, PatternType
 
@@ -482,24 +477,9 @@ class PatternExtractor:
             "with clear, measurable conditions that could be used for systematic trading."
         )
 
-        options = ClaudeAgentOptions(
-            system_prompt=system_prompt,
-        )
-
-        response_text = ""
-
         try:
-            async with ClaudeSDKClient(options=options) as client:
-                await client.query(prompt)
-
-                async for msg in client.receive_response():
-                    if isinstance(msg, AssistantMessage):
-                        for block in msg.content:
-                            if isinstance(block, TextBlock):
-                                response_text += block.text
-
+            response_text = await pool_query_llm(system_prompt, prompt, "pattern_extractor")
             logger.debug(f"LLM extraction response: {len(response_text)} chars")
-
         except Exception as e:
             logger.exception(f"LLM extraction failed: {e}")
             raise

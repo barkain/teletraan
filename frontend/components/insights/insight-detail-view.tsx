@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   Loader2,
   Database,
+  Briefcase,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -41,6 +42,7 @@ import {
   useInsightConversations,
   type InsightConversation,
 } from '@/lib/hooks/use-insight-conversation';
+import { usePortfolio } from '@/lib/hooks/use-portfolio';
 import type { DeepInsight, InsightAction } from '@/types';
 
 // ============================================
@@ -179,11 +181,13 @@ function InsightDetailsPanel({
   onRefresh,
   isRefreshing,
   onSymbolClick,
+  portfolioMatch,
 }: {
   insight: DeepInsight;
   onRefresh: () => void;
   isRefreshing: boolean;
   onSymbolClick: (symbol: string) => void;
+  portfolioMatch?: { symbols: string[]; allocationPct?: number } | null;
 }) {
   const actionInfo = actionConfig[insight.action];
   const ActionIcon = actionInfo.icon;
@@ -202,7 +206,23 @@ function InsightDetailsPanel({
 
         {/* Title and Thesis */}
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight mb-2">{insight.title}</h1>
+          <div className="flex items-start gap-2 mb-2">
+            <h1 className="text-2xl font-bold tracking-tight">{insight.title}</h1>
+            {portfolioMatch && portfolioMatch.symbols.length > 0 && (
+              <Badge
+                variant="outline"
+                className="shrink-0 mt-1 border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+              >
+                <Briefcase className="w-3 h-3" />
+                In Portfolio
+                {portfolioMatch.allocationPct != null && (
+                  <span className="ml-0.5 opacity-80">
+                    ({portfolioMatch.allocationPct.toFixed(1)}%)
+                  </span>
+                )}
+              </Badge>
+            )}
+          </div>
           <p className="text-muted-foreground leading-relaxed">{insight.thesis}</p>
         </div>
 
@@ -539,7 +559,7 @@ function ConversationsPanel({
         </TabsContent>
 
         {/* Active Conversation */}
-        <TabsContent value="chat" className="flex-1 m-0">
+        <TabsContent value="chat" className="flex-1 min-h-0 overflow-hidden m-0">
           {selectedConversationId && (
             <InsightConversationPanel
               conversationId={selectedConversationId}
@@ -567,6 +587,9 @@ export function InsightDetailView({ insightId }: InsightDetailViewProps) {
 
   // Fetch insight data
   const { data: insight, isLoading, error, refetch, isFetching } = useDeepInsight(insightId);
+
+  // Fetch portfolio for relevance badge
+  const { data: portfolio } = usePortfolio();
 
   // Conversations
   const { createConversationAsync, isCreating } = useInsightConversations(insightId);
@@ -654,6 +677,26 @@ export function InsightDetailView({ insightId }: InsightDetailViewProps) {
     );
   }
 
+  // Compute portfolio relevance
+  const portfolioMatch = (() => {
+    if (!portfolio?.holdings?.length) return null;
+    const heldSymbols = new Set(portfolio.holdings.map((h) => h.symbol.toUpperCase()));
+    const insightSymbols = [
+      ...(insight.primary_symbol ? [insight.primary_symbol.toUpperCase()] : []),
+      ...insight.related_symbols.map((s) => s.toUpperCase()),
+    ];
+    const matchedSymbols = insightSymbols.filter((s) => heldSymbols.has(s));
+    if (matchedSymbols.length === 0) return null;
+    // Sum allocation_pct for matched holdings
+    const totalAllocation = portfolio.holdings
+      .filter((h) => matchedSymbols.includes(h.symbol.toUpperCase()))
+      .reduce((sum, h) => sum + (h.allocation_pct ?? 0), 0);
+    return {
+      symbols: matchedSymbols,
+      allocationPct: totalAllocation > 0 ? totalAllocation : undefined,
+    };
+  })();
+
   return (
     <div className="space-y-6">
       {/* Back Navigation */}
@@ -682,6 +725,7 @@ export function InsightDetailView({ insightId }: InsightDetailViewProps) {
                 onRefresh={handleRefresh}
                 isRefreshing={isFetching}
                 onSymbolClick={handleSymbolClick}
+                portfolioMatch={portfolioMatch}
               />
             </ScrollArea>
           </CardContent>

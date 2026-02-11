@@ -332,6 +332,49 @@ export const api = {
         putApi<WatchlistSettings>('/api/v1/settings/watchlist', { symbols }),
     },
   },
+
+  // Portfolio
+  portfolio: {
+    get: () =>
+      fetchApi<Portfolio>('/api/v1/portfolio'),
+    create: (data?: { name?: string; description?: string }) =>
+      postApi<Portfolio>('/api/v1/portfolio', data),
+    addHolding: (holding: HoldingCreate) =>
+      postApi<PortfolioHolding>('/api/v1/portfolio/holdings', holding),
+    updateHolding: (holdingId: number, data: HoldingUpdate) =>
+      putApi<PortfolioHolding>(`/api/v1/portfolio/holdings/${holdingId}`, data),
+    deleteHolding: (holdingId: number) =>
+      deleteApi<void>(`/api/v1/portfolio/holdings/${holdingId}`),
+    impact: () =>
+      fetchApi<PortfolioImpact>('/api/v1/portfolio/impact'),
+  },
+
+  // Research
+  research: {
+    list: (params?: ResearchListParams) =>
+      fetchApi<ResearchListResponse>('/api/v1/research', {
+        params: params as Record<string, string | number | boolean | undefined>,
+      }),
+    get: (id: number) =>
+      fetchApi<FollowUpResearch>(`/api/v1/research/${id}`),
+    create: (data: ResearchCreateRequest) =>
+      postApi<FollowUpResearch>('/api/v1/research', data),
+    cancel: (id: number) =>
+      deleteApi<void>(`/api/v1/research/${id}`),
+  },
+
+  // Reports
+  reports: {
+    list: (params?: { limit?: number; offset?: number }) =>
+      fetchApi<ReportListResponse>('/api/v1/reports', {
+        params: params as Record<string, string | number | boolean | undefined>,
+      }),
+    get: (id: string) =>
+      fetchApi<ReportDetail>(`/api/v1/reports/${id}`),
+    htmlUrl: (id: string) => `${API_URL}/api/v1/reports/${id}/html`,
+    publish: (id: string) =>
+      postApi<PublishResponse>(`/api/v1/reports/${id}/publish`),
+  },
 };
 
 // ============================================
@@ -388,8 +431,10 @@ export const chatApi = {
 };
 
 // Import types
-import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse } from '@/types';
+import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact } from '@/types';
 import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
+import type { FollowUpResearch, ResearchListResponse, ResearchListParams, ResearchCreateRequest } from '@/lib/types/research';
+import type { ReportListResponse, ReportDetail, PublishResponse } from '@/lib/types/report';
 
 // ============================================
 // Data Refresh API

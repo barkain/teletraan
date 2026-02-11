@@ -24,11 +24,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from claude_agent_sdk import (
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
     AssistantMessage,
     TextBlock,
 )
+from llm.client_pool import get_client_pool
 
 from database import async_session_factory
 from models.deep_insight import DeepInsight
@@ -305,16 +304,19 @@ class InsightConversationAgent:
         # Build full prompt with history and new message
         user_prompt = f"{formatted_history}\n\nUser: {message}" if formatted_history else message
 
-        # Create SDK options
-        options = ClaudeAgentOptions(
-            system_prompt=system_prompt,
-        )
-
-        # Stream response
+        # Stream response via shared client pool
         logger.info(f"[CONV] Starting chat for conversation {conversation_id}")
 
-        async with ClaudeSDKClient(options=options) as client:
-            await client.query(user_prompt)
+        # Pool clients have no system prompt -- prepend to user prompt
+        combined_prompt = f"""<system_instructions>
+{system_prompt}
+</system_instructions>
+
+{user_prompt}"""
+
+        pool = get_client_pool()
+        async with pool.checkout() as client:
+            await client.query(combined_prompt)
 
             async for msg in client.receive_response():
                 if isinstance(msg, AssistantMessage):

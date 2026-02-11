@@ -85,6 +85,18 @@ from schemas.outcome import (
     OutcomeSummaryResponse,
     StartTrackingRequest,
 )
+from schemas.portfolio import (
+    AffectedHolding,
+    HoldingBase,
+    HoldingCreate,
+    HoldingResponse,
+    HoldingUpdate,
+    PortfolioBase,
+    PortfolioCreate,
+    PortfolioImpactResponse,
+    PortfolioResponse,
+    PortfolioSummaryResponse,
+)
 from schemas.stock import (
     PriceHistoryResponse,
     StockBase,
@@ -175,4 +187,15 @@ __all__ = [
     "MatchingConditions",
     "TrackRecordResponse",
     "TypeBreakdown",
+    # Portfolio schemas
+    "AffectedHolding",
+    "HoldingBase",
+    "HoldingCreate",
+    "HoldingResponse",
+    "HoldingUpdate",
+    "PortfolioBase",
+    "PortfolioCreate",
+    "PortfolioImpactResponse",
+    "PortfolioResponse",
+    "PortfolioSummaryResponse",
 ]

@@ -95,25 +95,11 @@ from analysis.agents.synthesis_lead import (  # type: ignore[import-not-found]
 )
 from analysis.context_builder import MarketContextBuilder  # type: ignore[import-not-found]
 from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
+from analysis.pattern_extractor import PatternExtractor  # type: ignore[import-not-found]
+from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
+from llm.client_pool import pool_query_llm  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# LLM concurrency limiter
-# Prevents too many simultaneous Claude SDK sessions (which can crash the host).
-# The semaphore is lazily initialised so it is always bound to the running
-# event loop at first use.
-# ---------------------------------------------------------------------------
-MAX_CONCURRENT_LLM: int = 3  # Max simultaneous Claude SDK sessions
-_llm_semaphore: asyncio.Semaphore | None = None
-
-
-def _get_llm_semaphore() -> asyncio.Semaphore:
-    """Return the module-level LLM semaphore, creating it lazily."""
-    global _llm_semaphore
-    if _llm_semaphore is None:
-        _llm_semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM)
-    return _llm_semaphore
 
 
 # Valid insight types and actions for validation
@@ -136,6 +122,7 @@ class AutonomousAnalysisResult:
     analyst_reports: dict[str, dict[str, Any]] = field(default_factory=dict)
     elapsed_seconds: float = 0.0
     phases_completed: list[str] = field(default_factory=list)
+    phase_summaries: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -163,6 +150,7 @@ class AutonomousAnalysisResult:
             "discovery_summary": self.discovery_summary,
             "elapsed_seconds": round(self.elapsed_seconds, 2),
             "phases_completed": self.phases_completed,
+            "phase_summaries": self.phase_summaries,
             "errors": self.errors,
         }
 
@@ -246,6 +234,91 @@ class AutonomousDeepEngine:
 
         self._last_analysis_time: datetime | None = None
 
+    async def _get_portfolio_holdings(self) -> dict[str, dict[str, float]]:
+        """Fetch portfolio holdings from the database.
+
+        Returns a dict mapping symbol to holding info, e.g.:
+        {"AAPL": {"shares": 50, "cost_basis": 150.0, "total_cost": 7500.0}}
+
+        Returns an empty dict if no portfolio exists or on any error.
+        Portfolio fetch failure must never break the analysis pipeline.
+        """
+        try:
+            from sqlalchemy import select  # type: ignore[import-not-found]
+            from models.portfolio import Portfolio  # type: ignore[import-not-found]
+
+            async with async_session_factory() as session:
+                result = await session.execute(select(Portfolio).limit(1))
+                portfolio = result.scalar_one_or_none()
+
+                if not portfolio or not portfolio.holdings:
+                    return {}
+
+                holdings: dict[str, dict[str, float]] = {}
+                for h in portfolio.holdings:
+                    holdings[h.symbol.upper()] = {
+                        "shares": h.shares,
+                        "cost_basis": h.cost_basis,
+                        "total_cost": h.shares * h.cost_basis,
+                    }
+
+                logger.info(
+                    f"Loaded {len(holdings)} portfolio holdings: "
+                    f"{', '.join(holdings.keys())}"
+                )
+                return holdings
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch portfolio holdings (non-fatal): {e}")
+            return {}
+
+    def _build_portfolio_synthesis_context(
+        self,
+        portfolio_holdings: dict[str, dict[str, float]],
+    ) -> str:
+        """Build portfolio context string for the synthesis prompt.
+
+        Args:
+            portfolio_holdings: Dict from _get_portfolio_holdings().
+
+        Returns:
+            Formatted portfolio context string, or empty string if no holdings.
+        """
+        if not portfolio_holdings:
+            return ""
+
+        total_cost = sum(h["total_cost"] for h in portfolio_holdings.values())
+
+        lines = [
+            "",
+            "## Portfolio Holdings",
+            "The user holds positions in the following stocks. "
+            "Consider how the analysis findings impact these holdings specifically. "
+            "Highlight any risks or opportunities directly relevant to held positions.",
+            "",
+        ]
+
+        for symbol, info in sorted(
+            portfolio_holdings.items(),
+            key=lambda x: x[1]["total_cost"],
+            reverse=True,
+        ):
+            allocation_pct = (
+                (info["total_cost"] / total_cost * 100) if total_cost > 0 else 0
+            )
+            lines.append(
+                f"- {symbol}: {info['shares']:.1f} shares @ "
+                f"${info['cost_basis']:.2f} cost basis "
+                f"({allocation_pct:.1f}% of portfolio)"
+            )
+
+        lines.append(
+            "\nPrioritize insights that directly affect held positions. "
+            "Flag any bearish signals on held stocks as portfolio risks."
+        )
+
+        return "\n".join(lines)
+
     async def run_autonomous_analysis(
         self,
         max_insights: int = 5,
@@ -279,25 +352,78 @@ class AutonomousDeepEngine:
         logger.info(f"Starting autonomous analysis {analysis_id}")
 
         try:
-            # ===== PHASE 1: Macro Scan =====
-            logger.info("Phase 1: Scanning macro environment...")
-            await self._update_task_progress(task_id, "macro_scan", 10, "Scanning macro environment...")
-            macro_result = await self._run_macro_scan()
+            # ===== PHASE 1 + PHASE 2: Macro Scan & Heatmap Fetch (concurrent) =====
+            # These two phases are independent -- only Phase 3 (HeatmapAnalysis)
+            # needs both results.  Running them concurrently saves wall-clock time.
+            logger.info("Phase 1+2: Scanning macro environment & fetching heatmap concurrently...")
+            await self._update_task_progress(task_id, "macro_scan", 10, "Scanning macro environment & fetching heatmap...")
+
+            macro_coro = self._run_macro_scan()
+            heatmap_coro = self._run_heatmap_fetch()
+            phase1_result, phase2_result = await asyncio.gather(
+                macro_coro, heatmap_coro, return_exceptions=True
+            )
+
+            # --- Handle Phase 1 (macro scan) result ---
+            if isinstance(phase1_result, BaseException):
+                raise phase1_result  # Macro scan is required; propagate failure
+            macro_result: MacroScanResult = phase1_result
             result.macro_result = macro_result
             result.phases_completed.append("macro_scan")
             logger.info(f"Macro scan complete. Regime: {macro_result.market_regime}")
 
-            # ===== PHASE 2+: Heatmap Pipeline (with legacy fallback) =====
-            try:
-                result = await self._run_heatmap_pipeline(
-                    result, macro_result, deep_dive_count, max_insights, task_id
-                )
-            except Exception as heatmap_err:
-                logger.warning(f"Heatmap pipeline failed, falling back to legacy: {heatmap_err}")
-                result.errors.append(f"Heatmap pipeline failed (using legacy fallback): {str(heatmap_err)}")
+            # Capture macro scan summary from structured data
+            theme_names = [t.name for t in macro_result.themes[:3]]
+            risk_names = [r.description for r in macro_result.key_risks[:2]]
+            macro_summary_parts = [
+                f"Detected {macro_result.market_regime} regime ({macro_result.regime_confidence:.0%} confidence).",
+            ]
+            if theme_names:
+                macro_summary_parts.append(f"Key themes: {', '.join(theme_names)}.")
+            if risk_names:
+                macro_summary_parts.append(f"Top risks: {', '.join(risk_names)}.")
+            result.phase_summaries["macro_scan"] = " ".join(macro_summary_parts)
+
+            # --- Handle Phase 2 (heatmap fetch) result ---
+            if isinstance(phase2_result, BaseException):
+                logger.warning(f"Heatmap fetch failed (will use legacy fallback): {phase2_result}")
+                result.errors.append(f"Heatmap fetch failed (using legacy fallback): {str(phase2_result)}")
                 result = await self._run_legacy_pipeline(
                     result, macro_result, deep_dive_count, max_insights, task_id
                 )
+            else:
+                heatmap_data: HeatmapData = phase2_result
+                result.heatmap_data = heatmap_data
+                result.phases_completed.append("heatmap_fetch")
+                logger.info(
+                    f"Heatmap fetch complete. {len(heatmap_data.sectors)} sectors, "
+                    f"{len(heatmap_data.stocks)} stocks"
+                )
+
+                # Capture heatmap fetch summary from structured data
+                best_sector = max(heatmap_data.sectors, key=lambda s: s.change_1d) if heatmap_data.sectors else None
+                worst_sector = min(heatmap_data.sectors, key=lambda s: s.change_1d) if heatmap_data.sectors else None
+                hf_parts = [
+                    f"Fetched {len(heatmap_data.sectors)} sectors and {len(heatmap_data.stocks)} stocks ({heatmap_data.market_status}).",
+                ]
+                if best_sector and worst_sector:
+                    hf_parts.append(
+                        f"Strongest: {best_sector.name} ({best_sector.change_1d:+.1f}%), "
+                        f"weakest: {worst_sector.name} ({worst_sector.change_1d:+.1f}%)."
+                    )
+                result.phase_summaries["heatmap_fetch"] = " ".join(hf_parts)
+
+                # ===== PHASE 3+: Heatmap Pipeline (with legacy fallback) =====
+                try:
+                    result = await self._run_heatmap_pipeline(
+                        result, macro_result, heatmap_data, deep_dive_count, max_insights, task_id
+                    )
+                except Exception as heatmap_err:
+                    logger.warning(f"Heatmap pipeline failed, falling back to legacy: {heatmap_err}")
+                    result.errors.append(f"Heatmap pipeline failed (using legacy fallback): {str(heatmap_err)}")
+                    result = await self._run_legacy_pipeline(
+                        result, macro_result, deep_dive_count, max_insights, task_id
+                    )
 
         except Exception as e:
             logger.error(f"Autonomous analysis failed: {e}")
@@ -321,18 +447,21 @@ class AutonomousDeepEngine:
         self,
         result: AutonomousAnalysisResult,
         macro_result: MacroScanResult,
+        heatmap_data: HeatmapData,
         deep_dive_count: int,
         max_insights: int,
         task_id: str | None,
     ) -> AutonomousAnalysisResult:
-        """Run the heatmap-driven pipeline (Phases 2-5).
+        """Run the heatmap-driven pipeline (Phases 3-5).
 
-        All types are non-Optional here since any failure propagates
-        to the caller which falls back to the legacy pipeline.
+        Heatmap data is already fetched by the caller and passed in.
+        Any failure propagates to the caller which falls back to
+        the legacy pipeline.
 
         Args:
             result: The in-progress result to populate.
             macro_result: Macro scan results from Phase 1.
+            heatmap_data: Heatmap data from Phase 2.
             deep_dive_count: Number of stocks to deep dive.
             max_insights: Max insights to generate.
             task_id: Optional task ID for progress tracking.
@@ -340,16 +469,9 @@ class AutonomousDeepEngine:
         Returns:
             Completed AutonomousAnalysisResult.
         """
-        # ===== PHASE 2: Heatmap Fetch =====
-        logger.info("Phase 2: Fetching market heatmap...")
-        await self._update_task_progress(task_id, "heatmap_fetch", 20, "Fetching market heatmap...")
-        heatmap_data = await self._run_heatmap_fetch()
-        result.heatmap_data = heatmap_data
-        result.phases_completed.append("heatmap_fetch")
-        logger.info(
-            f"Heatmap fetch complete. {len(heatmap_data.sectors)} sectors, "
-            f"{len(heatmap_data.stocks)} stocks"
-        )
+
+        # ===== Load portfolio holdings (non-blocking) =====
+        portfolio_holdings = await self._get_portfolio_holdings()
 
         # ===== PHASE 3: Heatmap Analysis =====
         logger.info("Phase 3: Analyzing heatmap patterns...")
@@ -363,6 +485,19 @@ class AutonomousDeepEngine:
             f"Heatmap analysis complete. Selected {len(heatmap_analysis_result.selected_stocks)} stocks"
         )
 
+        # Capture heatmap analysis summary
+        ha_high = heatmap_analysis_result.get_high_priority_stocks()
+        ha_patterns_desc = [p.description[:60] for p in heatmap_analysis_result.patterns[:2]]
+        ha_parts = [
+            f"Selected {len(heatmap_analysis_result.selected_stocks)} stocks "
+            f"({len(ha_high)} high priority) at {heatmap_analysis_result.confidence:.0%} confidence.",
+        ]
+        if heatmap_analysis_result.sectors_to_watch:
+            ha_parts.append(f"Sectors to watch: {', '.join(heatmap_analysis_result.sectors_to_watch[:4])}.")
+        if ha_patterns_desc:
+            ha_parts.append(f"Key patterns: {'; '.join(ha_patterns_desc)}.")
+        result.phase_summaries["heatmap_analysis"] = " ".join(ha_parts)
+
         # ===== PHASE 4: Deep Dive Analysis =====
         # Get stocks from heatmap analysis: high priority first, then others
         high_priority = heatmap_analysis_result.get_high_priority_stocks()
@@ -375,6 +510,20 @@ class AutonomousDeepEngine:
             s.symbol for s in ordered_selections[:deep_dive_count]
         ]
 
+        # Merge portfolio holdings into deep dive list (max 10 extra)
+        if portfolio_holdings:
+            existing_symbols = set(symbols_to_analyze)
+            portfolio_additions = [
+                sym for sym in portfolio_holdings
+                if sym not in existing_symbols
+            ][:10]
+            if portfolio_additions:
+                symbols_to_analyze.extend(portfolio_additions)
+                logger.info(
+                    f"Added {len(portfolio_additions)} portfolio-held symbols "
+                    f"to deep dive: {portfolio_additions}"
+                )
+
         logger.info(f"Phase 4: Deep diving into {symbols_to_analyze}...")
         await self._update_task_progress(
             task_id, "deep_dive", 55,
@@ -386,21 +535,40 @@ class AutonomousDeepEngine:
             macro_result, heatmap_analysis_result
         )
 
-        # Run all analysts in parallel for each symbol
+        # Run all symbols concurrently (semaphore gates actual LLM calls)
         analyst_reports: dict[str, dict[str, Any]] = {}
-        for symbol in symbols_to_analyze:
-            try:
-                symbol_reports = await self._run_analysts_for_symbol(
-                    symbol, discovery_context
-                )
+
+        async def _analyze_symbol(sym: str) -> tuple[str, dict[str, Any]]:
+            reports = await self._run_analysts_for_symbol(sym, discovery_context)
+            return sym, reports
+
+        gather_results = await asyncio.gather(
+            *[_analyze_symbol(sym) for sym in symbols_to_analyze],
+            return_exceptions=True,
+        )
+
+        for r in gather_results:
+            if isinstance(r, BaseException):
+                logger.error(f"Deep dive failed for a symbol: {r}")
+                result.errors.append(f"Deep dive: {str(r)}")
+            else:
+                symbol, symbol_reports = r
                 analyst_reports[symbol] = symbol_reports
-            except Exception as e:
-                logger.error(f"Deep dive failed for {symbol}: {e}")
-                result.errors.append(f"Deep dive {symbol}: {str(e)}")
 
         result.analyst_reports = analyst_reports
         result.phases_completed.append("deep_dive")
         await self._update_task_progress(task_id, "deep_dive", 70, "Deep analysis complete")
+
+        # Capture deep dive summary
+        successful_symbols = list(analyst_reports.keys())
+        failed_count = sum(1 for r in gather_results if isinstance(r, BaseException))
+        dd_parts = [
+            f"Analyzed {len(successful_symbols)} stocks successfully"
+            f"{f' ({failed_count} failed)' if failed_count else ''}.",
+            f"Symbols: {', '.join(successful_symbols[:8])}"
+            f"{'...' if len(successful_symbols) > 8 else ''}.",
+        ]
+        result.phase_summaries["deep_dive"] = " ".join(dd_parts)
 
         # ===== PHASE 4.5: Coverage Evaluation (adaptive loop) =====
         logger.info("Phase 4.5: Evaluating coverage...")
@@ -418,6 +586,24 @@ class AutonomousDeepEngine:
         result.analyst_reports = analyst_reports
         result.phases_completed.append("coverage_evaluation")
 
+        # Capture coverage evaluation summary
+        pre_coverage_count = len(symbols_to_analyze)
+        post_coverage_count = len(analyst_reports)
+        added_count = post_coverage_count - pre_coverage_count
+        if added_count > 0:
+            added_symbols = [s for s in analyst_reports if s not in symbols_to_analyze]
+            ce_summary = (
+                f"Coverage loop added {added_count} additional stocks: "
+                f"{', '.join(added_symbols[:5])}. "
+                f"Total coverage: {post_coverage_count} stocks."
+            )
+        else:
+            ce_summary = (
+                f"Coverage sufficient with {post_coverage_count} stocks. "
+                f"No additional symbols needed."
+            )
+        result.phase_summaries["coverage_evaluation"] = ce_summary
+
         # ===== PHASE 5: Synthesis =====
         logger.info("Phase 5: Synthesizing insights...")
         await self._update_task_progress(task_id, "synthesis", 90, "Synthesizing insights...")
@@ -426,6 +612,7 @@ class AutonomousDeepEngine:
             macro_context=macro_result,
             heatmap_analysis=heatmap_analysis_result,
             max_insights=max_insights,
+            portfolio_holdings=portfolio_holdings,
         )
         result.phases_completed.append("synthesis")
 
@@ -438,6 +625,25 @@ class AutonomousDeepEngine:
                 heatmap_analysis_result,
             )
             result.insights = saved_insights
+
+        # Capture synthesis summary
+        actions = [i.get("action", "HOLD") for i in insights_data]
+        avg_conf = (
+            sum(float(i.get("confidence", 0)) for i in insights_data) / len(insights_data)
+            if insights_data else 0
+        )
+        titles = [i.get("title", "")[:40] for i in insights_data[:3]]
+        synth_parts = [
+            f"Generated {len(insights_data)} insights (avg confidence: {avg_conf:.0%}).",
+        ]
+        if actions:
+            from collections import Counter
+            action_counts = Counter(actions)
+            action_str = ", ".join(f"{cnt} {act}" for act, cnt in action_counts.most_common(3))
+            synth_parts.append(f"Actions: {action_str}.")
+        if titles:
+            synth_parts.append(f"Top: {'; '.join(titles)}.")
+        result.phase_summaries["synthesis"] = " ".join(synth_parts)
 
         result.discovery_summary = self._build_heatmap_discovery_summary(
             macro_result, heatmap_analysis_result, heatmap_data
@@ -621,14 +827,21 @@ class AutonomousDeepEngine:
                 f"Analyzing {len(additional_symbols)} additional stocks (iteration {iteration})..."
             )
 
-            for symbol in additional_symbols:
-                try:
-                    symbol_reports = await self._run_analysts_for_symbol(
-                        symbol, discovery_context
-                    )
-                    analyst_reports[symbol] = symbol_reports
-                except Exception as e:
-                    logger.error(f"Additional deep dive failed for {symbol}: {e}")
+            async def _analyze_additional(sym: str) -> tuple[str, dict[str, Any]]:
+                reports = await self._run_analysts_for_symbol(sym, discovery_context)
+                return sym, reports
+
+            coverage_results = await asyncio.gather(
+                *[_analyze_additional(sym) for sym in additional_symbols],
+                return_exceptions=True,
+            )
+
+            for r in coverage_results:
+                if isinstance(r, BaseException):
+                    logger.error(f"Additional deep dive failed: {r}")
+                else:
+                    sym, sym_reports = r
+                    analyst_reports[sym] = sym_reports
 
         return analyst_reports
 
@@ -685,6 +898,7 @@ class AutonomousDeepEngine:
         macro_context: MacroScanResult,
         heatmap_analysis: HeatmapAnalysis,
         max_insights: int,
+        portfolio_holdings: dict[str, dict[str, float]] | None = None,
     ) -> list[dict[str, Any]]:
         """Run Phase 5: Synthesis Lead with heatmap context.
 
@@ -693,6 +907,7 @@ class AutonomousDeepEngine:
             macro_context: Macro scan results.
             heatmap_analysis: Heatmap analysis results.
             max_insights: Maximum insights to generate.
+            portfolio_holdings: Optional dict of user portfolio holdings.
 
         Returns:
             List of insight dictionaries.
@@ -726,12 +941,17 @@ class AutonomousDeepEngine:
             max_insights,
         )
 
+        # Add portfolio context if holdings exist
+        portfolio_context = self._build_portfolio_synthesis_context(
+            portfolio_holdings or {}
+        )
+
         # Format analyst reports for synthesis
         synthesis_context = format_synthesis_context(
             self._flatten_analyst_reports(analyst_reports)
         )
 
-        full_context = f"{autonomous_context}\n\n{synthesis_context}"
+        full_context = f"{autonomous_context}{portfolio_context}\n\n{synthesis_context}"
 
         # Query LLM
         response = await self._query_llm(enhanced_prompt, full_context, "synthesis")
@@ -889,6 +1109,68 @@ class AutonomousDeepEngine:
             await session.commit()
             logger.info(f"Stored {len(stored)} insights to database")
 
+            # Extract patterns from each stored insight
+            try:
+                pattern_extractor = PatternExtractor(session)
+                for insight in stored:
+                    try:
+                        insight_dict = {
+                            "id": insight.id,
+                            "title": insight.title,
+                            "insight_type": insight.insight_type,
+                            "action": insight.action,
+                            "thesis": insight.thesis,
+                            "confidence": insight.confidence,
+                            "time_horizon": insight.time_horizon,
+                            "primary_symbol": insight.primary_symbol,
+                            "risk_factors": insight.risk_factors or [],
+                        }
+                        await pattern_extractor.extract_from_insight(insight_dict)
+                        logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
+                    except Exception as pe:
+                        logger.warning(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                await session.commit()
+            except Exception as e:
+                logger.warning(f"[AUTO] Pattern extraction phase failed: {e}")
+
+            # Auto-initiate outcome tracking for actionable insights
+            try:
+                actionable_actions = {"STRONG_BUY", "BUY", "SELL", "STRONG_SELL"}
+                action_to_direction = {
+                    "STRONG_BUY": "bullish",
+                    "BUY": "bullish",
+                    "SELL": "bearish",
+                    "STRONG_SELL": "bearish",
+                }
+                outcome_tracker = InsightOutcomeTracker(session)
+                tracked_count = 0
+                for insight in stored:
+                    try:
+                        if not insight.primary_symbol:
+                            continue
+                        if insight.action not in actionable_actions:
+                            continue
+                        predicted_direction = action_to_direction[insight.action]
+                        await outcome_tracker.start_tracking(
+                            insight_id=insight.id,
+                            symbol=insight.primary_symbol,
+                            predicted_direction=predicted_direction,
+                            tracking_days=20,
+                        )
+                        tracked_count += 1
+                        logger.info(
+                            f"[AUTO] Outcome tracking started for {insight.primary_symbol} "
+                            f"(action={insight.action}, direction={predicted_direction})"
+                        )
+                    except Exception as te:
+                        logger.warning(
+                            f"[AUTO] Outcome tracking failed for {insight.primary_symbol}: {te}"
+                        )
+                if tracked_count > 0:
+                    logger.info(f"[AUTO] Started outcome tracking for {tracked_count}/{len(stored)} heatmap insights")
+            except Exception as e:
+                logger.warning(f"[AUTO] Outcome tracking phase failed: {e}")
+
         return stored
 
     def _build_heatmap_discovery_summary(
@@ -964,12 +1246,31 @@ class AutonomousDeepEngine:
         logger.info("Running legacy pipeline (sector rotation + opportunity hunt)...")
 
         try:
+            # ===== Load portfolio holdings (non-blocking) =====
+            portfolio_holdings = await self._get_portfolio_holdings()
+
             # ===== LEGACY PHASE 2: Sector Rotation =====
             logger.info("Legacy Phase 2: Analyzing sector rotation...")
             await self._update_task_progress(task_id, "sector_rotation", 25, "Analyzing sector rotation...")
             sector_result = await self._run_sector_rotation(macro_result)
             result.sector_result = sector_result
             result.phases_completed.append("sector_rotation")
+
+            # Capture sector rotation summary
+            top_sector_names = [s.sector_name for s in sector_result.top_sectors[:3]]
+            avoid_names = [s.sector_name for s in sector_result.sectors_to_avoid[:2]]
+            sr_parts = [
+                f"Top sectors: {', '.join(top_sector_names) if top_sector_names else 'none identified'}.",
+            ]
+            if avoid_names:
+                sr_parts.append(f"Avoid: {', '.join(avoid_names)}.")
+            if sector_result.rotation_active:
+                sr_parts.append(
+                    f"Rotation active ({sector_result.rotation_stage}): "
+                    f"{', '.join(sector_result.rotation_from[:2])} -> "
+                    f"{', '.join(sector_result.rotation_to[:2])}."
+                )
+            result.phase_summaries["sector_rotation"] = " ".join(sr_parts)
 
             # ===== LEGACY PHASE 3: Opportunity Hunt =====
             logger.info("Legacy Phase 3: Hunting for opportunities...")
@@ -978,9 +1279,33 @@ class AutonomousDeepEngine:
             result.candidates = candidates
             result.phases_completed.append("opportunity_hunt")
 
+            # Capture opportunity hunt summary
+            candidate_symbols = [c.symbol for c in candidates.candidates[:5]]
+            oh_parts = [
+                f"Screened {candidates.total_screened} stocks, found {len(candidates.candidates)} candidates "
+                f"({candidates.confidence:.0%} confidence).",
+            ]
+            if candidate_symbols:
+                oh_parts.append(f"Top picks: {', '.join(candidate_symbols)}.")
+            result.phase_summaries["opportunity_hunt"] = " ".join(oh_parts)
+
             # ===== LEGACY PHASE 4: Deep Dive =====
             top_candidates = candidates.get_top_candidates(deep_dive_count)
             symbols_to_analyze = [c.symbol for c in top_candidates]
+
+            # Merge portfolio holdings into deep dive list (max 10 extra)
+            if portfolio_holdings:
+                existing_symbols = set(symbols_to_analyze)
+                portfolio_additions = [
+                    sym for sym in portfolio_holdings
+                    if sym not in existing_symbols
+                ][:10]
+                if portfolio_additions:
+                    symbols_to_analyze.extend(portfolio_additions)
+                    logger.info(
+                        f"[Legacy] Added {len(portfolio_additions)} portfolio-held "
+                        f"symbols to deep dive: {portfolio_additions}"
+                    )
 
             logger.info(f"Legacy Phase 4: Deep diving into {symbols_to_analyze}...")
             await self._update_task_progress(
@@ -1007,6 +1332,17 @@ class AutonomousDeepEngine:
             result.phases_completed.append("deep_dive")
             await self._update_task_progress(task_id, "deep_dive", 70, "Deep analysis complete")
 
+            # Capture legacy deep dive summary
+            legacy_successful = list(analyst_reports.keys())
+            legacy_failed = len(symbols_to_analyze) - len(legacy_successful)
+            ldd_parts = [
+                f"Analyzed {len(legacy_successful)} stocks successfully"
+                f"{f' ({legacy_failed} failed)' if legacy_failed else ''}.",
+                f"Symbols: {', '.join(legacy_successful[:8])}"
+                f"{'...' if len(legacy_successful) > 8 else ''}.",
+            ]
+            result.phase_summaries["deep_dive"] = " ".join(ldd_parts)
+
             # ===== LEGACY PHASE 5: Synthesis =====
             logger.info("Legacy Phase 5: Synthesizing insights...")
             await self._update_task_progress(task_id, "synthesis", 85, "Synthesizing insights...")
@@ -1016,6 +1352,7 @@ class AutonomousDeepEngine:
                 sector_context=sector_result,
                 candidates=candidates,
                 max_insights=max_insights,
+                portfolio_holdings=portfolio_holdings,
             )
             result.phases_completed.append("synthesis")
 
@@ -1024,6 +1361,27 @@ class AutonomousDeepEngine:
                     session, insights_data, macro_result, sector_result, candidates
                 )
                 result.insights = saved_insights
+
+            # Capture legacy synthesis summary
+            l_actions = [i.get("action", "HOLD") for i in insights_data]
+            l_avg_conf = (
+                sum(float(i.get("confidence", 0)) for i in insights_data) / len(insights_data)
+                if insights_data else 0
+            )
+            l_titles = [i.get("title", "")[:40] for i in insights_data[:3]]
+            ls_parts = [
+                f"Generated {len(insights_data)} insights (avg confidence: {l_avg_conf:.0%}).",
+            ]
+            if l_actions:
+                from collections import Counter
+                l_action_counts = Counter(l_actions)
+                l_action_str = ", ".join(
+                    f"{cnt} {act}" for act, cnt in l_action_counts.most_common(3)
+                )
+                ls_parts.append(f"Actions: {l_action_str}.")
+            if l_titles:
+                ls_parts.append(f"Top: {'; '.join(l_titles)}.")
+            result.phase_summaries["synthesis"] = " ".join(ls_parts)
 
             result.discovery_summary = self._build_discovery_summary(
                 macro_result, sector_result, candidates
@@ -1384,6 +1742,7 @@ class AutonomousDeepEngine:
         sector_context: SectorRotationResult,
         candidates: OpportunityList,
         max_insights: int,
+        portfolio_holdings: dict[str, dict[str, float]] | None = None,
     ) -> list[dict[str, Any]]:
         """Run Phase 5: Synthesis Lead (legacy pipeline).
 
@@ -1393,6 +1752,7 @@ class AutonomousDeepEngine:
             sector_context: Sector rotation results.
             candidates: Opportunity candidates.
             max_insights: Maximum insights to generate.
+            portfolio_holdings: Optional dict of user portfolio holdings.
 
         Returns:
             List of insight dictionaries.
@@ -1426,12 +1786,17 @@ class AutonomousDeepEngine:
             max_insights,
         )
 
+        # Add portfolio context if holdings exist
+        portfolio_context = self._build_portfolio_synthesis_context(
+            portfolio_holdings or {}
+        )
+
         # Format analyst reports for synthesis
         synthesis_context = format_synthesis_context(
             self._flatten_analyst_reports(analyst_reports)
         )
 
-        full_context = f"{autonomous_context}\n\n{synthesis_context}"
+        full_context = f"{autonomous_context}{portfolio_context}\n\n{synthesis_context}"
 
         # Query LLM
         response = await self._query_llm(enhanced_prompt, full_context, "synthesis")
@@ -1624,6 +1989,68 @@ class AutonomousDeepEngine:
             await session.commit()
             logger.info(f"Stored {len(stored)} insights to database")
 
+            # Extract patterns from each stored insight
+            try:
+                pattern_extractor = PatternExtractor(session)
+                for insight in stored:
+                    try:
+                        insight_dict = {
+                            "id": insight.id,
+                            "title": insight.title,
+                            "insight_type": insight.insight_type,
+                            "action": insight.action,
+                            "thesis": insight.thesis,
+                            "confidence": insight.confidence,
+                            "time_horizon": insight.time_horizon,
+                            "primary_symbol": insight.primary_symbol,
+                            "risk_factors": insight.risk_factors or [],
+                        }
+                        await pattern_extractor.extract_from_insight(insight_dict)
+                        logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
+                    except Exception as pe:
+                        logger.warning(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                await session.commit()
+            except Exception as e:
+                logger.warning(f"[AUTO] Pattern extraction phase failed: {e}")
+
+            # Auto-initiate outcome tracking for actionable insights
+            try:
+                actionable_actions = {"STRONG_BUY", "BUY", "SELL", "STRONG_SELL"}
+                action_to_direction = {
+                    "STRONG_BUY": "bullish",
+                    "BUY": "bullish",
+                    "SELL": "bearish",
+                    "STRONG_SELL": "bearish",
+                }
+                outcome_tracker = InsightOutcomeTracker(session)
+                tracked_count = 0
+                for insight in stored:
+                    try:
+                        if not insight.primary_symbol:
+                            continue
+                        if insight.action not in actionable_actions:
+                            continue
+                        predicted_direction = action_to_direction[insight.action]
+                        await outcome_tracker.start_tracking(
+                            insight_id=insight.id,
+                            symbol=insight.primary_symbol,
+                            predicted_direction=predicted_direction,
+                            tracking_days=20,
+                        )
+                        tracked_count += 1
+                        logger.info(
+                            f"[AUTO] Outcome tracking started for {insight.primary_symbol} "
+                            f"(action={insight.action}, direction={predicted_direction})"
+                        )
+                    except Exception as te:
+                        logger.warning(
+                            f"[AUTO] Outcome tracking failed for {insight.primary_symbol}: {te}"
+                        )
+                if tracked_count > 0:
+                    logger.info(f"[AUTO] Started outcome tracking for {tracked_count}/{len(stored)} legacy insights")
+            except Exception as e:
+                logger.warning(f"[AUTO] Outcome tracking phase failed: {e}")
+
         return stored
 
     def _get_opportunity_type(
@@ -1689,12 +2116,9 @@ class AutonomousDeepEngine:
         self,
         system_prompt: str,
         user_prompt: str,
-        agent_name: str,
+        agent_name: str = "unknown",
     ) -> str:
-        """Query the LLM using ClaudeSDKClient.
-
-        Acquires the module-level semaphore so that at most
-        ``MAX_CONCURRENT_LLM`` sessions run simultaneously.
+        """Query the LLM using the shared client pool.
 
         Args:
             system_prompt: System prompt for the agent.
@@ -1704,41 +2128,7 @@ class AutonomousDeepEngine:
         Returns:
             LLM response text.
         """
-        sem = _get_llm_semaphore()
-
-        async with sem:
-            try:
-                from claude_agent_sdk import (  # type: ignore[import-not-found]
-                    ClaudeAgentOptions,
-                    ClaudeSDKClient,
-                    AssistantMessage,
-                    TextBlock,
-                )
-
-                logger.info(f"[AUTO] Querying {agent_name}, prompt length: {len(user_prompt)} chars")
-
-                response_text = ""
-
-                options = ClaudeAgentOptions(system_prompt=system_prompt)
-
-                async with ClaudeSDKClient(options=options) as client:
-                    await client.query(user_prompt)
-
-                    async for msg in client.receive_response():
-                        if isinstance(msg, AssistantMessage):
-                            for block in msg.content:
-                                if isinstance(block, TextBlock):
-                                    response_text += block.text
-
-                logger.info(f"[AUTO] {agent_name} complete: {len(response_text)} chars")
-                return response_text
-
-            except ImportError:
-                logger.error("ClaudeSDKClient not available")
-                raise ImportError(
-                    "claude_agent_sdk is required for LLM queries. "
-                    "Install it to use the autonomous analysis engine."
-                )
+        return await pool_query_llm(system_prompt, user_prompt, agent_name)
 
     async def get_more_insights(
         self,

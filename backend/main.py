@@ -1,13 +1,20 @@
 """FastAPI application entry point."""
 
+import resource
 import logging
 import sys
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+# Raise the soft file-descriptor limit to avoid "Too many open files" (Errno 24)
+# under the autonomous analysis pipeline (Claude SDK subprocesses + yfinance
+# ThreadPoolExecutor + SQLite connections can exceed macOS default of 256).
+_soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 4096), _hard))
+
+from fastapi import FastAPI, Request  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
 
 # Configure logging before importing other modules
 # This ensures all loggers created with getLogger(__name__) use this configuration
@@ -27,8 +34,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)  # Reduce HTTP client noise
 
 logger = logging.getLogger(__name__)
 
-from api import api_router
-from api.exceptions import (
+from api import api_router  # noqa: E402
+from api.exceptions import (  # noqa: E402
     NotFoundError,
     ValidationError,
     DataSourceError,
@@ -36,9 +43,9 @@ from api.exceptions import (
     validation_error_handler,
     data_source_error_handler,
 )
-from config import get_settings
-from database import init_db, close_db, async_session_factory
-from scheduler import etl_orchestrator
+from config import get_settings  # noqa: E402
+from database import init_db, close_db, async_session_factory  # noqa: E402
+from scheduler import etl_orchestrator  # noqa: E402
 
 settings = get_settings()
 

@@ -54,6 +54,7 @@ class MarketContextBuilder:
         self._cache_ttl = timedelta(minutes=5)
         self._last_context: dict[str, Any] | None = None
         self._last_build_time: datetime | None = None
+        self._last_cache_key: tuple | None = None
 
     async def build_context(
         self,
@@ -85,6 +86,28 @@ class MarketContextBuilder:
             - sector_performance: Dict of sector ETF performance metrics
             - market_summary: Overall market status summary
         """
+        # Build a cache key from the call parameters so cache hits only occur
+        # when the exact same query is repeated within the TTL window.
+        normalized_symbols = tuple(sorted(s.upper() for s in symbols)) if symbols else None
+        cache_key = (
+            normalized_symbols,
+            include_price_history,
+            include_technical,
+            include_economic,
+            include_sectors,
+            price_history_days,
+        )
+
+        # Return cached context if it matches and is still within TTL
+        if (
+            self._last_context is not None
+            and self._last_build_time is not None
+            and self._last_cache_key == cache_key
+            and datetime.utcnow() - self._last_build_time < self._cache_ttl
+        ):
+            logger.info("Returning cached context (TTL still valid)")
+            return self._last_context
+
         async with async_session_factory() as db:
             context: dict[str, Any] = {
                 "timestamp": datetime.utcnow().isoformat(),

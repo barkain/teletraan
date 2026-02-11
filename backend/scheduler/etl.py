@@ -520,10 +520,21 @@ class ETLOrchestrator:
             replace_existing=True,
         )
 
-        # Daily insight outcome check at 4:30 PM ET (after market close)
+        # Insight outcome check every 4 hours during market hours (9:30 AM, 1:30 PM ET)
+        # plus the definitive post-close check at 4:30 PM ET
         self.scheduler.add_job(
             self.check_insight_outcomes,
-            CronTrigger(hour=16, minute=30, timezone="America/New_York"),
+            CronTrigger(hour="9,13", minute=30, day_of_week="mon-fri",
+                        timezone="America/New_York"),
+            id="intraday_outcome_check",
+            replace_existing=True,
+        )
+
+        # Daily definitive outcome check at 4:30 PM ET (after market close)
+        self.scheduler.add_job(
+            self.check_insight_outcomes,
+            CronTrigger(hour=16, minute=30, day_of_week="mon-fri",
+                        timezone="America/New_York"),
             id="daily_outcome_check",
             replace_existing=True,
         )
@@ -549,7 +560,8 @@ class ETLOrchestrator:
         logger.info(
             "ETL scheduler started with jobs: daily_price_refresh, "
             "weekly_economic_refresh, daily_analysis, weekly_stock_info_refresh, "
-            "daily_outcome_check, daily_theme_decay, daily_feature_computation"
+            "intraday_outcome_check, daily_outcome_check, daily_theme_decay, "
+            "daily_feature_computation"
         )
 
     def stop(self) -> None:

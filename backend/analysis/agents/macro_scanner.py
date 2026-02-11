@@ -27,6 +27,7 @@ from datetime import datetime
 from typing import Any
 
 from data.adapters.yahoo import YahooFinanceAdapter, YahooFinanceError  # type: ignore[import-not-found]
+from llm.client_pool import pool_query_llm  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
 
@@ -754,35 +755,11 @@ class MacroScanner:
             # Use provided LLM client
             return await self.llm_client.analyze(prompt)
 
-        # Use ClaudeSDKClient
-        try:
-            from claude_agent_sdk import (  # type: ignore[import-not-found]
-                ClaudeAgentOptions,
-                ClaudeSDKClient,
-                AssistantMessage,
-                TextBlock,
-            )
-
-            response_text = ""
-            options = ClaudeAgentOptions()
-
-            async with ClaudeSDKClient(options=options) as client:
-                await client.query(prompt)
-
-                async for msg in client.receive_response():
-                    if isinstance(msg, AssistantMessage):
-                        for block in msg.content:
-                            if isinstance(block, TextBlock):
-                                response_text += block.text
-
-            return response_text
-
-        except ImportError:
-            logger.error("ClaudeSDKClient not available and no llm_client provided")
-            raise ImportError(
-                "claude_agent_sdk is required for LLM queries. "
-                "Install it or provide an llm_client."
-            )
+        return await pool_query_llm(
+            system_prompt=f"You are a {self.role}.",
+            user_prompt=prompt,
+            agent_name=self.name,
+        )
 
     def _parse_result(self, response: str) -> MacroScanResult:
         """Parse LLM response into MacroScanResult.

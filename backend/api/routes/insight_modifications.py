@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,7 @@ from schemas.insight_conversation import (
     InsightModificationListResponse,
     ModificationApproval,
     ModificationRejection,
+    ModificationType as ModificationTypeSchema,
 )
 
 router = APIRouter()
@@ -42,11 +44,6 @@ MODIFIABLE_FIELDS = {
     "title": "title",
     "supporting_evidence": "supporting_evidence",
 }
-
-
-# --- Request Schema for creating modifications ---
-from pydantic import BaseModel, Field
-from schemas.insight_conversation import ModificationType as ModificationTypeSchema
 
 
 class ModificationCreate(BaseModel):

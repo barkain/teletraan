@@ -6,7 +6,7 @@ This module provides the DeepAnalysisEngine class that:
 3. Generates unified DeepInsight recommendations
 4. Stores insights in the database
 
-Uses the Claude Agent SDK (ClaudeSDKClient) for LLM interactions.
+Uses the shared client pool for LLM interactions.
 """
 
 from __future__ import annotations
@@ -16,12 +16,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from claude_agent_sdk import (
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    AssistantMessage,
-    TextBlock,
-)
+from llm.client_pool import pool_query_llm
 
 from database import async_session_factory
 from models.deep_insight import DeepInsight, InsightType, InsightAction
@@ -61,16 +56,9 @@ from analysis.context_builder import market_context_builder
 from analysis.statistical_calculator import StatisticalFeatureCalculator
 from analysis.memory_service import InstitutionalMemoryService
 from analysis.outcome_tracker import InsightOutcomeTracker
+from analysis.pattern_extractor import PatternExtractor
 
 logger = logging.getLogger(__name__)
-
-# Concurrency limit for simultaneous Claude SDK sessions.
-# With 5 analysts running in parallel via asyncio.gather(), this semaphore
-# ensures at most MAX_CONCURRENT_LLM sessions are active at once.
-# The remaining tasks queue up and proceed as slots become available.
-MAX_CONCURRENT_LLM = 3
-_llm_semaphore = asyncio.Semaphore(MAX_CONCURRENT_LLM)
-
 
 # Valid insight types and actions for validation
 VALID_INSIGHT_TYPES = {t.value for t in InsightType}
@@ -368,17 +356,12 @@ class DeepAnalysisEngine:
         # Format context for the analyst
         formatted_context = format_func(agent_context)
 
-        # Create SDK options
-        options = ClaudeAgentOptions(
-            system_prompt=prompt,
-        )
-
         # Run with retries
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
                 response_text = await self._query_llm(
-                    options, formatted_context, analyst_name
+                    prompt, formatted_context, analyst_name
                 )
 
                 # Parse the response
@@ -429,13 +412,8 @@ class DeepAnalysisEngine:
         synthesis_context = format_synthesis_context(analyst_reports)
         logger.info(f"[DEEP] Synthesis context length: {len(synthesis_context)} chars")
 
-        # Create SDK options for synthesis
-        options = ClaudeAgentOptions(
-            system_prompt=SYNTHESIS_LEAD_PROMPT,
-        )
-
         # Query LLM
-        response_text = await self._query_llm(options, synthesis_context, "synthesis")
+        response_text = await self._query_llm(SYNTHESIS_LEAD_PROMPT, synthesis_context, "synthesis")
         logger.info(f"[DEEP] Synthesis response length: {len(response_text)} chars")
         logger.info(f"[DEEP] Synthesis response preview: {response_text[:500]}")
 
@@ -458,54 +436,21 @@ class DeepAnalysisEngine:
 
     async def _query_llm(
         self,
-        options: ClaudeAgentOptions,
-        prompt: str,
-        agent_name: str,
+        system_prompt: str,
+        user_prompt: str,
+        agent_name: str = "unknown",
     ) -> str:
-        """Query the LLM using ClaudeSDKClient.
+        """Query the LLM via the shared client pool.
 
         Args:
-            options: Claude agent options with system prompt.
-            prompt: The user prompt to send.
+            system_prompt: System prompt for the agent.
+            user_prompt: The user prompt to send.
             agent_name: Name of the agent (for logging).
 
         Returns:
             Full response text from the LLM.
         """
-        logger.info(f"[DEEP] Querying LLM for {agent_name}, prompt length: {len(prompt)} chars")
-
-        response_text = ""
-        message_count = 0
-
-        # Acquire semaphore to limit concurrent Claude SDK sessions
-        async with _llm_semaphore:
-            logger.info(f"[DEEP] Semaphore acquired for {agent_name} (max {MAX_CONCURRENT_LLM} concurrent)")
-            try:
-                logger.info(f"[DEEP] Creating ClaudeSDKClient for {agent_name}...")
-                async with ClaudeSDKClient(options=options) as client:
-                    logger.info(f"[DEEP] Client connected for {agent_name}, sending query...")
-                    await client.query(prompt)
-                    logger.info(f"[DEEP] Query sent for {agent_name}, waiting for response...")
-
-                    async for msg in client.receive_response():
-                        message_count += 1
-                        logger.info(f"[DEEP] {agent_name} received message {message_count}: {type(msg).__name__}")
-                        if isinstance(msg, AssistantMessage):
-                            for block in msg.content:
-                                if isinstance(block, TextBlock):
-                                    response_text += block.text
-                                    logger.info(f"[DEEP] {agent_name} TextBlock: {len(block.text)} chars")
-
-                logger.info(f"[DEEP] {agent_name} complete: {len(response_text)} chars from {message_count} messages")
-
-            except asyncio.TimeoutError:
-                logger.error(f"[DEEP] TIMEOUT waiting for {agent_name} response")
-                raise
-            except Exception as e:
-                logger.exception(f"[DEEP] ERROR in {agent_name}: {type(e).__name__}: {e}")
-                raise
-
-        return response_text
+        return await pool_query_llm(system_prompt, user_prompt, agent_name)
 
     async def _store_insights(
         self,
@@ -547,6 +492,30 @@ class DeepAnalysisEngine:
             if stored:
                 await session.commit()
                 logger.info(f"Successfully stored {len(stored)} DeepInsight records")
+
+                # Extract patterns from each stored insight
+                try:
+                    pattern_extractor = PatternExtractor(session)
+                    for insight in stored:
+                        try:
+                            insight_dict = {
+                                "id": insight.id,
+                                "title": insight.title,
+                                "insight_type": insight.insight_type,
+                                "action": insight.action,
+                                "thesis": insight.thesis,
+                                "confidence": insight.confidence,
+                                "time_horizon": insight.time_horizon,
+                                "primary_symbol": insight.primary_symbol,
+                                "risk_factors": insight.risk_factors or [],
+                            }
+                            await pattern_extractor.extract_from_insight(insight_dict)
+                            logger.info(f"[DEEP] Pattern extraction completed for {insight.primary_symbol}")
+                        except Exception as pe:
+                            logger.warning(f"[DEEP] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                    await session.commit()
+                except Exception as e:
+                    logger.warning(f"[DEEP] Pattern extraction phase failed: {e}")
 
         return stored
 

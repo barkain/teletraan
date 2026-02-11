@@ -25,6 +25,8 @@ import {
   Database,
   Target,
   BookOpen,
+  Briefcase,
+  FileText,
 } from 'lucide-react';
 import { useDeepInsights } from '@/lib/hooks/use-deep-insights';
 
@@ -42,6 +44,8 @@ const primaryNav: SidebarItem[] = [
   { name: 'Insights', href: '/insights', icon: <Lightbulb className="h-4 w-4" /> },
   { name: 'Patterns', href: '/patterns', icon: <BookOpen className="h-4 w-4" /> },
   { name: 'Track Record', href: '/track-record', icon: <Target className="h-4 w-4" /> },
+  { name: 'Reports', href: '/reports', icon: <FileText className="h-4 w-4" /> },
+  { name: 'Portfolio', href: '/portfolio', icon: <Briefcase className="h-4 w-4" /> },
   { name: 'Conversations', href: '/conversations', icon: <MessageSquare className="h-4 w-4" /> },
   { name: 'Research', href: '/research', icon: <FlaskConical className="h-4 w-4" /> },
 ];
