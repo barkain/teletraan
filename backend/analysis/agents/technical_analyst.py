@@ -259,6 +259,19 @@ Use these signal types in your findings:
 - HOLD: Maintain current position, no clear action
 - NEUTRAL: Mixed signals, wait for confirmation
 
+## Rich Technical Analysis Data
+
+When rich technical analysis data is provided below, use it as the PRIMARY source for your technical assessment. This includes:
+- Composite technical score (-1.0 to +1.0) with rating and confidence
+- Detailed indicator breakdown by category (trend, momentum, volatility, volume)
+- Individual indicator signals and values
+- Key support/resistance levels
+- Multi-timeframe alignment (if available)
+
+Prioritize the composite score and indicator agreement when forming your technical thesis. Note any divergences between indicator categories (e.g., bullish trend but overbought momentum). Highlight key support/resistance levels for entry/exit recommendations.
+
+If rich TA data is NOT provided, fall back to analyzing any basic indicators available in the standard context.
+
 ## Guidelines
 - Be specific with price levels and percentages
 - Note timeframe for each observation
@@ -514,6 +527,14 @@ def format_technical_context(market_data: dict[str, Any]) -> str:
     else:
         context_parts.append("No price data available for technical analysis.")
 
+    # Add rich technical analysis if available
+    rich_ta = market_data.get("rich_technical")
+    if rich_ta:
+        formatted_ta = _format_rich_ta_section(rich_ta)
+        if formatted_ta:
+            context_parts.append("")
+            context_parts.append(formatted_ta)
+
     return "\n".join(context_parts)
 
 
@@ -595,6 +616,152 @@ def _extract_json(text: str) -> dict[str, Any] | None:
             pass
 
     return None
+
+
+def _format_rich_ta_section(rich_ta: dict[str, Any]) -> str:
+    """Format rich technical analysis data for inclusion in analyst context.
+
+    Converts the per-symbol rich TA dict into a human-readable markdown block.
+    Returns an empty string when *rich_ta* is empty.
+
+    Args:
+        rich_ta: Dict mapping symbol -> rich TA data dict (as produced by
+            ``MarketContextBuilder._get_rich_technical``).  Each value
+            contains trend, momentum, volatility, volume dicts and a
+            signal_summary with composite_score, rating, confidence,
+            breakdown, and key_levels.
+
+    Returns:
+        Formatted markdown string, or empty string if no data.
+    """
+    if not rich_ta:
+        return ""
+
+    lines: list[str] = ["## Rich Technical Analysis", ""]
+
+    for symbol, data in sorted(rich_ta.items()):
+        summary = data.get("signal_summary", {})
+        score = summary.get("composite_score", 0.0)
+        rating = summary.get("rating", "N/A")
+        confidence = summary.get("confidence", 0.0)
+        breakdown = summary.get("breakdown", {})
+        key_levels = summary.get("key_levels", {})
+
+        lines.append(
+            f"### {symbol} -- Technical Score: {score:.2f} "
+            f"({rating}, {confidence:.0%} confidence)"
+        )
+        lines.append("")
+
+        # -- Trend -------------------------------------------------------------
+        trend = data.get("trend", {})
+        trend_score = breakdown.get("trend")
+        trend_parts: list[str] = []
+        for ma in ("sma_20", "sma_50", "sma_200"):
+            val = trend.get(ma)
+            if val is not None:
+                price = data.get("latest_price", 0)
+                direction = "above" if price and price > val else "below"
+                trend_parts.append(f"Price {direction} {ma.upper()}({val:.1f})")
+        macd_data = trend.get("macd", {})
+        if isinstance(macd_data, dict) and macd_data.get("histogram") is not None:
+            hist = macd_data["histogram"]
+            polarity = "positive" if hist > 0 else "negative"
+            trend_parts.append(f"MACD histogram {polarity} ({hist:.2f})")
+        adx_data = trend.get("adx", {})
+        if isinstance(adx_data, dict) and adx_data.get("adx") is not None:
+            adx_val = adx_data["adx"]
+            plus_di = adx_data.get("plus_di", 0)
+            minus_di = adx_data.get("minus_di", 0)
+            trend_label = "trending" if adx_val >= 25 else "ranging"
+            di_label = "bullish" if (plus_di or 0) > (minus_di or 0) else "bearish"
+            trend_parts.append(f"ADX at {adx_val:.1f} ({trend_label}), {di_label}")
+        trend_score_str = f" (score: {trend_score:.1f})" if trend_score is not None else ""
+        if trend_parts:
+            lines.append(f"**Trend{trend_score_str}:** {'. '.join(trend_parts)}.")
+
+        # -- Momentum ----------------------------------------------------------
+        momentum = data.get("momentum", {})
+        mom_score = breakdown.get("momentum")
+        mom_parts: list[str] = []
+        rsi = momentum.get("rsi_14")
+        if rsi is not None:
+            rsi_label = "overbought" if rsi > 70 else ("oversold" if rsi < 30 else "neutral")
+            mom_parts.append(f"RSI at {rsi:.1f} ({rsi_label})")
+        stoch = momentum.get("stochastic", {})
+        if isinstance(stoch, dict) and stoch.get("k") is not None:
+            k_val = stoch["k"]
+            k_label = "overbought" if k_val > 80 else ("oversold" if k_val < 20 else "neutral")
+            mom_parts.append(f"Stochastic %K={k_val:.1f} ({k_label})")
+        cci = momentum.get("cci_20")
+        if cci is not None:
+            cci_label = "overbought" if cci > 100 else ("oversold" if cci < -100 else "neutral")
+            mom_parts.append(f"CCI at {cci:.1f} ({cci_label})")
+        mfi = momentum.get("mfi_14")
+        if mfi is not None:
+            mfi_label = "overbought" if mfi > 80 else ("oversold" if mfi < 20 else "neutral")
+            mom_parts.append(f"MFI at {mfi:.1f} ({mfi_label})")
+        mom_score_str = f" (score: {mom_score:.1f})" if mom_score is not None else ""
+        if mom_parts:
+            lines.append(f"**Momentum{mom_score_str}:** {'. '.join(mom_parts)}.")
+
+        # -- Volatility --------------------------------------------------------
+        vol = data.get("volatility", {})
+        vol_parts: list[str] = []
+        atr = vol.get("atr_14")
+        if atr is not None:
+            vol_parts.append(f"ATR={atr:.2f}")
+        bb = vol.get("bollinger", {})
+        if isinstance(bb, dict):
+            pct_b = bb.get("percent_b")
+            if pct_b is not None:
+                bb_pos = "upper half" if pct_b > 0.5 else "lower half"
+                vol_parts.append(f"Bollinger %B={pct_b:.2f} ({bb_pos})")
+            bw = bb.get("bandwidth")
+            if bw is not None:
+                vol_parts.append(f"BB bandwidth={bw:.1f}")
+        if vol_parts:
+            lines.append(f"**Volatility:** {'. '.join(vol_parts)}.")
+
+        # -- Volume ------------------------------------------------------------
+        volume = data.get("volume", {})
+        vol_ratio = volume.get("volume_sma_ratio")
+        obv = volume.get("obv")
+        vol_line_parts: list[str] = []
+        if vol_ratio is not None:
+            if vol_ratio > 1.2:
+                vol_desc = "above average"
+            elif vol_ratio < 0.8:
+                vol_desc = "below average"
+            else:
+                vol_desc = "near average"
+            vol_line_parts.append(f"Volume/SMA ratio={vol_ratio:.2f} ({vol_desc})")
+        if obv is not None:
+            vol_line_parts.append(f"OBV={obv:,.0f}")
+        if vol_line_parts:
+            lines.append(f"**Volume:** {'. '.join(vol_line_parts)}.")
+
+        # -- Key levels --------------------------------------------------------
+        support = key_levels.get("support", [])
+        resistance = key_levels.get("resistance", [])
+        pivot = key_levels.get("pivot")
+        level_parts: list[str] = []
+        if support:
+            level_parts.append(
+                f"Support: {', '.join(f'{v:.1f}' for v in support)}"
+            )
+        if resistance:
+            level_parts.append(
+                f"Resistance: {', '.join(f'{v:.1f}' for v in resistance)}"
+            )
+        if pivot is not None:
+            level_parts.append(f"Pivot: {pivot:.1f} (SMA50)")
+        if level_parts:
+            lines.append(f"**Key Levels:** {'. '.join(level_parts)}.")
+
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def _format_date(date_value: Any) -> str:

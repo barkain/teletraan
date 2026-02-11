@@ -30,7 +30,84 @@ from models.statistical_feature import StatisticalFeature
 from .sectors import SECTOR_ETFS
 from .memory_service import InstitutionalMemoryService
 
+# ---------------------------------------------------------------------------
+# Optional rich technical analysis — graceful degradation if pandas_ta absent
+# ---------------------------------------------------------------------------
+try:
+    from analysis.technical.indicators import compute_indicators
+    from analysis.technical.scoring import get_technical_scorer, TechnicalSignalSummary
+
+    _HAS_RICH_TA = True
+except ImportError:
+    _HAS_RICH_TA = False
+
 logger = logging.getLogger(__name__)
+
+
+def _flatten_indicators_for_scorer(raw: dict[str, Any]) -> dict[str, Any]:
+    """Flatten nested indicator output into the flat dict expected by TechnicalScorer.
+
+    ``compute_indicators`` returns a nested dict organised by category (trend,
+    momentum, volatility, volume) with some values being sub-dicts (e.g. macd,
+    adx, stochastic, bollinger, keltner).  ``TechnicalScorer.compute_score``
+    expects a *flat* dict with specific key names.  This helper bridges the two.
+
+    Args:
+        raw: The nested indicator dict returned by ``compute_indicators``.
+
+    Returns:
+        Flat dict suitable for ``TechnicalScorer.compute_score``.
+    """
+    flat: dict[str, Any] = {}
+
+    # -- Trend --
+    trend = raw.get("trend", {})
+    for key in ("sma_20", "sma_50", "sma_200", "ema_12", "ema_26", "psar"):
+        if key in trend:
+            flat[key] = trend[key]
+    macd = trend.get("macd", {})
+    if isinstance(macd, dict):
+        flat["macd_line"] = macd.get("macd")
+        flat["macd_signal"] = macd.get("signal")
+        flat["macd_histogram"] = macd.get("histogram")
+    adx = trend.get("adx", {})
+    if isinstance(adx, dict):
+        flat["adx"] = adx.get("adx")
+        flat["plus_di"] = adx.get("plus_di")
+        flat["minus_di"] = adx.get("minus_di")
+
+    # -- Momentum --
+    momentum = raw.get("momentum", {})
+    flat["rsi_14"] = momentum.get("rsi_14")
+    stoch = momentum.get("stochastic", {})
+    if isinstance(stoch, dict):
+        flat["stoch_k"] = stoch.get("k")
+        flat["stoch_d"] = stoch.get("d")
+    flat["cci"] = momentum.get("cci_20")
+    flat["williams_r"] = momentum.get("williams_r")
+    flat["roc"] = momentum.get("roc_12")
+    flat["mfi"] = momentum.get("mfi_14")
+
+    # -- Volatility --
+    volatility = raw.get("volatility", {})
+    bb = volatility.get("bollinger", {})
+    if isinstance(bb, dict):
+        flat["bollinger_upper"] = bb.get("upper")
+        flat["bollinger_lower"] = bb.get("lower")
+        flat["bollinger_pct_b"] = bb.get("percent_b")
+        flat["bb_bandwidth"] = bb.get("bandwidth")
+    flat["atr"] = volatility.get("atr_14")
+    kc = volatility.get("keltner", {})
+    if isinstance(kc, dict):
+        flat["keltner_upper"] = kc.get("upper")
+        flat["keltner_lower"] = kc.get("lower")
+
+    # -- Volume --
+    volume = raw.get("volume", {})
+    flat["obv"] = volume.get("obv")
+    flat["volume_ratio"] = volume.get("volume_sma_ratio")
+
+    return flat
 
 
 class MarketContextBuilder:
@@ -63,6 +140,7 @@ class MarketContextBuilder:
         include_technical: bool = True,
         include_economic: bool = True,
         include_sectors: bool = True,
+        include_rich_technical: bool = False,
         price_history_days: int = 60,
     ) -> dict[str, Any]:
         """Build full market context for analysis.
@@ -74,6 +152,9 @@ class MarketContextBuilder:
             include_technical: Whether to include technical indicators.
             include_economic: Whether to include economic indicators.
             include_sectors: Whether to include sector performance analysis.
+            include_rich_technical: Whether to include rich technical analysis
+                computed via pandas_ta (composite scores, key levels, etc.).
+                Requires pandas_ta to be installed; silently degrades otherwise.
             price_history_days: Number of days of price history to include.
 
         Returns:
@@ -82,6 +163,7 @@ class MarketContextBuilder:
             - stocks: List of stock metadata dicts
             - price_history: Dict mapping symbols to OHLCV data
             - technical_indicators: Dict mapping symbols to indicator values
+            - rich_technical: (optional) Dict mapping symbols to rich TA data
             - economic_indicators: List of economic indicator readings
             - sector_performance: Dict of sector ETF performance metrics
             - market_summary: Overall market status summary
@@ -95,6 +177,7 @@ class MarketContextBuilder:
             include_technical,
             include_economic,
             include_sectors,
+            include_rich_technical,
             price_history_days,
         )
 
@@ -135,6 +218,16 @@ class MarketContextBuilder:
 
             context["market_summary"] = await self._get_market_summary(db)
 
+        # Rich technical analysis (pandas_ta-based composite scoring)
+        if include_rich_technical and _HAS_RICH_TA:
+            target_symbols = (
+                [s.upper() for s in symbols] if symbols
+                else [s["symbol"] for s in context.get("stocks", [])]
+            )
+            context["rich_technical"] = await self._get_rich_technical(
+                target_symbols, context,
+            )
+
         self._last_context = context
         self._last_build_time = datetime.utcnow()
 
@@ -147,6 +240,10 @@ class MarketContextBuilder:
         logger.info(f"Context built: {len(context.get('technical_indicators', {}))} symbols with technical indicators")
         logger.info(f"Context built: {len(context.get('economic_indicators', []))} economic indicators")
         logger.info(f"Context built: {len(context.get('sector_performance', {}))} sectors with performance data")
+        if context.get("rich_technical"):
+            logger.info(
+                f"Context built: {len(context['rich_technical'])} symbols with rich TA"
+            )
 
         return context
 
@@ -170,6 +267,100 @@ class MarketContextBuilder:
 
         result = await db.execute(query)
         return {row.symbol: row.id for row in result.fetchall()}
+
+    async def _get_rich_technical(
+        self,
+        symbols: list[str],
+        context: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Compute rich technical analysis for the given symbols.
+
+        Uses pandas_ta via ``compute_indicators`` to generate 30+ indicators
+        and then scores them with ``TechnicalScorer`` to produce a composite
+        signal summary per symbol.
+
+        OHLCV data is fetched via yfinance (blocking call wrapped with
+        ``run_in_executor``).  The result dict for each symbol contains the
+        raw indicator categories **and** a ``signal_summary`` sub-dict with
+        the composite score, rating, confidence, breakdown, and key levels.
+
+        Args:
+            symbols: List of ticker symbols (upper-case).
+            context: The context dict built so far (unused currently but
+                available for future enrichment from existing price_history).
+
+        Returns:
+            Dict mapping symbol -> rich TA data dict.  Symbols that fail are
+            silently skipped.
+        """
+        import asyncio
+
+        results: dict[str, dict[str, Any]] = {}
+
+        try:
+            import yfinance as yf  # blocking -- used in executor below
+
+            loop = asyncio.get_running_loop()
+
+            for symbol in symbols:
+                try:
+                    # Fetch ~3 months of daily OHLCV via yfinance in executor
+                    ticker = yf.Ticker(symbol)
+                    df = await loop.run_in_executor(
+                        None, lambda t=ticker: t.history(period="3mo"),
+                    )
+
+                    if df is None or df.empty or len(df) < 10:
+                        logger.debug(
+                            "Skipping rich TA for %s: insufficient data (%d rows)",
+                            symbol, 0 if df is None else len(df),
+                        )
+                        continue
+
+                    # Step 1: compute raw indicators (dict with nested categories)
+                    raw_indicators = compute_indicators(symbol, df)
+                    if not raw_indicators:
+                        continue
+
+                    # Step 2: flatten nested indicator dict for the scorer
+                    flat = _flatten_indicators_for_scorer(raw_indicators)
+
+                    latest_price = raw_indicators.get("latest_price")
+                    if latest_price is None:
+                        continue
+
+                    # Step 3: score with TechnicalScorer
+                    scorer = get_technical_scorer()
+                    summary: TechnicalSignalSummary = scorer.compute_score(
+                        flat, latest_price, symbol=symbol,
+                    )
+
+                    results[symbol] = {
+                        "latest_price": latest_price,
+                        "latest_date": raw_indicators.get("latest_date"),
+                        "computed_at": raw_indicators.get("computed_at"),
+                        "trend": raw_indicators.get("trend", {}),
+                        "momentum": raw_indicators.get("momentum", {}),
+                        "volatility": raw_indicators.get("volatility", {}),
+                        "volume": raw_indicators.get("volume", {}),
+                        "signal_summary": {
+                            "composite_score": summary.composite_score,
+                            "rating": summary.rating,
+                            "confidence": summary.confidence,
+                            "breakdown": summary.breakdown,
+                            "key_levels": summary.key_levels,
+                        },
+                    }
+                except Exception:
+                    logger.warning(
+                        "Rich TA computation failed for %s", symbol, exc_info=True,
+                    )
+                    continue
+
+        except Exception:
+            logger.warning("Rich TA pipeline failed", exc_info=True)
+
+        return results
 
     async def _get_stocks_data(
         self,
@@ -524,6 +715,7 @@ class MarketContextBuilder:
                 include_technical=True,
                 include_economic=False,
                 include_sectors=False,
+                include_rich_technical=True,
                 price_history_days=60,
             )
         elif agent_type == "macro":
@@ -555,6 +747,7 @@ class MarketContextBuilder:
                 include_technical=True,
                 include_economic=True,
                 include_sectors=True,
+                include_rich_technical=True,
                 price_history_days=90,
             )
         elif agent_type == "correlation":
@@ -1241,6 +1434,149 @@ class MarketContextBuilder:
             if datetime.utcnow() - self._last_build_time < self._cache_ttl:
                 return self._last_context
         return None
+
+
+def format_rich_technical_context(ta_data: dict[str, dict[str, Any]]) -> str:
+    """Format rich technical analysis data as readable text for LLM agents.
+
+    Converts the per-symbol dict returned by ``_get_rich_technical`` into a
+    human-readable markdown block that can be prepended to analyst prompts.
+
+    Args:
+        ta_data: Dict mapping symbol -> rich TA data dict (as produced by
+            ``MarketContextBuilder._get_rich_technical``).
+
+    Returns:
+        Markdown-formatted string.  Empty string when *ta_data* is empty.
+    """
+    if not ta_data:
+        return ""
+
+    lines: list[str] = ["## Rich Technical Analysis", ""]
+
+    for symbol, data in sorted(ta_data.items()):
+        summary = data.get("signal_summary", {})
+        score = summary.get("composite_score", 0.0)
+        rating = summary.get("rating", "N/A")
+        confidence = summary.get("confidence", 0.0)
+        breakdown = summary.get("breakdown", {})
+        key_levels = summary.get("key_levels", {})
+
+        lines.append(
+            f"### {symbol} -- Technical Score: {score:.2f} "
+            f"({rating}, {confidence:.0%} confidence)"
+        )
+        lines.append("")
+
+        # -- Trend ---------------------------------------------------------
+        trend = data.get("trend", {})
+        trend_score = breakdown.get("trend")
+        trend_parts: list[str] = []
+        for ma in ("sma_20", "sma_50", "sma_200"):
+            val = trend.get(ma)
+            if val is not None:
+                price = data.get("latest_price", 0)
+                direction = "above" if price and price > val else "below"
+                trend_parts.append(f"Price {direction} {ma.upper()}({val:.1f})")
+        macd_data = trend.get("macd", {})
+        if isinstance(macd_data, dict) and macd_data.get("histogram") is not None:
+            hist = macd_data["histogram"]
+            polarity = "positive" if hist > 0 else "negative"
+            trend_parts.append(f"MACD histogram {polarity} ({hist:.2f})")
+        adx_data = trend.get("adx", {})
+        if isinstance(adx_data, dict) and adx_data.get("adx") is not None:
+            adx_val = adx_data["adx"]
+            plus_di = adx_data.get("plus_di", 0)
+            minus_di = adx_data.get("minus_di", 0)
+            trend_label = "trending" if adx_val >= 25 else "ranging"
+            di_label = "bullish" if (plus_di or 0) > (minus_di or 0) else "bearish"
+            trend_parts.append(f"ADX at {adx_val:.1f} ({trend_label}), {di_label}")
+        trend_score_str = f" (score: {trend_score:.1f})" if trend_score is not None else ""
+        if trend_parts:
+            lines.append(f"**Trend{trend_score_str}:** {'. '.join(trend_parts)}.")
+
+        # -- Momentum ------------------------------------------------------
+        momentum = data.get("momentum", {})
+        mom_score = breakdown.get("momentum")
+        mom_parts: list[str] = []
+        rsi = momentum.get("rsi_14")
+        if rsi is not None:
+            rsi_label = "overbought" if rsi > 70 else ("oversold" if rsi < 30 else "neutral")
+            mom_parts.append(f"RSI at {rsi:.1f} ({rsi_label})")
+        stoch = momentum.get("stochastic", {})
+        if isinstance(stoch, dict) and stoch.get("k") is not None:
+            k_val = stoch["k"]
+            k_label = "overbought" if k_val > 80 else ("oversold" if k_val < 20 else "neutral")
+            mom_parts.append(f"Stochastic %K={k_val:.1f} ({k_label})")
+        cci = momentum.get("cci_20")
+        if cci is not None:
+            cci_label = "overbought" if cci > 100 else ("oversold" if cci < -100 else "neutral")
+            mom_parts.append(f"CCI at {cci:.1f} ({cci_label})")
+        mfi = momentum.get("mfi_14")
+        if mfi is not None:
+            mfi_label = "overbought" if mfi > 80 else ("oversold" if mfi < 20 else "neutral")
+            mom_parts.append(f"MFI at {mfi:.1f} ({mfi_label})")
+        mom_score_str = f" (score: {mom_score:.1f})" if mom_score is not None else ""
+        if mom_parts:
+            lines.append(f"**Momentum{mom_score_str}:** {'. '.join(mom_parts)}.")
+
+        # -- Volatility ----------------------------------------------------
+        vol = data.get("volatility", {})
+        vol_parts: list[str] = []
+        atr = vol.get("atr_14")
+        if atr is not None:
+            vol_parts.append(f"ATR={atr:.2f}")
+        bb = vol.get("bollinger", {})
+        if isinstance(bb, dict):
+            pct_b = bb.get("percent_b")
+            if pct_b is not None:
+                bb_pos = "upper half" if pct_b > 0.5 else "lower half"
+                vol_parts.append(f"Bollinger %B={pct_b:.2f} ({bb_pos})")
+            bw = bb.get("bandwidth")
+            if bw is not None:
+                vol_parts.append(f"BB bandwidth={bw:.1f}")
+        if vol_parts:
+            lines.append(f"**Volatility:** {'. '.join(vol_parts)}.")
+
+        # -- Volume --------------------------------------------------------
+        volume = data.get("volume", {})
+        vol_ratio = volume.get("volume_sma_ratio")
+        obv = volume.get("obv")
+        vol_line_parts: list[str] = []
+        if vol_ratio is not None:
+            if vol_ratio > 1.2:
+                vol_desc = "above average"
+            elif vol_ratio < 0.8:
+                vol_desc = "below average"
+            else:
+                vol_desc = "near average"
+            vol_line_parts.append(f"Volume/SMA ratio={vol_ratio:.2f} ({vol_desc})")
+        if obv is not None:
+            vol_line_parts.append(f"OBV={obv:,.0f}")
+        if vol_line_parts:
+            lines.append(f"**Volume:** {'. '.join(vol_line_parts)}.")
+
+        # -- Key levels ----------------------------------------------------
+        support = key_levels.get("support", [])
+        resistance = key_levels.get("resistance", [])
+        pivot = key_levels.get("pivot")
+        level_parts: list[str] = []
+        if support:
+            level_parts.append(
+                f"Support: {', '.join(f'{v:.1f}' for v in support)}"
+            )
+        if resistance:
+            level_parts.append(
+                f"Resistance: {', '.join(f'{v:.1f}' for v in resistance)}"
+            )
+        if pivot is not None:
+            level_parts.append(f"Pivot: {pivot:.1f} (SMA50)")
+        if level_parts:
+            lines.append(f"**Key Levels:** {'. '.join(level_parts)}.")
+
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 # Singleton instance for easy import
