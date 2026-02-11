@@ -14,6 +14,7 @@ This engine discovers opportunities autonomously without requiring user-provided
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -98,6 +99,10 @@ from analysis.memory_service import InstitutionalMemoryService  # type: ignore[i
 from analysis.pattern_extractor import PatternExtractor  # type: ignore[import-not-found]
 from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
 from llm.client_pool import pool_query_llm  # type: ignore[import-not-found]
+
+# Optional alternative data sources (availability flags)
+_HAS_PREDICTIONS = importlib.util.find_spec("data.adapters.prediction_markets") is not None
+_HAS_SENTIMENT = importlib.util.find_spec("data.adapters.reddit_sentiment") is not None
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +277,45 @@ class AutonomousDeepEngine:
             logger.warning(f"Failed to fetch portfolio holdings (non-fatal): {e}")
             return {}
 
+    async def _prefetch_prediction_data(self) -> dict:
+        """Pre-fetch prediction market data before pipeline starts.
+
+        Returns:
+            Dict of macro prediction categories, or empty dict on failure.
+        """
+        if not _HAS_PREDICTIONS:
+            return {}
+        try:
+            from data.adapters.prediction_markets import get_prediction_market_aggregator  # type: ignore[import-not-found]
+
+            aggregator = get_prediction_market_aggregator()
+            data = await aggregator.get_macro_predictions()
+            logger.info(f"Pre-fetched prediction market data: {len(data)} categories")
+            return data
+        except Exception as e:
+            logger.warning(f"Failed to pre-fetch prediction data: {e}")
+            return {}
+
+    async def _prefetch_sentiment_data(self) -> dict:
+        """Pre-fetch Reddit sentiment data before pipeline starts.
+
+        Returns:
+            Dict with 'trending' and 'market_mood' keys, or empty dict on failure.
+        """
+        if not _HAS_SENTIMENT:
+            return {}
+        try:
+            from data.adapters.reddit_sentiment import get_reddit_sentiment_adapter  # type: ignore[import-not-found]
+
+            adapter = get_reddit_sentiment_adapter()
+            trending = await adapter.get_trending_tickers(limit=50)
+            market_mood = await adapter.get_market_sentiment()
+            logger.info(f"Pre-fetched sentiment data: {len(trending)} trending tickers")
+            return {"trending": trending, "market_mood": market_mood}
+        except Exception as e:
+            logger.warning(f"Failed to pre-fetch sentiment data: {e}")
+            return {}
+
     def _build_portfolio_synthesis_context(
         self,
         portfolio_holdings: dict[str, dict[str, float]],
@@ -352,16 +396,39 @@ class AutonomousDeepEngine:
         logger.info(f"Starting autonomous analysis {analysis_id}")
 
         try:
-            # ===== PHASE 1 + PHASE 2: Macro Scan & Heatmap Fetch (concurrent) =====
-            # These two phases are independent -- only Phase 3 (HeatmapAnalysis)
-            # needs both results.  Running them concurrently saves wall-clock time.
-            logger.info("Phase 1+2: Scanning macro environment & fetching heatmap concurrently...")
+            # ===== PRE-FETCH + PHASE 1 + PHASE 2 (all concurrent) =====
+            # Macro scan, heatmap fetch, and alternative data pre-fetches are
+            # all independent -- run them concurrently to save wall-clock time.
+            logger.info("Phase 1+2 + data pre-fetch: Scanning macro, fetching heatmap & alternative data concurrently...")
             await self._update_task_progress(task_id, "macro_scan", 10, "Scanning macro environment & fetching heatmap...")
 
             macro_coro = self._run_macro_scan()
             heatmap_coro = self._run_heatmap_fetch()
-            phase1_result, phase2_result = await asyncio.gather(
-                macro_coro, heatmap_coro, return_exceptions=True
+            prediction_coro = self._prefetch_prediction_data()
+            sentiment_coro = self._prefetch_sentiment_data()
+            phase1_result, phase2_result, prediction_data, sentiment_data = await asyncio.gather(
+                macro_coro, heatmap_coro, prediction_coro, sentiment_coro,
+                return_exceptions=True,
+            )
+
+            # --- Handle pre-fetch results (non-blocking) ---
+            if isinstance(prediction_data, BaseException):
+                logger.warning(f"Prediction pre-fetch failed: {prediction_data}")
+                prediction_data = {}
+            if isinstance(sentiment_data, BaseException):
+                logger.warning(f"Sentiment pre-fetch failed: {sentiment_data}")
+                sentiment_data = {}
+
+            # Store pre-fetched data on instance for downstream access
+            self._prediction_data = prediction_data
+            self._sentiment_data = sentiment_data
+
+            # Build pre-fetch phase summary
+            prediction_count = len(prediction_data) if isinstance(prediction_data, dict) else 0
+            trending_count = len(sentiment_data.get("trending", [])) if isinstance(sentiment_data, dict) else 0
+            result.phase_summaries["data_prefetch"] = (
+                f"Pre-fetched {prediction_count} prediction categories "
+                f"and {trending_count} trending tickers from alternative data sources."
             )
 
             # --- Handle Phase 1 (macro scan) result ---
@@ -1648,13 +1715,14 @@ class AutonomousDeepEngine:
         Returns:
             Dictionary mapping analyst names to their reports.
         """
-        # Build symbol-specific context
+        # Build symbol-specific context (include rich TA for risk analyst)
         agent_context = await self.context_builder.build_context(
             symbols=[symbol],
             include_price_history=True,
             include_technical=True,
             include_economic=False,
             include_sectors=False,
+            include_rich_technical=True,
         )
 
         reports: dict[str, Any] = {}

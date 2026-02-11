@@ -284,6 +284,18 @@ Return JSON:
 - 0.2-0.4: Conflicting signals, low conviction
 - 0.0-0.2: High uncertainty, insufficient data
 
+## Alternative Data Alignment Check
+When prediction market and/or sentiment data is available, include an alignment assessment:
+
+**Prediction Market Alignment:** Do the prediction market probabilities support or contradict the macro thesis? Flag any significant divergences.
+
+**Social Sentiment Alignment:** Does retail investor sentiment align with the analytical thesis?
+- If thesis is bullish AND sentiment is bearish -> potential contrarian opportunity (highlight)
+- If thesis is bearish AND sentiment is bullish -> potential risk (crowd may be wrong, or you may be)
+- Strong alignment -> higher conviction, but watch for crowded trade risk
+
+Include a brief "Alternative Data Summary" in your synthesis noting the alignment/divergence of these signals.
+
 ## Guidelines
 - Generate 3-7 insights per synthesis (quality over quantity)
 - Always include at least one risk-focused insight
@@ -406,6 +418,26 @@ def format_synthesis_context(analyst_reports: dict[str, Any]) -> str:
     # Correlation Detective
     if "correlation" in analyst_reports:
         context_parts.append(_format_correlation_report(analyst_reports["correlation"]))
+
+    # Prediction market data (optional)
+    predictions = analyst_reports.get("predictions")
+    if predictions:
+        from analysis.context_builder import format_prediction_context  # type: ignore[import-not-found]
+
+        prediction_text = format_prediction_context(predictions)
+        if prediction_text:
+            context_parts.append("")
+            context_parts.append(prediction_text)
+
+    # Reddit sentiment data (optional)
+    sentiment = analyst_reports.get("sentiment")
+    if sentiment:
+        from analysis.context_builder import format_sentiment_context  # type: ignore[import-not-found]
+
+        sentiment_text = format_sentiment_context(sentiment)
+        if sentiment_text:
+            context_parts.append("")
+            context_parts.append(sentiment_text)
 
     context_parts.append("")
     context_parts.append("=" * 60)

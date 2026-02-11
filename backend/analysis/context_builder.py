@@ -41,6 +41,27 @@ try:
 except ImportError:
     _HAS_RICH_TA = False
 
+# ---------------------------------------------------------------------------
+# Optional prediction market data — graceful degradation if adapter absent
+# ---------------------------------------------------------------------------
+try:
+    from data.adapters.prediction_markets import get_prediction_market_aggregator
+
+    _HAS_PREDICTIONS = True
+except ImportError:
+    _HAS_PREDICTIONS = False
+
+# ---------------------------------------------------------------------------
+# Optional Reddit sentiment data — graceful degradation if adapter absent
+# ---------------------------------------------------------------------------
+try:
+    from data.adapters.reddit_sentiment import get_reddit_sentiment_adapter
+    from analysis.sentiment import get_symbol_sentiment
+
+    _HAS_SENTIMENT = True
+except ImportError:
+    _HAS_SENTIMENT = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -141,6 +162,8 @@ class MarketContextBuilder:
         include_economic: bool = True,
         include_sectors: bool = True,
         include_rich_technical: bool = False,
+        include_predictions: bool = False,
+        include_sentiment: bool = False,
         price_history_days: int = 60,
     ) -> dict[str, Any]:
         """Build full market context for analysis.
@@ -155,6 +178,11 @@ class MarketContextBuilder:
             include_rich_technical: Whether to include rich technical analysis
                 computed via pandas_ta (composite scores, key levels, etc.).
                 Requires pandas_ta to be installed; silently degrades otherwise.
+            include_predictions: Whether to include prediction market data
+                (Kalshi + Polymarket). Requires prediction_markets adapter;
+                silently degrades otherwise.
+            include_sentiment: Whether to include Reddit sentiment data.
+                Requires reddit_sentiment adapter; silently degrades otherwise.
             price_history_days: Number of days of price history to include.
 
         Returns:
@@ -164,6 +192,8 @@ class MarketContextBuilder:
             - price_history: Dict mapping symbols to OHLCV data
             - technical_indicators: Dict mapping symbols to indicator values
             - rich_technical: (optional) Dict mapping symbols to rich TA data
+            - predictions: (optional) Dict with prediction market data
+            - sentiment: (optional) Dict with Reddit sentiment data
             - economic_indicators: List of economic indicator readings
             - sector_performance: Dict of sector ETF performance metrics
             - market_summary: Overall market status summary
@@ -178,6 +208,8 @@ class MarketContextBuilder:
             include_economic,
             include_sectors,
             include_rich_technical,
+            include_predictions,
+            include_sentiment,
             price_history_days,
         )
 
@@ -228,6 +260,14 @@ class MarketContextBuilder:
                 target_symbols, context,
             )
 
+        # Prediction market data (Kalshi + Polymarket)
+        if include_predictions and _HAS_PREDICTIONS:
+            context["predictions"] = await self._get_prediction_data()
+
+        # Reddit sentiment data
+        if include_sentiment and _HAS_SENTIMENT:
+            context["sentiment"] = await self._get_sentiment_data(symbols)
+
         self._last_context = context
         self._last_build_time = datetime.utcnow()
 
@@ -244,8 +284,66 @@ class MarketContextBuilder:
             logger.info(
                 f"Context built: {len(context['rich_technical'])} symbols with rich TA"
             )
+        if context.get("predictions"):
+            logger.info(
+                f"Context built: {len(context['predictions'])} prediction market categories"
+            )
+        if context.get("sentiment"):
+            logger.info(
+                f"Context built: sentiment data with mood={context['sentiment'].get('overall_mood', 'unknown')}"
+            )
 
         return context
+
+    async def _get_prediction_data(self) -> dict[str, Any]:
+        """Fetch macro prediction data from Kalshi + Polymarket.
+
+        Returns:
+            Dict with keys like fed_rates, recession, inflation, sp500, gdp.
+            Empty dict on failure or if adapter is unavailable.
+        """
+        try:
+            aggregator = get_prediction_market_aggregator()
+            return await aggregator.get_macro_predictions()
+        except Exception:
+            logger.warning("Failed to fetch prediction market data", exc_info=True)
+            return {}
+
+    async def _get_sentiment_data(
+        self,
+        symbols: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Fetch Reddit sentiment data including trending tickers and market mood.
+
+        Args:
+            symbols: Optional list of symbols for per-symbol sentiment.
+
+        Returns:
+            Dict with keys: trending, overall_mood, top_mentioned, and
+            optionally per_symbol. Empty dict on failure.
+        """
+        try:
+            adapter = get_reddit_sentiment_adapter()
+            sentiment = await adapter.get_market_sentiment()
+            if not sentiment:
+                return {}
+
+            # Add per-symbol sentiment if specific symbols requested
+            if symbols:
+                per_symbol: list[dict[str, Any]] = []
+                for sym in symbols:
+                    upper_sym = sym.upper()
+                    posts = await adapter.search_mentions(upper_sym, days_back=7)
+                    if posts:
+                        sym_sentiment = get_symbol_sentiment(upper_sym, posts)
+                        per_symbol.append(sym_sentiment)
+                if per_symbol:
+                    sentiment["per_symbol"] = per_symbol
+
+            return sentiment
+        except Exception:
+            logger.warning("Failed to fetch Reddit sentiment data", exc_info=True)
+            return {}
 
     async def _get_stock_ids(
         self,
@@ -1574,6 +1672,167 @@ def format_rich_technical_context(ta_data: dict[str, dict[str, Any]]) -> str:
         if level_parts:
             lines.append(f"**Key Levels:** {'. '.join(level_parts)}.")
 
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_prediction_context(predictions: dict[str, Any]) -> str:
+    """Format prediction market data as readable text for LLM agents.
+
+    Converts the dict returned by ``PredictionMarketAggregator.get_macro_predictions``
+    into a human-readable markdown block suitable for analyst prompts.
+
+    Args:
+        predictions: Dict with keys like fed_rates, recession, inflation,
+            sp500, gdp as returned by ``_get_prediction_data``.
+
+    Returns:
+        Markdown-formatted string.  Empty string when *predictions* is empty.
+    """
+    if not predictions:
+        return ""
+
+    lines: list[str] = ["## Prediction Market Data", ""]
+
+    # --- Federal Reserve Rate Expectations ---
+    fed = predictions.get("fed_rates", {})
+    if fed:
+        lines.append("### Federal Reserve Rate Expectations")
+        meeting = fed.get("next_meeting", {})
+        meeting_date = meeting.get("date", "unknown")
+        probs = meeting.get("probabilities", {})
+        if probs:
+            prob_parts: list[str] = []
+            for action, prob in sorted(probs.items()):
+                label = action.replace("_", " ").title()
+                prob_parts.append(f"{label} {prob * 100:.0f}%")
+            lines.append(f"Next meeting ({meeting_date}): {', '.join(prob_parts)}")
+        source = fed.get("source", "unknown")
+        fetched = fed.get("fetched_at", "unknown")
+        lines.append(f"Sources: {source} | Updated: {fetched}")
+        lines.append("")
+
+    # --- Recession Probability ---
+    recession = predictions.get("recession", {})
+    if recession:
+        lines.append("### Recession Probability")
+        prob_2026 = recession.get("probability_2026")
+        if prob_2026 is not None:
+            lines.append(f"2026 recession probability: {prob_2026 * 100:.0f}%")
+        source = recession.get("source", "unknown")
+        fetched = recession.get("fetched_at", "unknown")
+        lines.append(f"Source: {source} | Updated: {fetched}")
+        lines.append("")
+
+    # --- Inflation Expectations ---
+    inflation = predictions.get("inflation", {})
+    if inflation:
+        lines.append("### Inflation Expectations")
+        cpi_above = inflation.get("cpi_above_3pct")
+        cpi_avg = inflation.get("cpi_average_probability")
+        if cpi_above is not None:
+            lines.append(f"CPI above 3%: {cpi_above * 100:.0f}% probability")
+        elif cpi_avg is not None:
+            lines.append(f"CPI average probability: {cpi_avg * 100:.0f}%")
+        source = inflation.get("source", "unknown")
+        fetched = inflation.get("fetched_at", "unknown")
+        lines.append(f"Source: {source} | Updated: {fetched}")
+        lines.append("")
+
+    # --- S&P 500 Targets ---
+    sp500 = predictions.get("sp500", {})
+    if sp500:
+        lines.append("### S&P 500 Targets")
+        targets = sp500.get("targets", [])
+        target_parts: list[str] = []
+        for t in targets[:5]:
+            level = t.get("level")
+            prob = t.get("probability", 0.0)
+            if level is not None:
+                target_parts.append(f"Above {level:,}: {prob * 100:.0f}%")
+        if target_parts:
+            lines.append(" | ".join(target_parts))
+        source = sp500.get("source", "unknown")
+        fetched = sp500.get("fetched_at", "unknown")
+        lines.append(f"Source: {source} | Updated: {fetched}")
+        lines.append("")
+
+    # --- GDP ---
+    gdp = predictions.get("gdp", {})
+    if gdp:
+        lines.append("### GDP Growth")
+        q1_positive = gdp.get("q1_positive")
+        if q1_positive is not None:
+            lines.append(f"Q1 positive growth probability: {q1_positive * 100:.0f}%")
+        source = gdp.get("source", "unknown")
+        fetched = gdp.get("fetched_at", "unknown")
+        lines.append(f"Source: {source} | Updated: {fetched}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_sentiment_context(sentiment: dict[str, Any]) -> str:
+    """Format Reddit sentiment data as readable text for LLM agents.
+
+    Converts the dict returned by ``RedditSentimentAdapter.get_market_sentiment``
+    (enriched with optional per_symbol data) into a human-readable markdown block.
+
+    Args:
+        sentiment: Dict with keys: trending, overall_mood, top_mentioned,
+            and optionally per_symbol.
+
+    Returns:
+        Markdown-formatted string.  Empty string when *sentiment* is empty.
+    """
+    if not sentiment:
+        return ""
+
+    lines: list[str] = ["## Social Sentiment (Reddit)", ""]
+
+    # --- Market Mood ---
+    overall_mood = sentiment.get("overall_mood", "unknown")
+    lines.append("### Market Mood")
+    lines.append(f"Overall sentiment: {overall_mood}")
+    lines.append("")
+
+    # --- Trending Tickers ---
+    trending = sentiment.get("trending", [])
+    if trending:
+        lines.append("### Trending Tickers")
+        for i, item in enumerate(trending[:10], 1):
+            ticker = item.get("ticker", "???")
+            mentions = item.get("mentions", 0)
+            upvotes = item.get("upvotes", 0)
+            lines.append(
+                f"{i}. {ticker} -- {mentions:,} mentions, {upvotes:,} upvotes"
+            )
+        lines.append("")
+
+    # --- Per-Symbol Sentiment ---
+    per_symbol = sentiment.get("per_symbol", [])
+    if per_symbol:
+        lines.append("### Per-Symbol Sentiment")
+        for sym_data in per_symbol:
+            symbol = sym_data.get("symbol", "???")
+            score = sym_data.get("sentiment_score", 0.0)
+            post_count = sym_data.get("post_count", 0)
+            bullish = sym_data.get("bullish_count", 0)
+            bearish = sym_data.get("bearish_count", 0)
+            neutral = sym_data.get("neutral_count", 0)
+
+            if score > 0.05:
+                label = "bullish"
+            elif score < -0.05:
+                label = "bearish"
+            else:
+                label = "neutral"
+
+            lines.append(
+                f"{symbol}: {score:+.2f} ({label}) -- "
+                f"{post_count} posts ({bullish} bullish / {bearish} bearish / {neutral} neutral)"
+            )
         lines.append("")
 
     return "\n".join(lines)

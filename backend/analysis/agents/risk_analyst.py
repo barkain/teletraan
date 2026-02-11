@@ -49,6 +49,19 @@ Use these indicators to:
 3. Evaluate whether current price action is supported by volume
 4. Factor volatility into position sizing and risk recommendations
 
+## Tail Risk from Prediction Markets
+When prediction market data is available, incorporate tail event probabilities:
+- Recession probability as a macro tail risk factor
+- Geopolitical event probabilities (if available)
+- Market-implied probability of extreme outcomes
+
+## Social Sentiment as Contrarian Signal
+When Reddit sentiment data is available:
+- Extreme bullish sentiment (>0.7) may indicate complacency -- increase risk assessment
+- Extreme bearish sentiment (<-0.7) may indicate capitulation -- potential contrarian buy signal
+- Rapid sentiment shifts indicate regime change risk
+- High mention velocity for a symbol suggests crowded positioning
+
 ## Output Format
 Return JSON:
 {
@@ -532,6 +545,26 @@ def format_risk_context(market_data: dict) -> str:
         volatility_context = _format_volatility_context(rich_ta)
         if volatility_context:
             context_parts.append(volatility_context)
+
+    # Prediction market data (optional)
+    predictions = market_data.get("predictions")
+    if predictions:
+        from analysis.context_builder import format_prediction_context  # type: ignore[import-not-found]
+
+        prediction_text = format_prediction_context(predictions)
+        if prediction_text:
+            context_parts.append("")
+            context_parts.append(prediction_text)
+
+    # Reddit sentiment data (optional)
+    sentiment = market_data.get("sentiment")
+    if sentiment:
+        from analysis.context_builder import format_sentiment_context  # type: ignore[import-not-found]
+
+        sentiment_text = format_sentiment_context(sentiment)
+        if sentiment_text:
+            context_parts.append("")
+            context_parts.append(sentiment_text)
 
     return "\n".join(context_parts)
 

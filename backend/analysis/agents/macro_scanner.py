@@ -114,6 +114,21 @@ Return your analysis as valid JSON:
   }}
 }}
 
+## Prediction Market Signals
+When prediction market data is available, incorporate market-implied probabilities into your macro assessment:
+- Federal Reserve rate expectations (hold/cut/hike probabilities per meeting)
+- Recession probability from prediction markets
+- Inflation expectations (CPI above/below thresholds)
+- GDP growth expectations
+
+These represent real-money bets on macro outcomes and should be weighed alongside traditional indicators.
+
+## Social Sentiment Overview
+When Reddit sentiment data is available, note the overall retail investor mood:
+- Overall market sentiment score and direction
+- Top trending tickers and their sentiment
+- Use as a supplementary signal -- high retail bullishness can be contrarian (late-cycle indicator)
+
 ## Guidelines
 - Be specific with data and percentages
 - Focus on actionable insights, not just observations
@@ -404,7 +419,7 @@ class MacroScanner:
         self.llm_client = llm_client
         self.data_adapter = data_adapter or YahooFinanceAdapter()
 
-    async def scan(self) -> MacroScanResult:
+    async def scan(self, context: dict[str, Any] | None = None) -> MacroScanResult:
         """
         Scan macro environment and return key themes.
 
@@ -413,6 +428,10 @@ class MacroScanner:
         2. Formats data for LLM analysis
         3. Queries LLM for theme identification
         4. Parses and returns structured result
+
+        Args:
+            context: Optional context dict that may contain 'predictions'
+                and/or 'sentiment' data from the context builder pipeline.
 
         Returns:
             MacroScanResult with market regime, themes, risks, and implications.
@@ -431,6 +450,10 @@ class MacroScanner:
         # Step 2: Format data for LLM
         formatted_data = self._format_macro_data(macro_data)
         logger.info(f"Formatted macro data: {len(formatted_data)} chars")
+
+        # Step 2b: Append prediction/sentiment context if available
+        if context:
+            formatted_data = self._append_alternative_data(formatted_data, context)
 
         # Step 3: Build prompt
         prompt = self._build_scan_prompt(formatted_data)
@@ -730,6 +753,38 @@ class MacroScanner:
             sections.append("\n".join(lines))
 
         return "\n\n".join(sections)
+
+    def _append_alternative_data(
+        self, formatted_data: str, context: dict[str, Any]
+    ) -> str:
+        """Append prediction market and sentiment data to formatted macro data.
+
+        Args:
+            formatted_data: Already-formatted macro data string.
+            context: Context dict that may contain 'predictions' and/or 'sentiment'.
+
+        Returns:
+            Formatted data string with alternative data appended (if available).
+        """
+        parts = [formatted_data]
+
+        predictions = context.get("predictions")
+        if predictions:
+            from analysis.context_builder import format_prediction_context  # type: ignore[import-not-found]
+
+            prediction_text = format_prediction_context(predictions)
+            if prediction_text:
+                parts.append(prediction_text)
+
+        sentiment = context.get("sentiment")
+        if sentiment:
+            from analysis.context_builder import format_sentiment_context  # type: ignore[import-not-found]
+
+            sentiment_text = format_sentiment_context(sentiment)
+            if sentiment_text:
+                parts.append(sentiment_text)
+
+        return "\n\n".join(parts)
 
     def _build_scan_prompt(self, formatted_data: str) -> str:
         """Build the full prompt for LLM analysis.

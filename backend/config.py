@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
 
+    # Data Source Integrations
+    PREDICTION_MARKETS_ENABLED: bool = True
+    REDDIT_SENTIMENT_ENABLED: bool = True
+    POLYMARKET_RATE_LIMIT: int = 30  # Max requests/minute to Polymarket APIs
+    KALSHI_RATE_LIMIT: int = 20  # Max requests/minute to Kalshi API
+
 
 @lru_cache
 def get_settings() -> Settings:
