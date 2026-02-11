@@ -122,6 +122,7 @@ class AutonomousAnalysisResult:
     analyst_reports: dict[str, dict[str, Any]] = field(default_factory=dict)
     elapsed_seconds: float = 0.0
     phases_completed: list[str] = field(default_factory=list)
+    phase_summaries: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -149,6 +150,7 @@ class AutonomousAnalysisResult:
             "discovery_summary": self.discovery_summary,
             "elapsed_seconds": round(self.elapsed_seconds, 2),
             "phases_completed": self.phases_completed,
+            "phase_summaries": self.phase_summaries,
             "errors": self.errors,
         }
 
@@ -370,6 +372,18 @@ class AutonomousDeepEngine:
             result.phases_completed.append("macro_scan")
             logger.info(f"Macro scan complete. Regime: {macro_result.market_regime}")
 
+            # Capture macro scan summary from structured data
+            theme_names = [t.name for t in macro_result.themes[:3]]
+            risk_names = [r.description for r in macro_result.key_risks[:2]]
+            macro_summary_parts = [
+                f"Detected {macro_result.market_regime} regime ({macro_result.regime_confidence:.0%} confidence).",
+            ]
+            if theme_names:
+                macro_summary_parts.append(f"Key themes: {', '.join(theme_names)}.")
+            if risk_names:
+                macro_summary_parts.append(f"Top risks: {', '.join(risk_names)}.")
+            result.phase_summaries["macro_scan"] = " ".join(macro_summary_parts)
+
             # --- Handle Phase 2 (heatmap fetch) result ---
             if isinstance(phase2_result, BaseException):
                 logger.warning(f"Heatmap fetch failed (will use legacy fallback): {phase2_result}")
@@ -385,6 +399,19 @@ class AutonomousDeepEngine:
                     f"Heatmap fetch complete. {len(heatmap_data.sectors)} sectors, "
                     f"{len(heatmap_data.stocks)} stocks"
                 )
+
+                # Capture heatmap fetch summary from structured data
+                best_sector = max(heatmap_data.sectors, key=lambda s: s.change_1d) if heatmap_data.sectors else None
+                worst_sector = min(heatmap_data.sectors, key=lambda s: s.change_1d) if heatmap_data.sectors else None
+                hf_parts = [
+                    f"Fetched {len(heatmap_data.sectors)} sectors and {len(heatmap_data.stocks)} stocks ({heatmap_data.market_status}).",
+                ]
+                if best_sector and worst_sector:
+                    hf_parts.append(
+                        f"Strongest: {best_sector.name} ({best_sector.change_1d:+.1f}%), "
+                        f"weakest: {worst_sector.name} ({worst_sector.change_1d:+.1f}%)."
+                    )
+                result.phase_summaries["heatmap_fetch"] = " ".join(hf_parts)
 
                 # ===== PHASE 3+: Heatmap Pipeline (with legacy fallback) =====
                 try:
@@ -458,6 +485,19 @@ class AutonomousDeepEngine:
             f"Heatmap analysis complete. Selected {len(heatmap_analysis_result.selected_stocks)} stocks"
         )
 
+        # Capture heatmap analysis summary
+        ha_high = heatmap_analysis_result.get_high_priority_stocks()
+        ha_patterns_desc = [p.description[:60] for p in heatmap_analysis_result.patterns[:2]]
+        ha_parts = [
+            f"Selected {len(heatmap_analysis_result.selected_stocks)} stocks "
+            f"({len(ha_high)} high priority) at {heatmap_analysis_result.confidence:.0%} confidence.",
+        ]
+        if heatmap_analysis_result.sectors_to_watch:
+            ha_parts.append(f"Sectors to watch: {', '.join(heatmap_analysis_result.sectors_to_watch[:4])}.")
+        if ha_patterns_desc:
+            ha_parts.append(f"Key patterns: {'; '.join(ha_patterns_desc)}.")
+        result.phase_summaries["heatmap_analysis"] = " ".join(ha_parts)
+
         # ===== PHASE 4: Deep Dive Analysis =====
         # Get stocks from heatmap analysis: high priority first, then others
         high_priority = heatmap_analysis_result.get_high_priority_stocks()
@@ -519,6 +559,17 @@ class AutonomousDeepEngine:
         result.phases_completed.append("deep_dive")
         await self._update_task_progress(task_id, "deep_dive", 70, "Deep analysis complete")
 
+        # Capture deep dive summary
+        successful_symbols = list(analyst_reports.keys())
+        failed_count = sum(1 for r in gather_results if isinstance(r, BaseException))
+        dd_parts = [
+            f"Analyzed {len(successful_symbols)} stocks successfully"
+            f"{f' ({failed_count} failed)' if failed_count else ''}.",
+            f"Symbols: {', '.join(successful_symbols[:8])}"
+            f"{'...' if len(successful_symbols) > 8 else ''}.",
+        ]
+        result.phase_summaries["deep_dive"] = " ".join(dd_parts)
+
         # ===== PHASE 4.5: Coverage Evaluation (adaptive loop) =====
         logger.info("Phase 4.5: Evaluating coverage...")
         await self._update_task_progress(
@@ -534,6 +585,24 @@ class AutonomousDeepEngine:
         )
         result.analyst_reports = analyst_reports
         result.phases_completed.append("coverage_evaluation")
+
+        # Capture coverage evaluation summary
+        pre_coverage_count = len(symbols_to_analyze)
+        post_coverage_count = len(analyst_reports)
+        added_count = post_coverage_count - pre_coverage_count
+        if added_count > 0:
+            added_symbols = [s for s in analyst_reports if s not in symbols_to_analyze]
+            ce_summary = (
+                f"Coverage loop added {added_count} additional stocks: "
+                f"{', '.join(added_symbols[:5])}. "
+                f"Total coverage: {post_coverage_count} stocks."
+            )
+        else:
+            ce_summary = (
+                f"Coverage sufficient with {post_coverage_count} stocks. "
+                f"No additional symbols needed."
+            )
+        result.phase_summaries["coverage_evaluation"] = ce_summary
 
         # ===== PHASE 5: Synthesis =====
         logger.info("Phase 5: Synthesizing insights...")
@@ -556,6 +625,25 @@ class AutonomousDeepEngine:
                 heatmap_analysis_result,
             )
             result.insights = saved_insights
+
+        # Capture synthesis summary
+        actions = [i.get("action", "HOLD") for i in insights_data]
+        avg_conf = (
+            sum(float(i.get("confidence", 0)) for i in insights_data) / len(insights_data)
+            if insights_data else 0
+        )
+        titles = [i.get("title", "")[:40] for i in insights_data[:3]]
+        synth_parts = [
+            f"Generated {len(insights_data)} insights (avg confidence: {avg_conf:.0%}).",
+        ]
+        if actions:
+            from collections import Counter
+            action_counts = Counter(actions)
+            action_str = ", ".join(f"{cnt} {act}" for act, cnt in action_counts.most_common(3))
+            synth_parts.append(f"Actions: {action_str}.")
+        if titles:
+            synth_parts.append(f"Top: {'; '.join(titles)}.")
+        result.phase_summaries["synthesis"] = " ".join(synth_parts)
 
         result.discovery_summary = self._build_heatmap_discovery_summary(
             macro_result, heatmap_analysis_result, heatmap_data
@@ -1168,12 +1256,38 @@ class AutonomousDeepEngine:
             result.sector_result = sector_result
             result.phases_completed.append("sector_rotation")
 
+            # Capture sector rotation summary
+            top_sector_names = [s.sector_name for s in sector_result.top_sectors[:3]]
+            avoid_names = [s.sector_name for s in sector_result.sectors_to_avoid[:2]]
+            sr_parts = [
+                f"Top sectors: {', '.join(top_sector_names) if top_sector_names else 'none identified'}.",
+            ]
+            if avoid_names:
+                sr_parts.append(f"Avoid: {', '.join(avoid_names)}.")
+            if sector_result.rotation_active:
+                sr_parts.append(
+                    f"Rotation active ({sector_result.rotation_stage}): "
+                    f"{', '.join(sector_result.rotation_from[:2])} -> "
+                    f"{', '.join(sector_result.rotation_to[:2])}."
+                )
+            result.phase_summaries["sector_rotation"] = " ".join(sr_parts)
+
             # ===== LEGACY PHASE 3: Opportunity Hunt =====
             logger.info("Legacy Phase 3: Hunting for opportunities...")
             await self._update_task_progress(task_id, "opportunity_hunt", 45, "Discovering opportunities...")
             candidates = await self._run_opportunity_hunt(macro_result, sector_result)
             result.candidates = candidates
             result.phases_completed.append("opportunity_hunt")
+
+            # Capture opportunity hunt summary
+            candidate_symbols = [c.symbol for c in candidates.candidates[:5]]
+            oh_parts = [
+                f"Screened {candidates.total_screened} stocks, found {len(candidates.candidates)} candidates "
+                f"({candidates.confidence:.0%} confidence).",
+            ]
+            if candidate_symbols:
+                oh_parts.append(f"Top picks: {', '.join(candidate_symbols)}.")
+            result.phase_summaries["opportunity_hunt"] = " ".join(oh_parts)
 
             # ===== LEGACY PHASE 4: Deep Dive =====
             top_candidates = candidates.get_top_candidates(deep_dive_count)
@@ -1218,6 +1332,17 @@ class AutonomousDeepEngine:
             result.phases_completed.append("deep_dive")
             await self._update_task_progress(task_id, "deep_dive", 70, "Deep analysis complete")
 
+            # Capture legacy deep dive summary
+            legacy_successful = list(analyst_reports.keys())
+            legacy_failed = len(symbols_to_analyze) - len(legacy_successful)
+            ldd_parts = [
+                f"Analyzed {len(legacy_successful)} stocks successfully"
+                f"{f' ({legacy_failed} failed)' if legacy_failed else ''}.",
+                f"Symbols: {', '.join(legacy_successful[:8])}"
+                f"{'...' if len(legacy_successful) > 8 else ''}.",
+            ]
+            result.phase_summaries["deep_dive"] = " ".join(ldd_parts)
+
             # ===== LEGACY PHASE 5: Synthesis =====
             logger.info("Legacy Phase 5: Synthesizing insights...")
             await self._update_task_progress(task_id, "synthesis", 85, "Synthesizing insights...")
@@ -1236,6 +1361,27 @@ class AutonomousDeepEngine:
                     session, insights_data, macro_result, sector_result, candidates
                 )
                 result.insights = saved_insights
+
+            # Capture legacy synthesis summary
+            l_actions = [i.get("action", "HOLD") for i in insights_data]
+            l_avg_conf = (
+                sum(float(i.get("confidence", 0)) for i in insights_data) / len(insights_data)
+                if insights_data else 0
+            )
+            l_titles = [i.get("title", "")[:40] for i in insights_data[:3]]
+            ls_parts = [
+                f"Generated {len(insights_data)} insights (avg confidence: {l_avg_conf:.0%}).",
+            ]
+            if l_actions:
+                from collections import Counter
+                l_action_counts = Counter(l_actions)
+                l_action_str = ", ".join(
+                    f"{cnt} {act}" for act, cnt in l_action_counts.most_common(3)
+                )
+                ls_parts.append(f"Actions: {l_action_str}.")
+            if l_titles:
+                ls_parts.append(f"Top: {'; '.join(l_titles)}.")
+            result.phase_summaries["synthesis"] = " ".join(ls_parts)
 
             result.discovery_summary = self._build_discovery_summary(
                 macro_result, sector_result, candidates

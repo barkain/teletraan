@@ -137,6 +137,10 @@ class AnalysisTask(TimestampMixin, Base):
         JSON,
         nullable=True,
     )
+    phase_summaries: Mapped[dict[str, str] | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
 
     # Publishing
     published_url: Mapped[str | None] = mapped_column(
@@ -190,6 +194,7 @@ class AnalysisTask(TimestampMixin, Base):
             "top_sectors": self.top_sectors,
             "discovery_summary": self.discovery_summary,
             "phases_completed": self.phases_completed,
+            "phase_summaries": self.phase_summaries,
             "error_message": self.error_message,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,

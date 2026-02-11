@@ -445,6 +445,7 @@ async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_co
                 task.result_insight_ids = [i.id for i in analysis_result.insights]
                 task.discovery_summary = analysis_result.discovery_summary
                 task.phases_completed = analysis_result.phases_completed
+                task.phase_summaries = analysis_result.phase_summaries
 
                 # Extract market regime and top sectors
                 if analysis_result.macro_result:
