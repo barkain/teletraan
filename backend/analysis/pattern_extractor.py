@@ -211,6 +211,7 @@ class PatternExtractor:
                 pattern = await self._create_pattern(
                     pattern_data=pattern_data,
                     source_conversation_id=conversation_id,
+                    extraction_source="conversation",
                 )
                 created_patterns.append(pattern)
             except Exception as e:
@@ -258,6 +259,27 @@ class PatternExtractor:
         pattern_data["success_rate"] = 0.5
         pattern_data["occurrences"] = 1
 
+        # Enrich pattern_data with symbols from the source insight
+        symbols: list[str] = list(pattern_data.get("related_symbols") or [])
+        primary_symbol = insight.get("primary_symbol")
+        if primary_symbol and primary_symbol not in symbols:
+            symbols.insert(0, primary_symbol)
+        insight_related = insight.get("related_symbols")
+        if isinstance(insight_related, list):
+            for sym in insight_related:
+                if isinstance(sym, str) and sym and sym not in symbols:
+                    symbols.append(sym)
+        if symbols:
+            pattern_data["related_symbols"] = symbols
+
+        # Enrich pattern_data with sector from the source insight
+        insight_sector = insight.get("sector")
+        if insight_sector:
+            existing_sectors: list[str] = list(pattern_data.get("related_sectors") or [])
+            if insight_sector not in existing_sectors:
+                existing_sectors.append(insight_sector)
+            pattern_data["related_sectors"] = existing_sectors
+
         try:
             # Get insight_id if available
             source_insight_id = insight.get("id")
@@ -265,6 +287,7 @@ class PatternExtractor:
             pattern = await self._create_pattern(
                 pattern_data=pattern_data,
                 source_insight_id=source_insight_id,
+                extraction_source="insight",
             )
 
             logger.info(f"Created pattern from insight: {pattern.pattern_name}")
@@ -586,6 +609,7 @@ class PatternExtractor:
         pattern_data: dict[str, Any],
         source_conversation_id: UUID | None = None,
         source_insight_id: int | None = None,
+        extraction_source: str | None = None,
     ) -> KnowledgePattern:
         """Create and store a KnowledgePattern from extracted data.
 
@@ -593,6 +617,7 @@ class PatternExtractor:
             pattern_data: Dictionary with pattern fields from LLM.
             source_conversation_id: Optional conversation UUID to link.
             source_insight_id: Optional insight ID to link.
+            extraction_source: Origin of the pattern (e.g. "insight", "conversation", "manual").
 
         Returns:
             Created KnowledgePattern record.
@@ -612,6 +637,26 @@ class PatternExtractor:
         if source_insight_id:
             source_insights.append(source_insight_id)
 
+        # Build related_symbols from pattern data
+        related_symbols_set: set[str] = set()
+        for key in ("related_symbols", "symbols"):
+            val = pattern_data.get(key)
+            if isinstance(val, list):
+                for s in val:
+                    if isinstance(s, str) and s:
+                        related_symbols_set.add(s.upper())
+        related_symbols: list[str] | None = sorted(related_symbols_set) if related_symbols_set else None
+
+        # Build related_sectors from pattern data
+        related_sectors_set: set[str] = set()
+        for key in ("related_sectors", "sectors"):
+            val = pattern_data.get(key)
+            if isinstance(val, list):
+                for s in val:
+                    if isinstance(s, str) and s:
+                        related_sectors_set.add(s)
+        related_sectors: list[str] | None = sorted(related_sectors_set) if related_sectors_set else None
+
         # Create pattern
         pattern = KnowledgePattern(
             pattern_name=pattern_data.get("pattern_name", "Unnamed Pattern")[:200],
@@ -619,12 +664,16 @@ class PatternExtractor:
             description=pattern_data.get("description", pattern_data.get("expected_outcome", "")),
             trigger_conditions=pattern_data.get("trigger_conditions", {}),
             expected_outcome=pattern_data.get("expected_outcome", ""),
-            success_rate=float(pattern_data.get("success_rate", 0.0)),
+            success_rate=float(pattern_data.get("confidence", pattern_data.get("success_rate", 0.5))),
             occurrences=int(pattern_data.get("occurrences", 1)),
             successful_outcomes=0,
             source_insights=source_insights if source_insights else None,
             source_conversations=source_conversations if source_conversations else None,
             is_active=True,
+            lifecycle_status="draft",
+            extraction_source=extraction_source,
+            related_symbols=related_symbols,
+            related_sectors=related_sectors,
         )
 
         self.db.add(pattern)

@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import {
   BookOpen, Brain, ChevronDown, ChevronUp, Search, Grid, List,
   TrendingUp, Zap, RefreshCcw, Calendar, BarChart3, Target,
-  CircleSlash, Filter, SortAsc, SortDesc, X
+  CircleSlash, SortAsc, SortDesc, X, Hash
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -43,13 +43,13 @@ interface PatternLibraryPanelProps {
 }
 
 // Pattern type configuration with colors and icons
-const patternTypeConfig: Record<PatternType, { color: string; icon: typeof TrendingUp; label: string }> = {
-  TECHNICAL_SETUP: { color: 'bg-blue-500', icon: TrendingUp, label: 'Technical Setup' },
-  MACRO_CORRELATION: { color: 'bg-purple-500', icon: RefreshCcw, label: 'Macro Correlation' },
-  SECTOR_ROTATION: { color: 'bg-green-500', icon: Zap, label: 'Sector Rotation' },
-  EARNINGS_PATTERN: { color: 'bg-amber-500', icon: Calendar, label: 'Earnings Pattern' },
-  SEASONALITY: { color: 'bg-cyan-500', icon: BarChart3, label: 'Seasonality' },
-  CROSS_ASSET: { color: 'bg-pink-500', icon: Target, label: 'Cross Asset' },
+const patternTypeConfig: Record<PatternType, { color: string; borderColor: string; icon: typeof TrendingUp; label: string }> = {
+  TECHNICAL_SETUP: { color: 'bg-blue-500', borderColor: 'border-l-blue-500', icon: TrendingUp, label: 'Technical Setup' },
+  MACRO_CORRELATION: { color: 'bg-purple-500', borderColor: 'border-l-purple-500', icon: RefreshCcw, label: 'Macro Correlation' },
+  SECTOR_ROTATION: { color: 'bg-green-500', borderColor: 'border-l-green-500', icon: Zap, label: 'Sector Rotation' },
+  EARNINGS_PATTERN: { color: 'bg-amber-500', borderColor: 'border-l-amber-500', icon: Calendar, label: 'Earnings Pattern' },
+  SEASONALITY: { color: 'bg-cyan-500', borderColor: 'border-l-cyan-500', icon: BarChart3, label: 'Seasonality' },
+  CROSS_ASSET: { color: 'bg-pink-500', borderColor: 'border-l-pink-500', icon: Target, label: 'Cross Asset' },
 };
 
 // Theme type configuration
@@ -105,6 +105,23 @@ function formatTriggerConditions(conditions: Record<string, unknown>): string[] 
 }
 
 /**
+ * Get freshness indicator color based on how recently a pattern was active
+ * Green: within 7 days, Amber: within 30 days, Gray: older than 30 days
+ */
+function getFreshnessColor(pattern: KnowledgePattern): string {
+  const timestamp = pattern.last_triggered_at || pattern.updated_at;
+  if (!timestamp) return 'bg-gray-400';
+
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000);
+
+  if (diffDays <= 7) return 'bg-green-500';
+  if (diffDays <= 30) return 'bg-amber-500';
+  return 'bg-gray-400';
+}
+
+/**
  * Success rate ring component
  */
 function SuccessRateRing({ rate, size = 48 }: { rate: number; size?: number }) {
@@ -151,144 +168,144 @@ function SuccessRateRing({ rate, size = 48 }: { rate: number; size?: number }) {
 }
 
 /**
- * Pattern card component
+ * Pattern card component — redesigned with trigger chips, freshness, and action summary
  */
 function PatternCard({
   pattern,
-  isExpanded,
-  onToggleExpand,
   onSelect,
 }: {
   pattern: KnowledgePattern;
-  isExpanded: boolean;
-  onToggleExpand: () => void;
-  onSelect?: (pattern: KnowledgePattern) => void;
+  onSelect: (pattern: KnowledgePattern) => void;
 }) {
   const typeConfig = patternTypeConfig[pattern.pattern_type];
   const TypeIcon = typeConfig.icon;
+  const freshnessColor = getFreshnessColor(pattern);
+  const triggerConditions = formatTriggerConditions(pattern.trigger_conditions);
+  const hasConditions = triggerConditions.length > 0;
+  const visibleConditions = triggerConditions.slice(0, 3);
+  const overflowCount = triggerConditions.length - 3;
+  const symbols = pattern.related_symbols ?? [];
+  const visibleSymbols = symbols.slice(0, 3);
+  const symbolOverflow = symbols.length - 3;
+
+  // Trading action summary: expected_outcome or truncated description
+  const actionSummary = pattern.expected_outcome
+    ? pattern.expected_outcome
+    : pattern.description.length > 100
+      ? pattern.description.slice(0, 100) + '...'
+      : pattern.description;
 
   return (
     <Card
       className={cn(
-        'hover:shadow-md transition-shadow cursor-pointer',
+        'border-l-4 hover:shadow-md transition-all cursor-pointer',
+        typeConfig.borderColor,
         !pattern.is_active && 'opacity-60'
       )}
-      onClick={() => onSelect?.(pattern)}
+      onClick={() => onSelect(pattern)}
     >
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
-            {/* Type Badge */}
-            <Badge className={`${typeConfig.color} text-white mb-2`}>
+            {/* Type Badge — small rounded pill */}
+            <span
+              className={cn(
+                'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium text-white mb-2',
+                typeConfig.color
+              )}
+            >
               <TypeIcon className="w-3 h-3 mr-1" />
               {typeConfig.label}
-            </Badge>
+            </span>
 
             {/* Pattern Name */}
-            <CardTitle className="text-base font-semibold line-clamp-2">
+            <CardTitle className="text-base font-bold line-clamp-2">
               {pattern.pattern_name}
             </CardTitle>
-
-            {/* Description (truncated) */}
-            <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-              {pattern.description}
-            </p>
           </div>
 
-          {/* Success Rate Ring */}
-          <SuccessRateRing rate={pattern.success_rate} />
+          {/* Success Rate Ring — 48px */}
+          <SuccessRateRing rate={pattern.success_rate} size={48} />
         </div>
       </CardHeader>
 
-      <CardContent className="pt-0">
-        {/* Stats Row */}
-        <div className="flex items-center gap-4 text-sm text-muted-foreground mb-2">
+      <CardContent className="pt-0 space-y-3">
+        {/* Trading Action Summary */}
+        <p className="text-sm font-medium text-foreground/80 line-clamp-1">
+          {actionSummary}
+        </p>
+
+        {/* Trigger Condition Chips */}
+        {hasConditions && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {visibleConditions.map((condition, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+              >
+                {condition}
+              </span>
+            ))}
+            {overflowCount > 0 && (
+              <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground font-medium">
+                +{overflowCount} more
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Meta Row */}
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          {/* Occurrences */}
           <div className="flex items-center gap-1">
-            <BarChart3 className="w-3.5 h-3.5" />
+            <Hash className="w-3 h-3" />
             <span>{pattern.occurrences} triggers</span>
           </div>
-          {pattern.last_triggered_at && (
+
+          {/* Related Symbols */}
+          {visibleSymbols.length > 0 && (
             <div className="flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5" />
-              <span>{formatRelativeTime(pattern.last_triggered_at)}</span>
+              {visibleSymbols.map((symbol) => (
+                <Badge key={symbol} variant="outline" className="text-[10px] px-1.5 py-0 h-5 font-mono">
+                  {symbol}
+                </Badge>
+              ))}
+              {symbolOverflow > 0 && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5">
+                  +{symbolOverflow}
+                </Badge>
+              )}
             </div>
           )}
+
+          {/* Date with freshness dot */}
+          {(pattern.last_triggered_at || pattern.updated_at) && (
+            <div className="flex items-center gap-1.5">
+              <span
+                className={cn('inline-block w-1.5 h-1.5 rounded-full', freshnessColor)}
+                title={
+                  freshnessColor === 'bg-green-500'
+                    ? 'Active within 7 days'
+                    : freshnessColor === 'bg-amber-500'
+                      ? 'Active within 30 days'
+                      : 'Inactive over 30 days'
+                }
+              />
+              <Calendar className="w-3 h-3" />
+              <span>
+                {formatRelativeTime(pattern.last_triggered_at || pattern.updated_at!)}
+              </span>
+            </div>
+          )}
+
+          {/* Inactive indicator */}
           {!pattern.is_active && (
             <div className="flex items-center gap-1 text-yellow-600">
-              <CircleSlash className="w-3.5 h-3.5" />
+              <CircleSlash className="w-3 h-3" />
               <span>Inactive</span>
             </div>
           )}
         </div>
-
-        {/* Expand/Collapse Details */}
-        <Collapsible open={isExpanded} onOpenChange={onToggleExpand}>
-          <CollapsibleTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full mt-2"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleExpand();
-              }}
-            >
-              {isExpanded ? (
-                <>Less Details <ChevronUp className="ml-1 w-4 h-4" /></>
-              ) : (
-                <>More Details <ChevronDown className="ml-1 w-4 h-4" /></>
-              )}
-            </Button>
-          </CollapsibleTrigger>
-
-          <CollapsibleContent className="space-y-4 pt-4" onClick={(e) => e.stopPropagation()}>
-            {/* Full Description */}
-            <div>
-              <h4 className="text-sm font-semibold mb-1">Description</h4>
-              <p className="text-sm text-muted-foreground">{pattern.description}</p>
-            </div>
-
-            {/* Trigger Conditions */}
-            {Object.keys(pattern.trigger_conditions).length > 0 && (
-              <div>
-                <h4 className="text-sm font-semibold mb-1">Trigger Conditions</h4>
-                <ul className="text-sm text-muted-foreground list-disc list-inside">
-                  {formatTriggerConditions(pattern.trigger_conditions).map((condition, i) => (
-                    <li key={i}>{condition}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Expected Outcome */}
-            <div>
-              <h4 className="text-sm font-semibold mb-1">Expected Outcome</h4>
-              <p className="text-sm text-muted-foreground">{pattern.expected_outcome}</p>
-            </div>
-
-            {/* Success Stats */}
-            <div className="grid grid-cols-2 gap-4 bg-muted/50 rounded-lg p-3">
-              <div>
-                <div className="text-xs text-muted-foreground">Success Rate</div>
-                <div className="text-lg font-bold">
-                  {pattern.successful_outcomes}/{pattern.occurrences}
-                </div>
-              </div>
-              {pattern.avg_return_when_triggered !== undefined && (
-                <div>
-                  <div className="text-xs text-muted-foreground">Avg Return</div>
-                  <div className={cn(
-                    'text-lg font-bold',
-                    pattern.avg_return_when_triggered >= 0 ? 'text-green-600' : 'text-red-600'
-                  )}>
-                    {pattern.avg_return_when_triggered >= 0 ? '+' : ''}
-                    {(pattern.avg_return_when_triggered * 100).toFixed(2)}%
-                  </div>
-                </div>
-              )}
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
       </CardContent>
     </Card>
   );
@@ -372,7 +389,32 @@ export function PatternLibraryPanel({
   const [sortDesc, setSortDesc] = useState(true);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isThemesExpanded, setIsThemesExpanded] = useState(true);
-  const [expandedPatternId, setExpandedPatternId] = useState<string | null>(null);
+
+  // Compute counts per pattern type (respecting search and success rate, but not type filter)
+  const patternTypeCounts = useMemo(() => {
+    let base = patterns;
+
+    // Apply search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      base = base.filter(
+        (p) =>
+          p.pattern_name.toLowerCase().includes(query) ||
+          p.description.toLowerCase().includes(query)
+      );
+    }
+
+    // Apply min success rate filter
+    if (minSuccessRate > 0) {
+      base = base.filter((p) => p.success_rate >= minSuccessRate / 100);
+    }
+
+    const counts: Partial<Record<PatternType, number>> = {};
+    for (const p of base) {
+      counts[p.pattern_type] = (counts[p.pattern_type] || 0) + 1;
+    }
+    return counts;
+  }, [patterns, searchQuery, minSuccessRate]);
 
   // Filter and sort patterns
   const filteredPatterns = useMemo(() => {
@@ -483,25 +525,6 @@ export function PatternLibraryPanel({
             />
           </div>
 
-          {/* Pattern Type */}
-          <Select
-            value={selectedPatternType}
-            onValueChange={(v) => setSelectedPatternType(v as PatternType | 'all')}
-          >
-            <SelectTrigger className="w-[160px] h-9">
-              <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
-              <SelectValue placeholder="Pattern Type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              {Object.entries(patternTypeConfig).map(([type, config]) => (
-                <SelectItem key={type} value={type}>
-                  {config.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
           {/* Sort */}
           <Select
             value={sortBy}
@@ -531,6 +554,45 @@ export function PatternLibraryPanel({
           >
             {sortDesc ? <SortDesc className="h-4 w-4" /> : <SortAsc className="h-4 w-4" />}
           </Button>
+        </div>
+
+        {/* Pattern Type Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => setSelectedPatternType('all')}
+            className={cn(
+              'rounded-full px-3 py-1 text-sm whitespace-nowrap transition-colors',
+              selectedPatternType === 'all'
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+            )}
+          >
+            All{' '}
+            <span className={cn(selectedPatternType === 'all' ? 'text-primary-foreground/70' : 'text-muted-foreground/70')}>
+              ({Object.values(patternTypeCounts).reduce((sum, c) => sum + c, 0)})
+            </span>
+          </button>
+          {(Object.entries(patternTypeConfig) as [PatternType, typeof patternTypeConfig[PatternType]][])
+            .filter(([type]) => (patternTypeCounts[type] ?? 0) > 0)
+            .map(([type, config]) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setSelectedPatternType(type)}
+                className={cn(
+                  'rounded-full px-3 py-1 text-sm whitespace-nowrap transition-colors',
+                  selectedPatternType === type
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                )}
+              >
+                {config.label}{' '}
+                <span className={cn(selectedPatternType === type ? 'text-primary-foreground/70' : 'text-muted-foreground/70')}>
+                  ({patternTypeCounts[type]})
+                </span>
+              </button>
+            ))}
         </div>
 
         {/* Success Rate Slider */}
@@ -591,11 +653,7 @@ export function PatternLibraryPanel({
               <PatternCard
                 key={pattern.id}
                 pattern={pattern}
-                isExpanded={expandedPatternId === pattern.id}
-                onToggleExpand={() =>
-                  setExpandedPatternId(expandedPatternId === pattern.id ? null : pattern.id)
-                }
-                onSelect={onPatternSelect}
+                onSelect={onPatternSelect ?? (() => {})}
               />
             ))}
           </div>

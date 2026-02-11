@@ -512,10 +512,10 @@ class DeepAnalysisEngine:
                             await pattern_extractor.extract_from_insight(insight_dict)
                             logger.info(f"[DEEP] Pattern extraction completed for {insight.primary_symbol}")
                         except Exception as pe:
-                            logger.warning(f"[DEEP] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                            logger.error(f"[DEEP] Pattern extraction failed for {insight.primary_symbol}: {pe}", exc_info=True)
                     await session.commit()
                 except Exception as e:
-                    logger.warning(f"[DEEP] Pattern extraction phase failed: {e}")
+                    logger.error(f"[DEEP] Pattern extraction phase failed: {e}", exc_info=True)
 
         return stored
 

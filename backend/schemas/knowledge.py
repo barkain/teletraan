@@ -36,6 +36,21 @@ class KnowledgePatternResponse(BaseModel):
     last_triggered_at: datetime | None = Field(
         None, description="When pattern was last detected"
     )
+    lifecycle_status: str | None = Field(
+        None, description="Pattern lifecycle stage (e.g. emerging, validated, declining)"
+    )
+    related_symbols: list[str] | None = Field(
+        None, description="Ticker symbols associated with this pattern"
+    )
+    related_sectors: list[str] | None = Field(
+        None, description="Market sectors associated with this pattern"
+    )
+    extraction_source: str | None = Field(
+        None, description="Origin of the pattern (e.g. autonomous_deep, deep_analysis)"
+    )
+    last_evaluated_at: datetime | None = Field(
+        None, description="When the pattern was last evaluated for relevance"
+    )
 
     model_config = {"from_attributes": True}
 
@@ -125,6 +140,26 @@ class MonthlyTrendResponse(BaseModel):
         default_factory=list, description="Monthly data points sorted oldest to newest"
     )
     period_months: int = Field(..., ge=1, description="Number of months in the response window")
+
+
+class PatternsSummaryResponse(BaseModel):
+    """Response schema for pattern summary statistics."""
+
+    total: int = Field(..., ge=0, description="Total number of patterns")
+    active: int = Field(..., ge=0, description="Number of active patterns")
+    avg_success_rate: float = Field(..., ge=0.0, le=1.0, description="Average success rate")
+    by_type: dict[str, int] = Field(
+        default_factory=dict, description="Pattern count by type"
+    )
+    by_lifecycle: dict[str, int] = Field(
+        default_factory=dict, description="Pattern count by lifecycle status"
+    )
+    top_symbols: list[str] = Field(
+        default_factory=list, description="Most referenced symbols"
+    )
+    top_sectors: list[str] = Field(
+        default_factory=list, description="Most referenced sectors"
+    )
 
 
 class MatchingConditions(BaseModel):

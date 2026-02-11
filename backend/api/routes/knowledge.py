@@ -6,6 +6,7 @@ This module provides endpoints for accessing institutional memory:
 - Historical track record
 """
 
+from collections import Counter
 from typing import Any
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from schemas.knowledge import (
     KnowledgePatternResponse,
     MonthlyDataPoint,
     MonthlyTrendResponse,
+    PatternsSummaryResponse,
     TrackRecordResponse,
     TypeBreakdown,
 )
@@ -39,7 +41,7 @@ async def list_patterns(
         default=None, description="Filter by pattern type"
     ),
     min_success_rate: float = Query(
-        default=0.5, ge=0.0, le=1.0, description="Minimum success rate threshold"
+        default=0.0, ge=0.0, le=1.0, description="Minimum success rate threshold"
     ),
     is_active: bool = Query(default=True, description="Filter by active status"),
     limit: int = Query(default=20, le=100, description="Maximum results"),
@@ -176,6 +178,86 @@ def _matches_conditions(
                 return False
 
     return True
+
+
+# Mapping from PatternType enum values to user-friendly summary keys
+_TYPE_KEY_MAP: dict[str, str] = {
+    "TECHNICAL_SETUP": "technical",
+    "MACRO_CORRELATION": "macro",
+    "SECTOR_ROTATION": "sector_rotation",
+    "EARNINGS_PATTERN": "earnings",
+    "SEASONALITY": "seasonality",
+    "CROSS_ASSET": "correlation",
+}
+
+
+@router.get("/patterns/summary", response_model=PatternsSummaryResponse)
+async def get_patterns_summary(
+    db: AsyncSession = Depends(get_db),
+) -> PatternsSummaryResponse:
+    """Get aggregate summary statistics across all knowledge patterns.
+
+    Returns total/active counts, average success rate, breakdowns by type
+    and lifecycle status, and the most frequently referenced symbols and sectors.
+    """
+    # Fetch all patterns in a single query
+    result = await db.execute(select(KnowledgePattern))
+    patterns = list(result.scalars().all())
+
+    if not patterns:
+        return PatternsSummaryResponse(
+            total=0,
+            active=0,
+            avg_success_rate=0.0,
+            by_type={},
+            by_lifecycle={},
+            top_symbols=[],
+            top_sectors=[],
+        )
+
+    total = len(patterns)
+    active = sum(1 for p in patterns if p.is_active)
+
+    # Average success rate
+    avg_success_rate = round(
+        sum(p.success_rate for p in patterns) / total, 4
+    )
+
+    # Breakdown by pattern type
+    by_type: dict[str, int] = {}
+    for p in patterns:
+        key = _TYPE_KEY_MAP.get(p.pattern_type, p.pattern_type.lower())
+        by_type[key] = by_type.get(key, 0) + 1
+
+    # Breakdown by lifecycle status
+    by_lifecycle: dict[str, int] = {}
+    for p in patterns:
+        status = p.lifecycle_status or "unknown"
+        by_lifecycle[status] = by_lifecycle.get(status, 0) + 1
+
+    # Top symbols (across all patterns' related_symbols JSON)
+    symbol_counter: Counter[str] = Counter()
+    for p in patterns:
+        if p.related_symbols:
+            symbol_counter.update(p.related_symbols)
+    top_symbols = [sym for sym, _ in symbol_counter.most_common(10)]
+
+    # Top sectors (across all patterns' related_sectors JSON)
+    sector_counter: Counter[str] = Counter()
+    for p in patterns:
+        if p.related_sectors:
+            sector_counter.update(p.related_sectors)
+    top_sectors = [sec for sec, _ in sector_counter.most_common(5)]
+
+    return PatternsSummaryResponse(
+        total=total,
+        active=active,
+        avg_success_rate=avg_success_rate,
+        by_type=by_type,
+        by_lifecycle=by_lifecycle,
+        top_symbols=top_symbols,
+        top_sectors=top_sectors,
+    )
 
 
 @router.get("/patterns/{pattern_id}", response_model=KnowledgePatternResponse)

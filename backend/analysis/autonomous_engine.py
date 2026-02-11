@@ -1124,14 +1124,16 @@ class AutonomousDeepEngine:
                             "time_horizon": insight.time_horizon,
                             "primary_symbol": insight.primary_symbol,
                             "risk_factors": insight.risk_factors or [],
+                            "related_symbols": insight.related_symbols or [],
+                            "sector": (insight.discovery_context or {}).get("sector"),
                         }
                         await pattern_extractor.extract_from_insight(insight_dict)
                         logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
                     except Exception as pe:
-                        logger.warning(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                        logger.error(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}", exc_info=True)
                 await session.commit()
             except Exception as e:
-                logger.warning(f"[AUTO] Pattern extraction phase failed: {e}")
+                logger.error(f"[AUTO] Pattern extraction phase failed: {e}", exc_info=True)
 
             # Auto-initiate outcome tracking for actionable insights
             try:
@@ -2004,14 +2006,16 @@ class AutonomousDeepEngine:
                             "time_horizon": insight.time_horizon,
                             "primary_symbol": insight.primary_symbol,
                             "risk_factors": insight.risk_factors or [],
+                            "related_symbols": insight.related_symbols or [],
+                            "sector": (insight.discovery_context or {}).get("sector"),
                         }
                         await pattern_extractor.extract_from_insight(insight_dict)
                         logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
                     except Exception as pe:
-                        logger.warning(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                        logger.error(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}", exc_info=True)
                 await session.commit()
             except Exception as e:
-                logger.warning(f"[AUTO] Pattern extraction phase failed: {e}")
+                logger.error(f"[AUTO] Pattern extraction phase failed: {e}", exc_info=True)
 
             # Auto-initiate outcome tracking for actionable insights
             try:
