@@ -237,6 +237,9 @@ class AutonomousDeepEngine:
         # Phase 1: Macro Scanner
         self.macro_scanner = MacroScanner()
 
+        # Limit concurrent LLM calls to avoid overloading the client pool
+        self._llm_semaphore = asyncio.Semaphore(5)
+
         self._last_analysis_time: datetime | None = None
 
     async def _get_portfolio_holdings(self) -> dict[str, dict[str, float]]:
@@ -605,8 +608,18 @@ class AutonomousDeepEngine:
         # Run all symbols concurrently (semaphore gates actual LLM calls)
         analyst_reports: dict[str, dict[str, Any]] = {}
 
+        # Pre-build context for all symbols at once to avoid redundant fetches
+        pre_context = await self.context_builder.build_context(
+            symbols=symbols_to_analyze,
+            include_price_history=True,
+            include_technical=True,
+            include_economic=False,
+            include_sectors=False,
+            include_rich_technical=True,
+        )
+
         async def _analyze_symbol(sym: str) -> tuple[str, dict[str, Any]]:
-            reports = await self._run_analysts_for_symbol(sym, discovery_context)
+            reports = await self._run_analysts_for_symbol(sym, discovery_context, pre_built_context=pre_context)
             return sym, reports
 
         gather_results = await asyncio.gather(
@@ -1176,10 +1189,11 @@ class AutonomousDeepEngine:
             await session.commit()
             logger.info(f"Stored {len(stored)} insights to database")
 
-            # Extract patterns from each stored insight
+            # Extract patterns from each stored insight (in parallel)
             try:
                 pattern_extractor = PatternExtractor(session)
-                for insight in stored:
+
+                async def _extract_pattern(insight: DeepInsight) -> None:
                     try:
                         insight_dict = {
                             "id": insight.id,
@@ -1198,6 +1212,11 @@ class AutonomousDeepEngine:
                         logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
                     except Exception as pe:
                         logger.error(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}", exc_info=True)
+
+                await asyncio.gather(
+                    *[_extract_pattern(ins) for ins in stored],
+                    return_exceptions=True,
+                )
                 await session.commit()
             except Exception as e:
                 logger.error(f"[AUTO] Pattern extraction phase failed: {e}", exc_info=True)
@@ -1387,15 +1406,26 @@ class AutonomousDeepEngine:
             )
 
             analyst_reports: dict[str, dict[str, Any]] = {}
-            for symbol in symbols_to_analyze:
+
+            async def _analyze_one(sym: str) -> tuple[str, dict[str, Any] | None]:
                 try:
-                    symbol_reports = await self._run_analysts_for_symbol(
-                        symbol, discovery_context
-                    )
-                    analyst_reports[symbol] = symbol_reports
+                    reports = await self._run_analysts_for_symbol(sym, discovery_context)
+                    return sym, reports
                 except Exception as e:
-                    logger.error(f"Deep dive failed for {symbol}: {e}")
-                    result.errors.append(f"Deep dive {symbol}: {str(e)}")
+                    logger.error(f"Deep dive failed for {sym}: {e}")
+                    result.errors.append(f"Deep dive {sym}: {str(e)}")
+                    return sym, None
+
+            gather_results = await asyncio.gather(
+                *[_analyze_one(sym) for sym in symbols_to_analyze],
+                return_exceptions=True,
+            )
+            for r in gather_results:
+                if isinstance(r, BaseException):
+                    logger.error(f"Deep dive failed: {r}")
+                    result.errors.append(f"Deep dive: {str(r)}")
+                elif r[1] is not None:
+                    analyst_reports[r[0]] = r[1]
 
             result.analyst_reports = analyst_reports
             result.phases_completed.append("deep_dive")
@@ -1635,6 +1665,9 @@ class AutonomousDeepEngine:
     ) -> list[dict[str, Any]]:
         """Screen stocks and return candidates with data.
 
+        Uses asyncio.gather with run_in_executor to fetch yfinance data
+        concurrently instead of blocking the event loop sequentially.
+
         Args:
             symbols: List of stock symbols to screen.
 
@@ -1643,40 +1676,56 @@ class AutonomousDeepEngine:
         """
         import yfinance as yf  # type: ignore[import-not-found]
 
-        candidates: list[dict[str, Any]] = []
+        loop = asyncio.get_event_loop()
+        yf_semaphore = asyncio.Semaphore(20)
 
-        for symbol in symbols:
-            try:
-                ticker = yf.Ticker(symbol)
-                hist = ticker.history(period="1mo")
+        async def _screen_one(symbol: str) -> dict[str, Any] | None:
+            async with yf_semaphore:
+                try:
+                    ticker = yf.Ticker(symbol)
+                    hist = await loop.run_in_executor(
+                        None, lambda t=ticker: t.history(period="1mo")
+                    )
 
-                if hist.empty or len(hist) < 5:
-                    continue
+                    if hist.empty or len(hist) < 5:
+                        return None
 
-                current = hist["Close"].iloc[-1]
-                return_5d = ((current / hist["Close"].iloc[-5]) - 1) * 100
-                return_20d = ((current / hist["Close"].iloc[0]) - 1) * 100
-                avg_volume = hist["Volume"].mean()
-                current_volume = hist["Volume"].iloc[-1]
+                    current = hist["Close"].iloc[-1]
+                    return_5d = ((current / hist["Close"].iloc[-5]) - 1) * 100
+                    return_20d = ((current / hist["Close"].iloc[0]) - 1) * 100
+                    avg_volume = hist["Volume"].mean()
+                    current_volume = hist["Volume"].iloc[-1]
 
-                data = {
-                    "symbol": symbol,
-                    "sector": SYMBOL_TO_SECTOR.get(symbol, "Unknown"),
-                    "price": current,
-                    "return_5d": return_5d,
-                    "return_20d": return_20d,
-                    "avg_volume": avg_volume,
-                    "volume_ratio": current_volume / avg_volume if avg_volume > 0 else 1.0,
-                }
+                    data = {
+                        "symbol": symbol,
+                        "sector": SYMBOL_TO_SECTOR.get(symbol, "Unknown"),
+                        "price": current,
+                        "return_5d": return_5d,
+                        "return_20d": return_20d,
+                        "avg_volume": avg_volume,
+                        "volume_ratio": current_volume / avg_volume if avg_volume > 0 else 1.0,
+                    }
 
-                # Apply technical screen
-                if passes_technical_screen(data):
-                    data["screen_score"] = calculate_screen_score(data)
-                    candidates.append(data)
+                    # Apply technical screen
+                    if passes_technical_screen(data):
+                        data["screen_score"] = calculate_screen_score(data)
+                        return data
 
-            except Exception as e:
-                logger.warning(f"Failed to screen {symbol}: {e}")
-                continue
+                    return None
+                except Exception as e:
+                    logger.warning(f"Failed to screen {symbol}: {e}")
+                    return None
+
+        results = await asyncio.gather(
+            *[_screen_one(sym) for sym in symbols],
+            return_exceptions=True,
+        )
+
+        # Filter out None values and exceptions
+        candidates: list[dict[str, Any]] = [
+            r for r in results
+            if isinstance(r, dict)
+        ]
 
         # Sort by screen score
         candidates.sort(key=lambda x: x.get("screen_score", 0), reverse=True)
@@ -1705,25 +1754,32 @@ class AutonomousDeepEngine:
         self,
         symbol: str,
         discovery_context: str,
+        pre_built_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run all analysts for a single symbol.
 
         Args:
             symbol: Stock symbol to analyze.
             discovery_context: Pre-built discovery context.
+            pre_built_context: Optional pre-built market context covering all
+                symbols. When provided, skips the per-symbol build_context()
+                call, saving redundant data fetches.
 
         Returns:
             Dictionary mapping analyst names to their reports.
         """
-        # Build symbol-specific context (include rich TA for risk analyst)
-        agent_context = await self.context_builder.build_context(
-            symbols=[symbol],
-            include_price_history=True,
-            include_technical=True,
-            include_economic=False,
-            include_sectors=False,
-            include_rich_technical=True,
-        )
+        # Use pre-built context if available, otherwise build per-symbol
+        if pre_built_context is not None:
+            agent_context = pre_built_context
+        else:
+            agent_context = await self.context_builder.build_context(
+                symbols=[symbol],
+                include_price_history=True,
+                include_technical=True,
+                include_economic=False,
+                include_sectors=False,
+                include_rich_technical=True,
+            )
 
         reports: dict[str, Any] = {}
 
@@ -1783,10 +1839,11 @@ class AutonomousDeepEngine:
         # Prepend discovery context
         full_context = f"{discovery_context}\n\n{formatted_context}"
 
-        # Query LLM
+        # Query LLM (semaphore limits concurrent LLM calls across all analysts)
         for attempt in range(self.max_retries + 1):
             try:
-                response = await self._query_llm(prompt, full_context, analyst_name)
+                async with self._llm_semaphore:
+                    response = await self._query_llm(prompt, full_context, analyst_name)
                 parsed = parse_func(response)
 
                 if hasattr(parsed, "to_dict"):
@@ -2059,10 +2116,11 @@ class AutonomousDeepEngine:
             await session.commit()
             logger.info(f"Stored {len(stored)} insights to database")
 
-            # Extract patterns from each stored insight
+            # Extract patterns from each stored insight (in parallel)
             try:
                 pattern_extractor = PatternExtractor(session)
-                for insight in stored:
+
+                async def _extract_pattern_legacy(insight: DeepInsight) -> None:
                     try:
                         insight_dict = {
                             "id": insight.id,
@@ -2081,6 +2139,11 @@ class AutonomousDeepEngine:
                         logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
                     except Exception as pe:
                         logger.error(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}", exc_info=True)
+
+                await asyncio.gather(
+                    *[_extract_pattern_legacy(ins) for ins in stored],
+                    return_exceptions=True,
+                )
                 await session.commit()
             except Exception as e:
                 logger.error(f"[AUTO] Pattern extraction phase failed: {e}", exc_info=True)

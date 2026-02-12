@@ -15,6 +15,7 @@ Supports autonomous analysis flow with:
 - build_discovery_context(): Combines macro/sector results for symbol analysis
 """
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, date as date_type
 from typing import Any
@@ -229,26 +230,39 @@ class MarketContextBuilder:
                 "stocks": await self._get_stocks_data(db, symbols),
             }
 
-            # Get stock IDs for filtered queries
+            # Get stock IDs for filtered queries (needed by price_history and technical)
             stock_ids = await self._get_stock_ids(db, symbols)
 
+            # Gather independent queries in parallel
+            tasks: list = []
+            task_keys: list[str] = []
+
             if include_price_history:
-                context["price_history"] = await self._get_price_history(
-                    db, symbols, stock_ids, days=price_history_days
-                )
+                tasks.append(self._get_price_history(db, symbols, stock_ids, days=price_history_days))
+                task_keys.append("price_history")
 
             if include_technical:
-                context["technical_indicators"] = await self._get_technical_indicators(
-                    db, symbols, stock_ids
-                )
+                tasks.append(self._get_technical_indicators(db, symbols, stock_ids))
+                task_keys.append("technical_indicators")
 
             if include_economic:
-                context["economic_indicators"] = await self._get_economic_indicators(db)
+                tasks.append(self._get_economic_indicators(db))
+                task_keys.append("economic_indicators")
 
             if include_sectors:
-                context["sector_performance"] = await self._calculate_sector_performance(db)
+                tasks.append(self._calculate_sector_performance(db))
+                task_keys.append("sector_performance")
 
-            context["market_summary"] = await self._get_market_summary(db)
+            tasks.append(self._get_market_summary(db))
+            task_keys.append("market_summary")
+
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for key, result in zip(task_keys, results):
+                    if isinstance(result, BaseException):
+                        logger.warning("Parallel context fetch failed for %s: %s", key, result)
+                    else:
+                        context[key] = result
 
         # Rich technical analysis (pandas_ta-based composite scoring)
         if include_rich_technical and _HAS_RICH_TA:
@@ -400,14 +414,25 @@ class MarketContextBuilder:
 
             loop = asyncio.get_running_loop()
 
-            for symbol in symbols:
-                try:
-                    # Fetch ~3 months of daily OHLCV via yfinance in executor
-                    ticker = yf.Ticker(symbol)
-                    df = await loop.run_in_executor(
-                        None, lambda t=ticker: t.history(period="3mo"),
-                    )
+            # Fetch all symbols concurrently via run_in_executor
+            async def _fetch_one(sym: str):
+                ticker = yf.Ticker(sym)
+                return sym, await loop.run_in_executor(
+                    None, lambda t=ticker: t.history(period="3mo"),
+                )
 
+            fetch_results = await asyncio.gather(
+                *[_fetch_one(s) for s in symbols], return_exceptions=True,
+            )
+
+            # Process results sequentially (CPU-bound indicator computation, fast)
+            for r in fetch_results:
+                if isinstance(r, BaseException):
+                    logger.warning("Rich TA yfinance fetch failed: %s", r)
+                    continue
+
+                symbol, df = r
+                try:
                     if df is None or df.empty or len(df) < 10:
                         logger.debug(
                             "Skipping rich TA for %s: insufficient data (%d rows)",
@@ -664,19 +689,30 @@ class MarketContextBuilder:
         result = await db.execute(query)
         stocks = result.scalars().all()
 
+        if not stocks:
+            return {}
+
+        # Batch fetch: single query for all sector ETF prices instead of N+1
+        stock_ids_list = [stock.id for stock in stocks]
+        price_query = (
+            select(PriceHistory)
+            .where(PriceHistory.stock_id.in_(stock_ids_list))
+            .order_by(PriceHistory.stock_id, PriceHistory.date.desc())
+        )
+        price_result = await db.execute(price_query)
+        all_prices = price_result.scalars().all()
+
+        # Group by stock_id, keeping at most 30 per stock
+        from collections import defaultdict
+        prices_by_stock: dict[int, list] = defaultdict(list)
+        for price in all_prices:
+            if len(prices_by_stock[price.stock_id]) < 30:
+                prices_by_stock[price.stock_id].append(price)
+
         performance: dict[str, dict[str, Any]] = {}
 
         for stock in stocks:
-            # Get recent prices for this sector ETF
-            price_query = (
-                select(PriceHistory)
-                .where(PriceHistory.stock_id == stock.id)
-                .order_by(PriceHistory.date.desc())
-                .limit(30)
-            )
-
-            price_result = await db.execute(price_query)
-            prices = price_result.scalars().all()
+            prices = prices_by_stock.get(stock.id, [])
 
             if len(prices) >= 2:
                 current = prices[0].close
@@ -1238,34 +1274,52 @@ class MarketContextBuilder:
             "^FTSE": "FTSE 100",
         }
 
-        results: dict[str, dict[str, Any]] = {}
-        for symbol, name in tickers.items():
+        loop = asyncio.get_running_loop()
+
+        async def _fetch_ticker(symbol: str, name: str) -> tuple[str, dict[str, Any]] | None:
             try:
                 ticker = yf.Ticker(symbol)
-                hist = ticker.history(period="1mo")
-                if not hist.empty and len(hist) >= 2:
-                    current = hist["Close"].iloc[-1]
-                    prev_day = hist["Close"].iloc[-2]
-                    change_1d = ((current / prev_day) - 1) * 100
+                hist = await loop.run_in_executor(
+                    None, lambda t=ticker: t.history(period="1mo"),
+                )
+                if hist.empty or len(hist) < 2:
+                    return None
+                current = hist["Close"].iloc[-1]
+                prev_day = hist["Close"].iloc[-2]
+                change_1d = ((current / prev_day) - 1) * 100
 
-                    change_5d = None
-                    if len(hist) >= 5:
-                        change_5d = ((current / hist["Close"].iloc[-5]) - 1) * 100
+                change_5d = None
+                if len(hist) >= 5:
+                    change_5d = ((current / hist["Close"].iloc[-5]) - 1) * 100
 
-                    change_20d = ((current / hist["Close"].iloc[0]) - 1) * 100
+                change_20d = ((current / hist["Close"].iloc[0]) - 1) * 100
 
-                    results[symbol] = {
-                        "name": name,
-                        "current": current,
-                        "change_1d": change_1d,
-                        "change_5d": change_5d,
-                        "change_20d": change_20d,
-                        "high_20d": hist["High"].max(),
-                        "low_20d": hist["Low"].min(),
-                    }
+                return symbol, {
+                    "name": name,
+                    "current": current,
+                    "change_1d": change_1d,
+                    "change_5d": change_5d,
+                    "change_20d": change_20d,
+                    "high_20d": hist["High"].max(),
+                    "low_20d": hist["Low"].min(),
+                }
             except Exception as e:
                 logger.warning(f"Failed to fetch {symbol}: {e}")
+                return None
+
+        fetch_results = await asyncio.gather(
+            *[_fetch_ticker(sym, name) for sym, name in tickers.items()],
+            return_exceptions=True,
+        )
+
+        results: dict[str, dict[str, Any]] = {}
+        for r in fetch_results:
+            if isinstance(r, BaseException):
+                logger.warning("Macro indicator fetch failed: %s", r)
                 continue
+            if r is not None:
+                sym, data = r
+                results[sym] = data
 
         return results
 
@@ -1341,30 +1395,48 @@ class MarketContextBuilder:
             "XLB": "Materials",
         }
 
-        results: dict[str, dict[str, Any]] = {}
-        for symbol, name in sector_etfs.items():
+        loop = asyncio.get_running_loop()
+
+        async def _fetch_etf(symbol: str, name: str) -> tuple[str, dict[str, Any]] | None:
             try:
                 ticker = yf.Ticker(symbol)
-                hist = ticker.history(period="1mo")
-                if not hist.empty and len(hist) >= 2:
-                    current = hist["Close"].iloc[-1]
-                    prev_day = hist["Close"].iloc[-2]
+                hist = await loop.run_in_executor(
+                    None, lambda t=ticker: t.history(period="1mo"),
+                )
+                if hist.empty or len(hist) < 2:
+                    return None
+                current = hist["Close"].iloc[-1]
+                prev_day = hist["Close"].iloc[-2]
 
-                    return_5d = 0.0
-                    if len(hist) >= 5:
-                        return_5d = ((current / hist["Close"].iloc[-5]) - 1) * 100
+                return_5d = 0.0
+                if len(hist) >= 5:
+                    return_5d = ((current / hist["Close"].iloc[-5]) - 1) * 100
 
-                    results[symbol] = {
-                        "name": name,
-                        "price": current,
-                        "return_1d": ((current / prev_day) - 1) * 100,
-                        "return_5d": return_5d,
-                        "return_20d": ((current / hist["Close"].iloc[0]) - 1) * 100,
-                        "volume_avg": hist["Volume"].mean(),
-                    }
+                return symbol, {
+                    "name": name,
+                    "price": current,
+                    "return_1d": ((current / prev_day) - 1) * 100,
+                    "return_5d": return_5d,
+                    "return_20d": ((current / hist["Close"].iloc[0]) - 1) * 100,
+                    "volume_avg": hist["Volume"].mean(),
+                }
             except Exception as e:
                 logger.warning(f"Failed to fetch sector {symbol}: {e}")
+                return None
+
+        fetch_results = await asyncio.gather(
+            *[_fetch_etf(sym, name) for sym, name in sector_etfs.items()],
+            return_exceptions=True,
+        )
+
+        results: dict[str, dict[str, Any]] = {}
+        for r in fetch_results:
+            if isinstance(r, BaseException):
+                logger.warning("Sector ETF fetch failed: %s", r)
                 continue
+            if r is not None:
+                sym, data = r
+                results[sym] = data
 
         # Calculate relative strength vs SPY
         if "SPY" in results:
