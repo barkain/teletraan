@@ -735,10 +735,21 @@ class AutonomousDeepEngine:
     async def _run_heatmap_fetch(self) -> HeatmapData:
         """Run Phase 2: Heatmap Fetch.
 
+        Attempts to use the dynamic universe from universe_builder for a
+        broader stock universe. Falls back to the default static holdings.
+
         Returns:
             HeatmapData with sector and stock heatmap entries.
         """
         fetcher = get_heatmap_fetcher()
+        # Attempt to inject dynamic holdings into the fetcher
+        try:
+            from analysis.agents.heatmap_fetcher import get_dynamic_holdings  # type: ignore[import-not-found]
+            dynamic_holdings = await get_dynamic_holdings()
+            if dynamic_holdings:
+                fetcher._fallback_holdings = dynamic_holdings
+        except Exception as exc:
+            logger.debug("Dynamic holdings unavailable for heatmap fetch: %s", exc)
         return await fetcher.fetch_heatmap_data()
 
     async def _run_heatmap_analysis(
@@ -1641,8 +1652,16 @@ class AutonomousDeepEngine:
         Returns:
             OpportunityList with candidate opportunities.
         """
-        # Get all stocks in screening universe
-        all_stocks = get_all_screening_stocks()
+        # Get all stocks in screening universe (dynamic)
+        try:
+            from analysis.agents.universe_builder import get_screening_universe  # type: ignore[import-not-found]
+            universe = await get_screening_universe()
+            all_stocks: list[str] = []
+            for symbols in universe.values():
+                all_stocks.extend(symbols)
+            all_stocks = list(set(all_stocks))
+        except Exception:
+            all_stocks = get_all_screening_stocks()
 
         # Fetch stock data for screening
         screened_candidates = await self._screen_stocks(all_stocks)
@@ -1686,19 +1705,38 @@ class AutonomousDeepEngine:
 
     async def _screen_stocks(
         self,
-        symbols: list[str],
+        symbols: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Screen stocks and return candidates with data.
 
         Uses asyncio.gather with run_in_executor to fetch yfinance data
         concurrently instead of blocking the event loop sequentially.
 
+        If *symbols* is None or empty, the dynamic screening universe from
+        ``universe_builder`` is used. Falls back to the synchronous
+        hardcoded list from ``opportunity_hunter`` on failure.
+
         Args:
-            symbols: List of stock symbols to screen.
+            symbols: List of stock symbols to screen. If None, uses
+                the dynamic universe.
 
         Returns:
             List of screened candidate dictionaries.
         """
+        # Resolve symbols from the dynamic universe when none provided
+        resolved_symbols: list[str] = symbols or []
+        if not resolved_symbols:
+            try:
+                from analysis.agents.universe_builder import get_screening_universe  # type: ignore[import-not-found]
+                universe = await get_screening_universe()
+                all_syms: list[str] = []
+                for syms in universe.values():
+                    all_syms.extend(syms)
+                resolved_symbols = list(set(all_syms))
+            except Exception:
+                from analysis.agents.opportunity_hunter import get_all_screening_stocks_sync  # type: ignore[import-not-found]
+                resolved_symbols = get_all_screening_stocks_sync()
+
         import yfinance as yf  # type: ignore[import-not-found]
 
         loop = asyncio.get_event_loop()
@@ -1742,7 +1780,7 @@ class AutonomousDeepEngine:
                     return None
 
         results = await asyncio.gather(
-            *[_screen_one(sym) for sym in symbols],
+            *[_screen_one(sym) for sym in resolved_symbols],
             return_exceptions=True,
         )
 

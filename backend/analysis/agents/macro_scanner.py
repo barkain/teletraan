@@ -57,9 +57,11 @@ Analyze the macro environment and identify:
    - Theme name (e.g., "Fed Policy Pivot", "China Reopening", "Energy Crisis", "Dollar Strength")
    - Direction of impact (bullish/bearish/mixed)
    - Affected sectors (list of sectors like Technology, Energy, Financials, etc.)
-   - Affected assets (specific ETFs or asset classes)
+   - Affected assets: list of 5-8 specific individual stocks AND commodity futures (e.g., NVDA, GC=F, COP) that directly benefit from this theme. Do NOT list sector ETFs like XLK or XLF.
    - Confidence level (high/medium/low)
    - Brief rationale (2-3 sentences)
+
+   For each macro theme, identify specific tradeable instruments — individual equities, commodity futures, or specific companies — NOT sector ETFs. The goal is actionable single-name recommendations.
 
 3. **KEY RISKS** to monitor (2-3 risks)
    - Risk description
@@ -87,7 +89,7 @@ Return your analysis as valid JSON:
       "name": "Fed Policy Pivot",
       "direction": "bullish",
       "affected_sectors": ["Technology", "Real Estate", "Consumer Discretionary"],
-      "affected_assets": ["XLK", "XLRE", "XLY", "TLT"],
+      "affected_assets": ["NVDA", "MSFT", "AAPL", "AMT", "AMZN", "GC=F", "TLT"],
       "confidence": "high",
       "rationale": "Fed signaling end of hiking cycle. Market pricing in rate cuts by mid-year. Bonds rallying as yields decline."
     }}
@@ -950,32 +952,58 @@ def get_affected_symbols_from_scan(scan_result: MacroScanResult) -> list[str]:
     # Get symbols from themes
     for theme in scan_result.themes:
         for asset in theme.affected_assets:
-            # Filter to ticker-like strings (uppercase, 1-5 chars)
-            if asset.isupper() and 1 <= len(asset) <= 5:
-                symbols.add(asset)
+            # Filter to ticker-like strings (uppercase, may contain =, -, ^)
+            clean = asset.strip()
+            if clean and (
+                (clean.isupper() and 1 <= len(clean) <= 5)
+                or "=" in clean  # commodity futures like GC=F, CL=F
+                or clean.startswith("^")  # indices
+            ):
+                symbols.add(clean)
 
-    # Add sector ETFs from preferences
+    # Add individual stocks and ETFs from sector preferences
     implications = scan_result.actionable_implications
-    sector_to_etf = {
-        "Technology": "XLK",
-        "Financials": "XLF",
-        "Energy": "XLE",
-        "Healthcare": "XLV",
-        "Industrials": "XLI",
-        "Consumer Staples": "XLP",
-        "Consumer Discretionary": "XLY",
-        "Utilities": "XLU",
-        "Communication Services": "XLC",
-        "Real Estate": "XLRE",
-        "Materials": "XLB",
+    sector_to_symbols = {
+        "Technology": ["XLK", "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AVGO", "ADBE", "CRM", "AMD"],
+        "Financials": ["XLF", "JPM", "BAC", "GS", "MS", "BLK", "V", "MA", "AXP", "SCHW"],
+        "Energy": ["XLE", "XOM", "CVX", "COP", "SLB", "CL=F", "EOG", "PXD", "OXY", "HAL"],
+        "Healthcare": ["XLV", "UNH", "JNJ", "LLY", "PFE", "ABT", "TMO", "ABBV", "MRK", "ISRG"],
+        "Industrials": ["XLI", "CAT", "HON", "UNP", "GE", "RTX", "DE", "LMT", "NOC", "WM"],
+        "Consumer Staples": ["XLP", "PG", "KO", "PEP", "COST", "WMT", "PM", "MO", "CL", "STZ"],
+        "Consumer Discretionary": ["XLY", "AMZN", "TSLA", "HD", "NKE", "MCD", "SBUX", "TJX", "ABNB", "BKNG"],
+        "Utilities": ["XLU", "NEE", "DUK", "SO", "D", "AEP", "SRE", "WEC", "ES", "XEL"],
+        "Communication Services": ["XLC", "GOOGL", "META", "NFLX", "DIS", "TMUS", "T", "VZ", "SPOT", "EA"],
+        "Real Estate": ["XLRE", "AMT", "PLD", "CCI", "EQIX", "SPG", "O", "WELL", "DLR", "PSA"],
+        "Materials": ["XLB", "LIN", "APD", "ECL", "NEM", "FCX", "SHW", "DD", "VMC", "MLM"],
+    }
+
+    # Commodity theme keywords → relevant commodity futures and stocks
+    commodity_theme_symbols = {
+        "inflation": ["GC=F", "SI=F", "TIP", "CL=F", "NEM", "GOLD"],
+        "energy": ["CL=F", "NG=F", "BZ=F", "XOM", "CVX", "COP", "SLB"],
+        "commodities": ["GC=F", "SI=F", "CL=F", "HG=F", "ZW=F", "FCX", "NEM", "BHP"],
+        "gold": ["GC=F", "GLD", "NEM", "GOLD", "AEM", "FNV"],
+        "oil": ["CL=F", "BZ=F", "XOM", "CVX", "COP", "OXY", "SLB"],
+        "copper": ["HG=F", "FCX", "SCCO", "TECK"],
+        "agriculture": ["DBA", "ADM", "BG", "DE", "ZW=F", "ZC=F", "ZS=F"],
+        "silver": ["SI=F", "SLV", "PAAS", "WPM"],
+        "natural gas": ["NG=F", "LNG", "AR", "EQT"],
+        "metals": ["GC=F", "SI=F", "HG=F", "PL=F", "FCX", "NEM", "SCCO"],
     }
 
     for sector in implications.sector_preferences.overweight:
-        if sector in sector_to_etf:
-            symbols.add(sector_to_etf[sector])
+        if sector in sector_to_symbols:
+            symbols.update(sector_to_symbols[sector])
 
     for sector in implications.sector_preferences.underweight:
-        if sector in sector_to_etf:
-            symbols.add(sector_to_etf[sector])
+        if sector in sector_to_symbols:
+            symbols.update(sector_to_symbols[sector])
+
+    # Add commodity symbols based on theme keywords
+    for theme in scan_result.themes:
+        theme_lower = theme.name.lower()
+        for keyword, syms in commodity_theme_symbols.items():
+            if keyword in theme_lower:
+                symbols.update(syms)
 
     return sorted(symbols)

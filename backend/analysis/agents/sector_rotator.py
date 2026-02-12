@@ -331,11 +331,15 @@ Benchmark: SPY (S&P 500)
 ## Your Task
 Based on the macro context and sector performance data provided, identify:
 
-1. **TOP 3 SECTORS** to focus on:
-   For each sector:
-   - Sector name and ETF symbol
-   - Why it's attractive (momentum + macro alignment)
-   - Key stocks to consider in this sector
+1. **TOP 8-10 SPECIFIC STOCKS AND COMMODITIES** across the best-positioned sectors:
+   For each sector rotation opportunity, recommend 2-3 specific individual stocks that benefit most — NOT the sector ETF. Include commodity futures if macro conditions warrant (e.g., GC=F for gold during uncertainty, CL=F for oil during energy rotation).
+
+   Every recommendation must be a specific tradeable symbol. Never recommend a sector ETF (XLK, XLF, XLE, XLV, XLI, XLP, XLY, XLU, XLC, XLRE, XLB) as a primary position — ETFs are only for context/benchmarking.
+
+   For each top sector, provide:
+   - Sector name and ETF symbol (for reference only)
+   - 2-3 specific stock picks (the PRIMARY output) with brief rationale per stock
+   - Why this sector is attractive (momentum + macro alignment)
    - Risk factors to watch
 
 2. **SECTORS TO AVOID** (2 sectors):
@@ -348,7 +352,7 @@ Based on the macro context and sector performance data provided, identify:
    - Stage of rotation (early/mid/late)
 
 4. **SECTOR PAIRS TRADE** (optional):
-   - Long sector vs Short sector if clear divergence exists
+   - Long specific stock vs Short specific stock if clear divergence exists (use individual names, not ETFs)
    - Only recommend if high conviction (>70% confidence)
 
 ## Output Format
@@ -365,6 +369,26 @@ Return JSON:
       "rationale": "Strong momentum aligned with growth-favorable macro environment",
       "key_stocks": ["NVDA", "MSFT", "AAPL"],
       "risks": ["Elevated valuations", "Rate sensitivity"]
+    },
+    {
+      "sector_name": "Energy",
+      "etf_symbol": "XLE",
+      "recommendation": "overweight",
+      "momentum_score": 2.8,
+      "relative_strength_20d": 1.9,
+      "rationale": "Late-cycle inflation hedge with supply constraints",
+      "key_stocks": ["XOM", "CVX", "CL=F"],
+      "risks": ["Demand slowdown", "Geopolitical volatility"]
+    },
+    {
+      "sector_name": "Materials",
+      "etf_symbol": "XLB",
+      "recommendation": "overweight",
+      "momentum_score": 2.1,
+      "relative_strength_20d": 1.5,
+      "rationale": "Infrastructure spending tailwind and inflation hedge",
+      "key_stocks": ["FCX", "NEM", "GC=F"],
+      "risks": ["China demand uncertainty", "Dollar strength"]
     }
   ],
   "sectors_to_avoid": [
@@ -384,23 +408,28 @@ Return JSON:
   "rotation_to": ["Technology", "Industrials"],
   "rotation_stage": "mid",
   "sector_pair_trade": {
-    "long": "XLK",
-    "short": "XLU",
-    "rationale": "Tech vs Utilities spread widening on rate expectations"
+    "long": "NVDA",
+    "short": "NEE",
+    "rationale": "AI semiconductor leader vs rate-sensitive utility on diverging macro setup"
   },
   "key_observations": [
     "Risk-on environment with cyclicals outperforming defensives",
-    "Technology maintaining leadership with strong relative strength"
+    "Technology maintaining leadership with strong relative strength",
+    "Top individual picks: NVDA, MSFT, AAPL, XOM, CVX, FCX, NEM plus GC=F and CL=F as commodity hedges"
   ],
   "confidence": 0.75
 }
 
+IMPORTANT: The key_stocks field is REQUIRED for every top_sectors entry. Each must contain 2-3 specific tradeable symbols (individual stocks or commodity futures like GC=F, CL=F, SI=F). Never put sector ETFs in key_stocks.
+
 ## Guidelines
 - Focus on momentum and relative strength metrics
 - Align sector recommendations with macro context from Phase 1
-- Be specific about which stocks to watch in each sector
+- **Individual stock picks are your PRIMARY deliverable** — every top sector MUST include 2-3 specific stock symbols
+- Include commodity futures (GC=F, CL=F, SI=F, etc.) when macro conditions warrant
+- Never recommend sector ETFs (XLK, XLF, etc.) as positions — they are for analysis context only
 - Identify rotation patterns and their stage
-- Only recommend pairs trades when there's clear divergence
+- Only recommend pairs trades when there's clear divergence (use individual stock symbols, not ETFs)
 - Use confidence scores between 0.0 and 1.0
 - Higher confidence (>0.7) for clear rotation signals with volume confirmation
 - Lower confidence (<0.5) for mixed or unclear signals
