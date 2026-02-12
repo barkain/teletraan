@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Float, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -51,6 +51,11 @@ class KnowledgePattern(TimestampMixin, Base):
         source_conversations: Array of conversation IDs where discussed
         is_active: Whether pattern is currently active for detection
         last_triggered_at: When pattern was last detected in market
+        lifecycle_status: Lifecycle stage (draft, active, confirmed, retired, archived)
+        related_symbols: Stock symbols related to this pattern
+        related_sectors: Sectors related to this pattern
+        extraction_source: Where the pattern came from (insight, conversation, manual)
+        last_evaluated_at: When the pattern was last evaluated against market data
     """
 
     __tablename__ = "knowledge_patterns"
@@ -126,6 +131,35 @@ class KnowledgePattern(TimestampMixin, Base):
         index=True,
     )
     last_triggered_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    # Lifecycle and metadata
+    lifecycle_status: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        default="draft",
+        server_default="draft",
+        index=True,
+    )  # "draft", "active", "confirmed", "retired", "archived"
+    related_symbols: Mapped[list[str] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=None,
+    )  # Stock symbols related to this pattern
+    related_sectors: Mapped[list[str] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=None,
+    )  # Sectors related to this pattern
+    extraction_source: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        default=None,
+    )  # Where the pattern came from: "insight", "conversation", "manual"
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+        default=None,
+    )  # When the pattern was last evaluated against market data
 
     __table_args__ = (
         Index("ix_knowledge_patterns_type_active", "pattern_type", "is_active"),

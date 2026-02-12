@@ -204,6 +204,43 @@ export interface DeepInsight {
   // Parent insight linking (for follow-up insights derived from conversations)
   parent_insight_id?: number;
   source_conversation_id?: number;
+
+  // Additional data sources
+  technical_analysis_data?: {
+    composite_score: number;
+    rating: string;
+    confidence: number;
+    breakdown: {
+      trend: number;
+      momentum: number;
+      volatility: number;
+      volume: number;
+    };
+    key_levels?: {
+      support: number[];
+      resistance: number[];
+      pivot: number;
+    };
+    signals?: string[];
+  } | null;
+  prediction_market_data?: {
+    fed_rates?: { next_meeting?: { date?: string; probabilities?: Record<string, number> }; source?: string };
+    recession?: { probability_2026?: number; source?: string };
+    inflation?: { cpi_above_3pct?: number; source?: string };
+    sp500?: { targets?: Array<{ level: number; probability: number }>; source?: string };
+    gdp?: { q1_positive?: number; source?: string };
+  } | null;
+  sentiment_data?: {
+    overall_mood?: string;
+    trending?: Array<{ ticker: string; mentions: number; upvotes?: number }>;
+    per_symbol?: Array<{
+      symbol: string;
+      sentiment_score: number;
+      post_count: number;
+      bullish_count?: number;
+      bearish_count?: number;
+    }>;
+  } | null;
 }
 
 export interface DeepInsightListResponse {

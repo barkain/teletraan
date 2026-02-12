@@ -24,6 +24,12 @@ export interface KnowledgePattern {
   occurrences: number;
   successful_outcomes: number;
   avg_return_when_triggered?: number;
+  lifecycle_status?: 'DRAFT' | 'ACTIVE' | 'CONFIRMED' | 'RETIRED' | 'ARCHIVED' | null;
+  related_symbols?: string[] | null;
+  related_sectors?: string[] | null;
+  extraction_source?: string | null;
+  source_insight_count?: number;
+  last_evaluated_at?: string | null;
   is_active: boolean;
   last_triggered_at?: string;
   created_at?: string;
@@ -43,6 +49,28 @@ export interface KnowledgePatternsParams {
   is_active?: boolean;
   limit?: number;
   offset?: number;
+}
+
+// Summary statistics for patterns
+export interface PatternsSummary {
+  total: number;
+  active: number;
+  avg_success_rate: number;
+  by_type: Record<string, number>;
+  by_lifecycle: Record<string, number>;
+  top_symbols: string[];
+  top_sectors: string[];
+}
+
+// Response type for pattern summary/dashboard stats
+export interface PatternsSummaryResponse {
+  total_patterns: number;
+  active_patterns: number;
+  avg_success_rate: number;
+  by_type: Record<string, number>;
+  by_lifecycle: Record<string, number>;
+  top_performing: KnowledgePattern[];
+  recently_triggered: KnowledgePattern[];
 }
 
 // Request parameters for matching patterns

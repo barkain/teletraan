@@ -85,6 +85,26 @@ FALLBACK_HOLDINGS: dict[str, list[str]] = {
 }
 
 
+async def get_dynamic_holdings() -> dict[str, list[str]]:
+    """Get dynamic stock universe, falling back to FALLBACK_HOLDINGS.
+
+    Attempts to fetch a broad screening universe (300-500 symbols) from
+    the universe_builder module. Falls back to the static FALLBACK_HOLDINGS
+    if the dynamic fetch fails or returns too few symbols.
+
+    Returns:
+        Dict mapping sector/category name -> list of stock symbols.
+    """
+    try:
+        from analysis.agents.universe_builder import get_screening_universe  # type: ignore[import-not-found]
+        universe = await get_screening_universe()
+        if universe and sum(len(v) for v in universe.values()) > 50:
+            return universe
+    except Exception as e:
+        logger.warning(f"Dynamic universe fetch failed, using fallback: {e}")
+    return FALLBACK_HOLDINGS
+
+
 class SectorHeatmapFetcher:
     """Fetches and computes sector/stock heatmap data from yfinance.
 
@@ -101,7 +121,10 @@ class SectorHeatmapFetcher:
     # Public API
     # ------------------------------------------------------------------
 
-    async def fetch_heatmap_data(self) -> HeatmapData:
+    async def fetch_heatmap_data(
+        self,
+        holdings: dict[str, list[str]] | None = None,
+    ) -> HeatmapData:
         """Fetch a complete market heatmap snapshot.
 
         Workflow:
@@ -111,23 +134,47 @@ class SectorHeatmapFetcher:
             4. Aggregate per-sector breadth and top movers.
             5. Return HeatmapData.
 
+        Args:
+            holdings: Optional sector/category -> symbols mapping from the
+                dynamic universe builder. When provided, these symbols are
+                used instead of FALLBACK_HOLDINGS. Keys should be sector
+                names (not ETF tickers). Falls back to FALLBACK_HOLDINGS
+                when None.
+
         Returns:
             HeatmapData containing sector and stock entries.
         """
         # Build symbol universe
         etf_symbols = list(self._sector_etfs.keys())
         stock_symbols_by_sector: dict[str, list[str]] = {}
-        for etf, sector in self._sector_etfs.items():
-            stock_symbols_by_sector[sector] = self._fallback_holdings.get(etf, [])
+
+        if holdings is not None:
+            # Dynamic universe: keys are sector names (or categories like
+            # "Commodities", "International", "Top Gainers", etc.)
+            sector_names = set(self._sector_etfs.values())
+            for key, syms in holdings.items():
+                if key in sector_names:
+                    stock_symbols_by_sector[key] = syms
+                else:
+                    # Non-sector categories (commodities, ADRs, movers) —
+                    # include them under their own key for heatmap data.
+                    stock_symbols_by_sector[key] = syms
+            # Ensure every GICS sector has at least fallback symbols
+            for etf, sector in self._sector_etfs.items():
+                if sector not in stock_symbols_by_sector:
+                    stock_symbols_by_sector[sector] = self._fallback_holdings.get(etf, [])
+        else:
+            for etf, sector in self._sector_etfs.items():
+                stock_symbols_by_sector[sector] = self._fallback_holdings.get(etf, [])
 
         all_stock_symbols: list[str] = []
         for syms in stock_symbols_by_sector.values():
             all_stock_symbols.extend(syms)
 
-        all_symbols = etf_symbols + all_stock_symbols
+        all_symbols = etf_symbols + list(dict.fromkeys(all_stock_symbols))
 
-        # Batch fetch price history
-        hist_data = await self._batch_download(all_symbols, period="1mo")
+        # Batch fetch price history (chunked for large universes)
+        hist_data = await self._batch_download_chunked(all_symbols, period="1mo")
 
         # Fetch market caps in parallel
         market_caps = await self._fetch_market_caps(all_stock_symbols)
@@ -144,6 +191,10 @@ class SectorHeatmapFetcher:
         stocks_by_sector: dict[str, list[StockHeatmapEntry]] = {
             s: [] for s in self._sector_etfs.values()
         }
+        # Include non-GICS categories from the dynamic universe
+        for key in stock_symbols_by_sector:
+            if key not in stocks_by_sector:
+                stocks_by_sector[key] = []
 
         for sector, syms in stock_symbols_by_sector.items():
             for symbol in syms:
@@ -271,6 +322,54 @@ class SectorHeatmapFetcher:
 
         _set_cache(cache_key, result)
         return result
+
+    async def _batch_download_chunked(
+        self,
+        symbols: list[str],
+        period: str = "1mo",
+        chunk_size: int = 150,
+    ) -> dict[str, Any]:
+        """Batch download with automatic chunking for large symbol universes.
+
+        When the symbol list exceeds *chunk_size*, splits into chunks and
+        downloads them in parallel via ``asyncio.gather()``, then merges
+        the results. For small lists (<= chunk_size), delegates directly
+        to ``_batch_download()``.
+
+        Args:
+            symbols: List of ticker symbols to download.
+            period: yfinance period string (default ``"1mo"``).
+            chunk_size: Maximum symbols per batch download call.
+
+        Returns:
+            Merged dict mapping symbol -> DataFrame.
+        """
+        if len(symbols) <= chunk_size:
+            return await self._batch_download(symbols, period=period)
+
+        # Split into chunks
+        chunks = [
+            symbols[i : i + chunk_size]
+            for i in range(0, len(symbols), chunk_size)
+        ]
+        logger.info(
+            "Chunked download: %d symbols in %d chunks of <=%d",
+            len(symbols), len(chunks), chunk_size,
+        )
+
+        chunk_results = await asyncio.gather(
+            *(self._batch_download(chunk, period=period) for chunk in chunks),
+            return_exceptions=True,
+        )
+
+        merged: dict[str, Any] = {}
+        for idx, chunk_result in enumerate(chunk_results):
+            if isinstance(chunk_result, BaseException):
+                logger.warning("Chunk %d download failed: %s", idx, chunk_result)
+                continue
+            merged.update(chunk_result)
+
+        return merged
 
     def _compute_metrics(
         self,

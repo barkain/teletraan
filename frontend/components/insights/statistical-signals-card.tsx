@@ -384,6 +384,12 @@ export function StatisticalSignalsCard({
     return result.slice(0, maxSignals);
   }, [signals, signalFilter, sortBy, maxSignals]);
 
+  // Hide entirely when there's no data (e.g. 404 / no features computed yet)
+  const hasNoData = !isLoading && !isError && signals.length === 0;
+  if (hasNoData) {
+    return null;
+  }
+
   // Toggle expanded state
   const toggleExpanded = (id: string) => {
     setExpandedIds((prev) => {

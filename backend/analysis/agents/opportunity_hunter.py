@@ -252,13 +252,16 @@ You identify five types of opportunities:
    - Relative strength vs peers
 
 ## Your Task
-From the screened candidates (passed technical filters), select 10-15 stocks that best align with current market themes.
+From the screened candidates (passed technical filters), select 10-15 instruments that best align with current market themes.
 
-For each selected stock, provide:
-1. **Symbol and Name**: Stock identifier
+**Prioritize specific individual equities and commodity futures. Do NOT recommend sector ETFs (XLK, XLF, etc.). Each pick must be a single tradeable instrument.**
+Include commodity futures and international ADRs alongside domestic equities when macro themes support it.
+
+For each selected instrument, provide:
+1. **Symbol and Name**: Instrument identifier (individual stock or commodity future)
 2. **Opportunity Type**: One of the five types above
 3. **Alignment Score** (1-10): How well does this align with macro/sector themes?
-4. **Key Catalyst**: What will drive this stock?
+4. **Key Catalyst**: What will drive this instrument?
 5. **Risk Level**: Low/Medium/High
 6. **Priority for Deep Dive**: High/Medium/Low (High = most actionable)
 
@@ -284,6 +287,36 @@ Return JSON:
       "return_5d": 3.2,
       "return_20d": 12.5,
       "volume_ratio": 1.4
+    },
+    {
+      "symbol": "GC=F",
+      "company_name": "Gold Futures",
+      "sector": "Commodities",
+      "opportunity_type": "momentum",
+      "alignment_score": 8,
+      "key_catalyst": "Central bank buying and inflation hedge demand",
+      "risk_level": "medium",
+      "deep_dive_priority": "high",
+      "price": 2340.0,
+      "market_cap": 0.0,
+      "return_5d": 1.8,
+      "return_20d": 5.4,
+      "volume_ratio": 1.3
+    },
+    {
+      "symbol": "TSM",
+      "company_name": "Taiwan Semiconductor ADR",
+      "sector": "Technology",
+      "opportunity_type": "catalyst",
+      "alignment_score": 8,
+      "key_catalyst": "Global semiconductor capex cycle beneficiary",
+      "risk_level": "medium",
+      "deep_dive_priority": "high",
+      "price": 155.20,
+      "market_cap": 803.0,
+      "return_5d": 2.1,
+      "return_20d": 8.7,
+      "volume_ratio": 1.2
     }
   ],
   "macro_alignment_summary": "Growth stocks favored as Fed signals rate cut path, tech benefiting from soft landing narrative",
@@ -292,12 +325,13 @@ Return JSON:
 }
 
 ## Guidelines
-- Select 10-15 candidates maximum
-- Diversify across opportunity types
+- Select 10-15 candidates maximum — all must be individual instruments (no sector ETFs)
+- Diversify across opportunity types and asset classes (equities, commodities, ADRs)
 - Prioritize 5-7 as "high" priority for deep dive
 - Consider position sizing implications (risk level)
-- Higher alignment scores for stocks matching multiple themes
+- Higher alignment scores for instruments matching multiple themes
 - Note when technicals and fundamentals converge
+- Include at least 1-2 commodity futures when macro conditions warrant
 """
 
 
@@ -323,8 +357,33 @@ def get_sector_stocks(sector_etfs: list[str]) -> list[str]:
     return list(set(stocks))  # Remove duplicates
 
 
-def get_all_screening_stocks() -> list[str]:
-    """Get all stocks in the screening universe.
+async def get_all_screening_stocks() -> list[str]:
+    """Get all stocks in the screening universe (dynamic).
+
+    Attempts to use the dynamic universe_builder which includes ETF holdings,
+    commodity futures, international ADRs, and daily movers. Falls back to
+    hardcoded SECTOR_HOLDINGS if the dynamic fetch fails.
+
+    Returns:
+        List of all unique stock symbols across all sectors/categories.
+    """
+    try:
+        from analysis.agents.universe_builder import get_screening_universe  # type: ignore[reportMissingImports]
+        universe = await get_screening_universe()
+        all_stocks: list[str] = []
+        for holdings in universe.values():
+            all_stocks.extend(holdings)
+        return list(set(all_stocks))
+    except Exception:
+        logger.warning("Dynamic universe_builder failed, falling back to hardcoded SECTOR_HOLDINGS")
+        all_stocks: list[str] = []
+        for holdings in SECTOR_HOLDINGS.values():
+            all_stocks.extend(holdings)
+        return list(set(all_stocks))
+
+
+def get_all_screening_stocks_sync() -> list[str]:
+    """Synchronous fallback: get stocks from hardcoded SECTOR_HOLDINGS.
 
     Returns:
         List of all unique stock symbols across all sectors.

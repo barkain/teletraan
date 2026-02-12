@@ -3,22 +3,26 @@ name = "market-analyzer-backend"
 version = "0.1.0"
 description = "Teletraan Backend API"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.14"
 dependencies = [
-    "fastapi>=0.109.0",
-    "uvicorn[standard]",
-    "sqlalchemy[asyncio]>=2.0",
+    "aiohttp>=3.9.0",
     "aiosqlite",
+    "apscheduler>=3.10",
+    "claude-agent-sdk",
+    "fastapi>=0.109.0",
+    "finvader>=1.0.0",
+    "fredapi",
+    "httpx",
+    "numpy>=1.24,<2.3",
+    "pandas-ta>=0.3.14b",
     "pydantic>=2.0",
     "pydantic-settings",
     "python-dotenv",
-    "httpx",
-    "apscheduler>=3.10",
+    "scipy>=1.14.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "tradingview-ta>=3.3.0",
+    "uvicorn[standard]",
     "yfinance",
-    "fredapi",
-    "claude-agent-sdk",
-    "numpy>=2.4.1",
-    "scipy>=1.17.0",
 ]
 
 [project.optional-dependencies]

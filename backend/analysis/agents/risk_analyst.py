@@ -35,6 +35,33 @@ Assess risk for proposed positions and identify:
 4. **Invalidation triggers** - When to exit if wrong
 5. **Portfolio considerations** - Correlation with existing positions
 
+## Volatility Regime Indicators
+
+When rich technical analysis data is provided, pay special attention to the volatility indicators:
+- **ATR (Average True Range):** Rising ATR indicates increasing volatility/risk. Compare current ATR to recent average to assess volatility regime.
+- **Bollinger Band width/squeeze:** Narrow bandwidth = low volatility (potential breakout setup). Wide bandwidth = high volatility. %B position indicates overbought/oversold.
+- **Keltner Channels:** Price outside channels signals momentum breakout. Bollinger squeeze inside Keltner = strong squeeze setup.
+- **Volume/SMA ratio:** High volume with volatility expansion confirms the move. Low volume with expansion suggests false breakout risk.
+
+Use these indicators to:
+1. Assess current volatility regime (low/normal/high/extreme)
+2. Identify squeeze setups (potential for large moves)
+3. Evaluate whether current price action is supported by volume
+4. Factor volatility into position sizing and risk recommendations
+
+## Tail Risk from Prediction Markets
+When prediction market data is available, incorporate tail event probabilities:
+- Recession probability as a macro tail risk factor
+- Geopolitical event probabilities (if available)
+- Market-implied probability of extreme outcomes
+
+## Social Sentiment as Contrarian Signal
+When Reddit sentiment data is available:
+- Extreme bullish sentiment (>0.7) may indicate complacency -- increase risk assessment
+- Extreme bearish sentiment (<-0.7) may indicate capitulation -- potential contrarian buy signal
+- Rapid sentiment shifts indicate regime change risk
+- High mention velocity for a symbol suggests crowded positioning
+
 ## Output Format
 Return JSON:
 {
@@ -156,6 +183,132 @@ class RiskAnalysisResult:
         }
 
 
+def _format_volatility_context(rich_ta: dict) -> str:
+    """Extract and format volatility-relevant data from rich technical analysis.
+
+    Produces a focused subset of the rich TA data covering only volatility
+    and volume indicators that the risk analyst needs for regime assessment,
+    squeeze detection, and position sizing guidance.
+
+    Args:
+        rich_ta: Dict mapping symbol -> rich TA data dict (as produced by
+            ``MarketContextBuilder._get_rich_technical``).  Each symbol entry
+            contains 'volatility', 'volume', 'latest_price', and
+            'signal_summary' sub-dicts.
+
+    Returns:
+        Formatted markdown string with volatility context per symbol.
+        Empty string when *rich_ta* is empty or contains no useful data.
+    """
+    if not rich_ta:
+        return ""
+
+    lines: list[str] = ["\n=== RICH VOLATILITY INDICATORS ==="]
+
+    for symbol, data in sorted(rich_ta.items()):
+        latest_price = data.get("latest_price", 0)
+        vol_data = data.get("volatility", {})
+        volume_data = data.get("volume", {})
+        signal_summary = data.get("signal_summary", {})
+        breakdown = signal_summary.get("breakdown", {})
+
+        section_parts: list[str] = []
+
+        # --- ATR ---
+        atr = vol_data.get("atr_14")
+        if atr is not None:
+            atr_pct = (atr / latest_price * 100) if latest_price else 0
+            section_parts.append(f"  ATR (14): ${atr:.2f} ({atr_pct:.1f}% of price)")
+
+        # --- Bollinger Bands ---
+        bb = vol_data.get("bollinger", {})
+        if isinstance(bb, dict):
+            pct_b = bb.get("percent_b")
+            bandwidth = bb.get("bandwidth")
+            upper = bb.get("upper")
+            lower = bb.get("lower")
+
+            if pct_b is not None:
+                if pct_b > 1.0:
+                    bb_label = "ABOVE upper band"
+                elif pct_b < 0.0:
+                    bb_label = "BELOW lower band"
+                elif pct_b > 0.8:
+                    bb_label = "near upper band"
+                elif pct_b < 0.2:
+                    bb_label = "near lower band"
+                else:
+                    bb_label = "mid-range"
+                section_parts.append(f"  Bollinger %B: {pct_b:.2f} ({bb_label})")
+
+            if bandwidth is not None:
+                # Low bandwidth suggests squeeze
+                if bandwidth < 5:
+                    bw_label = "TIGHT (squeeze setup)"
+                elif bandwidth < 10:
+                    bw_label = "narrow"
+                elif bandwidth > 25:
+                    bw_label = "WIDE (high volatility)"
+                else:
+                    bw_label = "normal"
+                section_parts.append(f"  Bollinger Bandwidth: {bandwidth:.1f} ({bw_label})")
+
+            if upper is not None and lower is not None:
+                section_parts.append(f"  Bollinger Bands: ${lower:.2f} - ${upper:.2f}")
+
+        # --- Keltner Channels ---
+        kc = vol_data.get("keltner", {})
+        if isinstance(kc, dict):
+            kc_upper = kc.get("upper")
+            kc_lower = kc.get("lower")
+            if kc_upper is not None and kc_lower is not None:
+                section_parts.append(f"  Keltner Channels: ${kc_lower:.2f} - ${kc_upper:.2f}")
+                # Detect Bollinger-inside-Keltner squeeze
+                if isinstance(bb, dict) and bb.get("upper") and bb.get("lower"):
+                    bb_inside_kc = (
+                        bb["upper"] < kc_upper and bb["lower"] > kc_lower
+                    )
+                    if bb_inside_kc:
+                        section_parts.append("  ** SQUEEZE DETECTED: Bollinger inside Keltner **")
+                # Price outside Keltner
+                if latest_price and kc_upper and kc_lower:
+                    if latest_price > kc_upper:
+                        section_parts.append("  Price ABOVE Keltner upper (momentum breakout)")
+                    elif latest_price < kc_lower:
+                        section_parts.append("  Price BELOW Keltner lower (momentum breakdown)")
+
+        # --- Volume ---
+        vol_ratio = volume_data.get("volume_sma_ratio")
+        if vol_ratio is not None:
+            if vol_ratio > 2.0:
+                vol_label = "VERY HIGH (confirms move)"
+            elif vol_ratio > 1.5:
+                vol_label = "elevated"
+            elif vol_ratio > 1.2:
+                vol_label = "above average"
+            elif vol_ratio < 0.5:
+                vol_label = "VERY LOW (lack of conviction)"
+            elif vol_ratio < 0.8:
+                vol_label = "below average"
+            else:
+                vol_label = "near average"
+            section_parts.append(f"  Volume/SMA Ratio: {vol_ratio:.2f} ({vol_label})")
+
+        # --- Composite volatility sub-score ---
+        vol_score = breakdown.get("volatility")
+        if vol_score is not None:
+            section_parts.append(f"  Volatility Sub-Score: {vol_score:.1f}")
+
+        if section_parts:
+            lines.append(f"\n--- {symbol} (Price: ${latest_price:.2f}) ---")
+            lines.extend(section_parts)
+
+    if len(lines) <= 1:
+        return ""
+
+    return "\n".join(lines)
+
+
 def format_risk_context(market_data: dict) -> str:
     """
     Format volatility and risk data for analyst consumption.
@@ -168,6 +321,7 @@ def format_risk_context(market_data: dict) -> str:
             - sector_performance: Dict mapping sector ETFs to performance metrics
             - economic_indicators: List of economic indicator dicts
             - market_summary: Overall market status
+            - rich_technical: (optional) Dict mapping symbols to rich TA data
             Or legacy format with vix_data, price_data, portfolio, correlations.
 
     Returns:
@@ -384,6 +538,33 @@ def format_risk_context(market_data: dict) -> str:
             context_parts.append("\n=== MARKET CONTEXT ===")
             for item in market_data["market_context"]:
                 context_parts.append(f"  - {item}")
+
+    # Append volatility subset from rich TA if available
+    rich_ta = market_data.get("rich_technical")
+    if rich_ta:
+        volatility_context = _format_volatility_context(rich_ta)
+        if volatility_context:
+            context_parts.append(volatility_context)
+
+    # Prediction market data (optional)
+    predictions = market_data.get("predictions")
+    if predictions:
+        from analysis.context_builder import format_prediction_context  # type: ignore[import-not-found]
+
+        prediction_text = format_prediction_context(predictions)
+        if prediction_text:
+            context_parts.append("")
+            context_parts.append(prediction_text)
+
+    # Reddit sentiment data (optional)
+    sentiment = market_data.get("sentiment")
+    if sentiment:
+        from analysis.context_builder import format_sentiment_context  # type: ignore[import-not-found]
+
+        sentiment_text = format_sentiment_context(sentiment)
+        if sentiment_text:
+            context_parts.append("")
+            context_parts.append(sentiment_text)
 
     return "\n".join(context_parts)
 

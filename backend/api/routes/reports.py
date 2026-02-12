@@ -1032,26 +1032,26 @@ async def publish_report(
 # ---------------------------------------------------------------------------
 
 _ACTION_COLORS = {
-    "STRONG_BUY": "#22c55e",
-    "BUY": "#10B981",
-    "HOLD": "#F59E0B",
+    "STRONG_BUY": "#22C55E",
+    "BUY": "#22C55E",
+    "HOLD": "#EAB308",
     "SELL": "#EF4444",
-    "STRONG_SELL": "#DC2626",
-    "WATCH": "#6366F1",
+    "STRONG_SELL": "#EF4444",
+    "WATCH": "#3B82F6",
 }
 
 _ACTION_BG = {
     "STRONG_BUY": "rgba(34,197,94,0.12)",
-    "BUY": "rgba(16,185,129,0.10)",
-    "HOLD": "rgba(245,158,11,0.10)",
+    "BUY": "rgba(34,197,94,0.10)",
+    "HOLD": "rgba(234,179,8,0.10)",
     "SELL": "rgba(239,68,68,0.10)",
-    "STRONG_SELL": "rgba(220,38,38,0.12)",
-    "WATCH": "rgba(99,102,241,0.10)",
+    "STRONG_SELL": "rgba(239,68,68,0.12)",
+    "WATCH": "rgba(59,130,246,0.10)",
 }
 
 _ACTION_GLOW = {
     "STRONG_BUY": "0 0 12px rgba(34,197,94,0.4)",
-    "STRONG_SELL": "0 0 12px rgba(220,38,38,0.4)",
+    "STRONG_SELL": "0 0 12px rgba(239,68,68,0.4)",
 }
 
 _ACTION_LABELS = {
@@ -1064,13 +1064,333 @@ _ACTION_LABELS = {
 }
 
 _ACTION_BORDER_COLORS = {
-    "STRONG_BUY": "#22c55e",
-    "BUY": "#10B981",
-    "HOLD": "#F59E0B",
+    "STRONG_BUY": "#22C55E",
+    "BUY": "#22C55E",
+    "HOLD": "#EAB308",
     "SELL": "#EF4444",
-    "STRONG_SELL": "#DC2626",
-    "WATCH": "#6366F1",
+    "STRONG_SELL": "#EF4444",
+    "WATCH": "#3B82F6",
 }
+
+# ---------------------------------------------------------------------------
+# Analyst type color system (matches frontend design system)
+# ---------------------------------------------------------------------------
+
+_ANALYST_COLORS: dict[str, str] = {
+    "technical": "#3B82F6",        # blue
+    "technical_focus": "#3B82F6",
+    "macro": "#A855F7",            # purple
+    "macro_impact": "#A855F7",
+    "sector_rotator": "#10B981",   # emerald
+    "sector_deep_dive": "#10B981",
+    "risk": "#F43F5E",             # rose
+    "risk_scenario": "#F43F5E",
+    "correlation": "#F59E0B",      # amber
+    "correlation_analysis": "#F59E0B",
+    "sentiment": "#06B6D4",        # cyan
+    "prediction_markets": "#8B5CF6",  # violet
+    "synthesis": "#6366F1",        # indigo
+}
+
+_ANALYST_ICONS: dict[str, str] = {
+    "technical": "&#128200;",        # chart increasing
+    "technical_focus": "&#128200;",
+    "macro": "&#127758;",            # globe
+    "macro_impact": "&#127758;",
+    "sector_rotator": "&#128202;",   # bar chart
+    "sector_deep_dive": "&#128202;",
+    "risk": "&#128737;",             # shield
+    "risk_scenario": "&#128737;",
+    "correlation": "&#128279;",      # link
+    "correlation_analysis": "&#128279;",
+    "sentiment": "&#128172;",        # speech bubble
+    "prediction_markets": "&#127922;",  # game die
+    "synthesis": "&#129520;",        # puzzle piece
+}
+
+_ANALYST_DISPLAY_NAMES: dict[str, str] = {
+    "technical": "Technical Analysis",
+    "technical_focus": "Technical Analysis",
+    "macro": "Macro Analysis",
+    "macro_impact": "Macro Analysis",
+    "sector_rotator": "Sector Analysis",
+    "sector_deep_dive": "Sector Analysis",
+    "risk": "Risk Assessment",
+    "risk_scenario": "Risk Assessment",
+    "correlation": "Correlation Analysis",
+    "correlation_analysis": "Correlation Analysis",
+    "sentiment": "Sentiment Analysis",
+    "prediction_markets": "Prediction Markets",
+    "synthesis": "Synthesis",
+}
+
+
+# ---------------------------------------------------------------------------
+# Layman language helper
+# ---------------------------------------------------------------------------
+
+def _extract_symbols(text: str) -> list[str]:
+    """Extract stock ticker symbols from text."""
+    import re as _re
+    matches = _re.findall(r"\b[A-Z]{2,5}\b", text)
+    stop_words = {
+        "VaR", "RSI", "MACD", "SMA", "EMA", "GDP", "CPI",
+        "THE", "AND", "FOR", "NOT", "BUT", "ALL", "WITH", "THIS", "THAT",
+    }
+    seen: set[str] = set()
+    result: list[str] = []
+    for m in matches:
+        if m not in stop_words and m not in seen:
+            seen.add(m)
+            result.append(m)
+    return result
+
+
+def _extract_percentages(text: str) -> list[str]:
+    """Extract percentage values from text."""
+    import re as _re
+    return _re.findall(r"[\d.]+%", text)
+
+
+# Sentence-level pattern rewrites: (compiled_regex, rewrite_function)
+_SENTENCE_PATTERNS: list[tuple[re.Pattern[str], object]] = []
+
+
+def _init_sentence_patterns() -> list[tuple[re.Pattern[str], object]]:
+    """Build and cache the list of sentence-level pattern rewrites."""
+    if _SENTENCE_PATTERNS:
+        return _SENTENCE_PATTERNS
+
+    patterns: list[tuple[str, object]] = [
+        # Late/mid/early cycle with recession + stagflation
+        (
+            r"(late|mid|early)[- ]cycle.*?(\d+)%\s*(?:confidence|prob).*?(\d+)%\s*recession.*?(\d+)%\s*stagflation",
+            lambda m, _t: (
+                f"The economy looks like it's "
+                f"{'running out of steam' if m.group(1).lower() == 'late' else 'in the middle of its growth phase' if m.group(1).lower() == 'mid' else 'in the early stages of recovery'}. "
+                f"There's {'a coin-flip chance' if int(m.group(3)) == 50 else f'about a {m.group(3)}% chance'} we enter a recession, "
+                f"and about 1-in-{round(100 / int(m.group(4)))} odds of stagflation "
+                f"(prices rising while the economy stalls). Both scenarios would hit growth-oriented investments hardest."
+            ),
+        ),
+        # Late/mid/early cycle with recession only
+        (
+            r"(late|mid|early)[- ]cycle.*?(\d+)%\s*recession",
+            lambda m, _t: (
+                f"The economy looks like it's "
+                f"{'running out of steam' if m.group(1).lower() == 'late' else 'in the middle of its growth phase' if m.group(1).lower() == 'mid' else 'in the early stages of recovery'}, "
+                f"with {'a coin-flip chance' if int(m.group(2)) == 50 else f'about a {m.group(2)}% chance'} of a recession."
+            ),
+        ),
+        # VaR with range
+        (
+            r"VaR\s*([\d.]+)[-\u2013]([\d.]+)%",
+            lambda m, t: (
+                f"On a bad day, your portfolio could drop {m.group(1)}-{m.group(2)}%."
+                + (" This is higher than normal because your investments are bunched together in similar stocks."
+                   if re.search(r"concentrat|cluster|correlat", t, re.IGNORECASE) else
+                   " This kind of loss happens roughly 1 in 20 trading days.")
+            ),
+        ),
+        # VaR single value
+        (
+            r"VaR\s*([\d.]+)%",
+            lambda m, _t: f"On a bad day, your portfolio could drop about {m.group(1)}%. This kind of loss happens roughly 1 in 20 trading days.",
+        ),
+        # Squeeze + parabolic = synchronized risk
+        (
+            r"squeeze.*?\(([^)]+)\).*?parabolic.*?\(([^)]+)\)",
+            lambda m, _t: (
+                f"{m.group(1).strip()} are coiling up for a big move — like a compressed spring. "
+                f"Meanwhile, {m.group(2).strip()} have been rising at an unsustainable pace. "
+                f"The risk is these all unwind at the same time."
+            ),
+        ),
+        # Distribution + squeeze uncertainty
+        (
+            r"distribution\s+signals?\s*\(([^)]+)\).*?squeeze\s+(?:uncertainty|signals?)\s*\(([^)]+)\)",
+            lambda m, _t: (
+                f"It looks like big investors may be quietly selling {m.group(1).strip()} while prices are still high. "
+                f"{m.group(2).strip()} are in a holding pattern where a big price swing is brewing, but the direction isn't clear yet."
+            ),
+        ),
+        # Distribution signals with symbols
+        (
+            r"distribution\s+signals?\s*\(([^)]+)\)",
+            lambda m, _t: f"It looks like big investors may be quietly selling {m.group(1).strip()} while prices are still high.",
+        ),
+        # RSI divergence + MACD crossover + support
+        (
+            r"RSI\s+divergence.*MACD\s+(?:bearish\s+)?crossover.*support\s+(?:at\s+)?\$?([\d,.]+)",
+            lambda m, _t: (
+                f"The stock's momentum is fading even as the price holds steady — a warning sign. "
+                f"The trend indicators just flipped negative, and the price is at a critical floor of ${m.group(1)}. "
+                f"If it drops below, expect a bigger decline."
+            ),
+        ),
+        # RSI divergence + MACD (no support)
+        (
+            r"RSI\s+divergence.*MACD",
+            lambda _m, _t: "The stock's momentum is fading while the price holds steady — a warning sign. The trend indicators are confirming the current move may be losing steam.",
+        ),
+        # RSI with value
+        (
+            r"RSI\s*(?:at|above|below|near|of|is)?\s*(\d+)",
+            lambda m, _t: (
+                f"The stock's momentum gauge reads {m.group(1)}/100 — it's been running hot and may be due for a pullback."
+                if int(m.group(1)) >= 70
+                else f"The stock's momentum gauge reads just {m.group(1)}/100 — it's been beaten down and may be due for a bounce."
+                if int(m.group(1)) <= 30
+                else f"The stock's momentum is in a neutral zone at {m.group(1)}/100, with no strong push in either direction."
+            ),
+        ),
+        # MACD bearish
+        (r"MACD\s+bearish", lambda _m, _t: "A key trend indicator just flipped negative — the upward momentum is fading and caution is warranted."),
+        # MACD bullish/crossover
+        (r"MACD\s+(?:bullish|cross)", lambda _m, _t: "A key trend indicator just flipped positive, suggesting the downward pressure is easing."),
+        # MACD divergence
+        (r"MACD\s+divergence", lambda _m, _t: "Price and a key trend indicator are telling different stories — this often signals a reversal is coming."),
+        # Support level
+        (
+            r"support\s+(?:at|near|around|level|of)?\s*\$?([\d,.]+)",
+            lambda m, _t: f"There's a price floor around ${m.group(1)} where buyers have historically stepped in. If it breaks, expect a sharper drop.",
+        ),
+        # Resistance level
+        (
+            r"resistance\s+(?:at|near|around|level|of)?\s*\$?([\d,.]+)",
+            lambda m, _t: f"There's a price ceiling around ${m.group(1)} where sellers have historically cashed out. Breaking through would be bullish.",
+        ),
+        # Breakout
+        (r"break(?:out|ing\s+out)\s+(?:above|from|through)", lambda _m, _t: "The price just broke through a key ceiling, which often attracts new buyers and leads to further gains."),
+        # Breakdown
+        (r"break(?:down|ing\s+down)\s+(?:below|from|through)", lambda _m, _t: "The price just fell through a key floor, which often triggers more selling."),
+        # Squeeze with symbols
+        (
+            r"squeeze\s*\(([^)]+)\)",
+            lambda m, _t: f"{m.group(1).strip()} are coiling up for a big move — like a compressed spring that could snap either way.",
+        ),
+        # Squeeze generic
+        (r"squeeze", lambda _m, _t: "Price swings have gotten unusually small — like the calm before a storm. A big move is likely coming soon."),
+        # Accumulation
+        (r"accumulation", lambda _m, _t: "Large investors appear to be quietly buying, building positions while the price is still low."),
+        # Distribution generic
+        (r"distribution", lambda _m, _t: "Large investors appear to be quietly selling while prices are still high."),
+        # Parabolic
+        (r"parabolic", lambda _m, _t: "The price has been rising at an unsustainable pace. Like a ball thrown in the air, it will eventually come back down."),
+        # Stagflation
+        (r"stagflation", lambda _m, _t: "There's a risk of stagflation — prices keep rising while the economy stalls. It's tough for most investments."),
+        # Late-cycle alone
+        (r"late[- ]cycle", lambda _m, _t: "The economy appears to be in the later stages of its growth cycle. Historically, this is when markets become more volatile."),
+        # Breadth narrowing
+        (r"breadth\s+(?:narrowing|declining|weakening)", lambda _m, _t: "Fewer stocks are participating in the rally, which is a warning sign for the broader market."),
+        # Breadth improving
+        (r"breadth\s+(?:improving|expanding|strengthening)", lambda _m, _t: "More stocks are joining the rally — a healthy sign that the uptrend has staying power."),
+        # Volatility expansion
+        (r"volatility\s+(?:expansion|spike|surge)", lambda _m, _t: "Market swings are getting bigger — expect larger daily price moves in both directions."),
+        # Volatility contraction
+        (r"volatility\s+(?:contraction|compression|low)", lambda _m, _t: "The market has been unusually calm. This quiet often comes before a sharp move."),
+        # Momentum fading
+        (r"momentum\s+(?:divergence|weakening|fading|stalling)", lambda _m, _t: "The speed of price moves is slowing down — the stock is coasting and may be losing direction."),
+        # Yield curve inverted
+        (r"(?:yield\s+curve\s+)?invert(?:ed|ion)", lambda _m, _t: "Short-term bonds are paying more than long-term ones (unusual) — historically one of the most reliable recession warning signs."),
+        # Yield curve steepening
+        (r"yield\s+curve\s+steepening", lambda _m, _t: "The gap between short and long-term rates is widening, which typically signals expectations of stronger economic growth."),
+        # Recession probability
+        (
+            r"(\d+)%\s*(?:recession|chance of recession)",
+            lambda m, _t: (
+                f"There's a {m.group(1)}% chance of a recession — the economy may shrink, which would be bad for most investments."
+                if int(m.group(1)) >= 70
+                else f"There's a meaningful {m.group(1)}% chance of recession — not certain, but high enough to warrant caution."
+                if int(m.group(1)) >= 40
+                else f"Recession risk is relatively low at {m.group(1)}%."
+            ),
+        ),
+        # Mean reversion
+        (r"mean\s+reversion", lambda _m, _t: "Prices have stretched far from their average and may snap back, like a rubber band being pulled."),
+        # Head and shoulders
+        (r"head\s+and\s+shoulders", lambda _m, _t: "The price chart has formed a pattern that often appears before a significant downturn."),
+        # Golden cross
+        (r"golden\s+cross", lambda _m, _t: "A rare bullish signal: the short-term trend crossed above the long-term trend, suggesting upward momentum."),
+        # Death cross
+        (r"death\s+cross", lambda _m, _t: "A bearish signal: the short-term trend crossed below the long-term trend, suggesting downward momentum."),
+        # Double top
+        (r"double\s+top", lambda _m, _t: "The price tried to break higher twice and failed both times — this often signals the stock has hit its ceiling."),
+        # Double bottom
+        (r"double\s+bottom", lambda _m, _t: "The price bounced off the same floor twice — this often signals the worst is over."),
+        # Regime shift
+        (r"regime\s+(?:change|shift|transition)", lambda _m, _t: "The overall market environment is fundamentally changing. Strategies that worked recently may stop working."),
+        # Overbought
+        (r"overbought", lambda _m, _t: "The stock has risen fast and may be stretched too high — it could be due for a pullback."),
+        # Oversold
+        (r"oversold", lambda _m, _t: "The stock has fallen fast and may have been pushed too low — it could be due for a bounce."),
+        # Hawkish
+        (r"hawkish", lambda _m, _t: "The central bank is leaning toward raising interest rates to fight inflation, which can slow down the economy and weigh on stocks."),
+        # Dovish
+        (r"dovish", lambda _m, _t: "The central bank is leaning toward keeping rates low to support growth, which is generally good for stocks."),
+    ]
+
+    for pattern_str, rewrite_fn in patterns:
+        _SENTENCE_PATTERNS.append((re.compile(pattern_str, re.IGNORECASE), rewrite_fn))
+
+    return _SENTENCE_PATTERNS
+
+
+def generate_layman_explanation(analyst_type: str, technical_text: str) -> str:
+    """Generate a complete plain-English rewrite of a technical finding.
+
+    Instead of inserting ``term = definition`` glossary entries, this function
+    detects the overall meaning of the sentence and produces a fully rewritten
+    explanation in conversational English.
+
+    The *analyst_type* is used for Tier 2 contextual framing when no specific
+    sentence pattern matches.
+
+    Returns a string suitable for display under each analyst finding, or an
+    empty string when no meaningful simplification is possible.
+    """
+    if not technical_text:
+        return ""
+
+    patterns = _init_sentence_patterns()
+
+    # Tier 1: Full-sentence pattern rewrites
+    for compiled, rewrite_fn in patterns:
+        m = compiled.search(technical_text)
+        if m:
+            return rewrite_fn(m, technical_text)
+
+    # Tier 2: Analyst-type contextual rewrite with extracted data
+    symbols = _extract_symbols(technical_text)
+    percentages = _extract_percentages(technical_text)
+
+    symbol_phrase = f" for {', '.join(symbols[:3])}" if symbols else ""
+    pct_phrase = f" Key numbers: {', '.join(percentages[:3])}." if percentages else ""
+
+    at = analyst_type.lower()
+    if "technical" in at:
+        return f"The chart patterns and price trends{symbol_phrase} are showing a notable signal.{pct_phrase} This is worth watching as it may indicate where the price is headed next."
+    elif "macro" in at:
+        return f"Looking at the broader economy, conditions are shifting in a way that could affect your investments{symbol_phrase}.{pct_phrase}"
+    elif "risk" in at:
+        return f"From a risk perspective, there are signals{symbol_phrase} that warrant attention.{pct_phrase} This doesn't mean something bad will happen, but it's worth being prepared."
+    elif "sector" in at:
+        return f"Industry-level trends are signaling a shift{symbol_phrase}.{pct_phrase} Some sectors are gaining favor while others are falling out."
+    elif "correlation" in at:
+        return f"Looking at how these investments move together{symbol_phrase}, an unusual pattern has emerged.{pct_phrase}"
+    elif "sentiment" in at:
+        return f"Market sentiment{symbol_phrase} is sending a signal worth noting.{pct_phrase} What other investors think can influence where prices head next."
+
+    # Tier 3: Generic fallback
+    if symbols or percentages:
+        data_parts: list[str] = []
+        if symbols:
+            data_parts.append(f"involving {', '.join(symbols[:3])}")
+        if percentages:
+            data_parts.append(f"with key figures of {' and '.join(percentages[:2])}")
+        return f"This analyst spotted something noteworthy {', '.join(data_parts)}."
+
+    return ""
 
 
 def _esc(text: str | None) -> str:
@@ -1512,6 +1832,723 @@ def _build_phase_timeline(
     <div class="phase-accordion-list">{items}</div>"""
 
 
+def _ta_rating_explanation(rating: str) -> str:
+    """Return a fallback explanation for a technical analysis rating (used only when data-driven explanation unavailable)."""
+    explanations = {
+        "strong buy": "Multiple technical indicators align bullish — a strong entry signal",
+        "buy": "Most indicators lean positive — conditions favor buying",
+        "neutral": "Mixed signals from indicators — no clear direction",
+        "sell": "Most indicators lean negative — caution advised",
+        "strong sell": "Multiple indicators align bearish — significant downside risk",
+    }
+    return explanations.get(rating.lower().strip(), "")
+
+
+def _build_ta_data_driven_explanation(ta: dict) -> str:
+    """Build a data-driven explanation referencing actual TA values."""
+    parts: list[str] = []
+    score = ta.get("composite_score")
+    bd = ta.get("breakdown") or {}
+
+    # Composite score context
+    if score is not None:
+        score_val = float(score)
+        score_abs = abs(score_val)
+        direction = "bullish" if score_val >= 0 else "bearish"
+        strength = "strongly" if score_abs > 0.6 else "moderately" if score_abs > 0.3 else "mildly"
+        parts.append(f"Composite score {score_val:+.2f} — {strength} {direction}")
+
+    if bd:
+        # Identify which dimensions are driving the rating
+        drivers: list[str] = []
+        for key in ("trend", "momentum", "volume"):
+            val = bd.get(key)
+            if val is not None and abs(float(val)) > 0.3:
+                drivers.append(f"{key} at {float(val):+.2f}")
+        if drivers:
+            parts.append(f"Driven by {', '.join(drivers)}")
+
+        # Divergence callouts
+        trend_val = float(bd.get("trend", 0))
+        momentum_val = float(bd.get("momentum", 0))
+        volume_val = float(bd.get("volume", 0))
+        volatility_val = float(bd.get("volatility", 0))
+
+        divergences: list[str] = []
+        if trend_val > 0.2 and momentum_val < -0.2:
+            divergences.append("Trend is positive but momentum is fading — potential reversal risk")
+        elif trend_val < -0.2 and momentum_val > 0.2:
+            divergences.append("Momentum building despite weak trend — watch for breakout")
+        if momentum_val > 0.3 and volume_val < -0.2:
+            divergences.append("Momentum rising on declining volume — move may lack conviction")
+        if volatility_val > 0.5:
+            divergences.append(f"Volatility elevated at {volatility_val:+.2f} — expect outsized moves")
+        if divergences:
+            parts.append(". ".join(divergences))
+
+    return ". ".join(parts) + "." if parts else ""
+
+
+def _build_key_levels_explanation(ta: dict) -> str:
+    """Build contextual explanation for key support/resistance levels."""
+    kl = ta.get("key_levels") or {}
+    support_list = kl.get("support", [])
+    resistance_list = kl.get("resistance", [])
+    parts: list[str] = []
+
+    if isinstance(support_list, list) and support_list:
+        nearest = max(float(s) for s in support_list)
+        parts.append(f"Nearest support at ${nearest:,.2f} — a break below could accelerate selling")
+    if isinstance(resistance_list, list) and resistance_list:
+        nearest = min(float(r) for r in resistance_list)
+        parts.append(f"Nearest resistance at ${nearest:,.2f} — needs a break above for continuation")
+    if support_list and resistance_list:
+        try:
+            rng = min(float(r) for r in resistance_list) - max(float(s) for s in support_list)
+            if rng > 0:
+                parts.append(f"Trading range: ${rng:,.2f} between key support and resistance")
+        except (TypeError, ValueError):
+            pass
+
+    return ". ".join(parts) + "." if parts else ""
+
+
+def _ta_breakdown_meaning(key: str, val: float) -> str:
+    """Return a short plain-English meaning for a TA breakdown metric."""
+    if key == "trend":
+        if val > 0.5:
+            return "Strong upward price trend"
+        if val > 0:
+            return "Mild upward trend"
+        if val > -0.5:
+            return "Mild downward trend"
+        return "Strong downward price trend"
+    if key == "momentum":
+        if val > 0.5:
+            return "Strong buying pressure"
+        if val > 0:
+            return "Mild buying pressure"
+        if val > -0.5:
+            return "Mild selling pressure"
+        return "Strong selling pressure"
+    if key == "volatility":
+        if val > 0.5:
+            return "Very large price swings"
+        if val > 0:
+            return "Moderate price swings"
+        if val > -0.5:
+            return "Below-average price swings"
+        return "Very low price swings"
+    if key == "volume":
+        if val > 0.5:
+            return "Very high trading activity"
+        if val > 0:
+            return "Above-average trading activity"
+        if val > -0.5:
+            return "Below-average trading activity"
+        return "Very low trading activity"
+    return ""
+
+
+def _build_analysis_sources_html(ins: DeepInsight) -> str:
+    """Build a collapsible Analysis Sources section for an insight card.
+
+    Renders available technical analysis, prediction market, and sentiment
+    data in a compact expandable panel.  Returns an empty string when none
+    of the three data fields are populated.
+    """
+    ta = ins.technical_analysis_data
+    pred = ins.prediction_market_data
+    sent = ins.sentiment_data
+
+    if not ta and not pred and not sent:
+        return ""
+
+    sections: list[str] = []
+
+    # --- Technical Analysis ---
+    if ta and isinstance(ta, dict):
+        score = ta.get("composite_score")
+        rating = ta.get("rating", "")
+        confidence = ta.get("confidence")
+        breakdown = ta.get("breakdown") or {}
+
+        # Score color: green positive, red negative, amber near zero
+        score_val = float(score) if score is not None else 0.0
+        if score_val > 0.2:
+            score_color = "#10B981"
+        elif score_val < -0.2:
+            score_color = "#EF4444"
+        else:
+            score_color = "#F59E0B"
+
+        score_display = f"{score_val:+.2f}" if score is not None else "N/A"
+        rating_display = _esc(str(rating)) if rating else ""
+        conf_display = (
+            f"{int(float(confidence) * 100)}%"
+            if confidence is not None
+            else ""
+        )
+
+        # Data-driven explanation text (falls back to generic if no data)
+        explain_text = _build_ta_data_driven_explanation(ta) or (
+            _ta_rating_explanation(str(rating)) if rating else ""
+        )
+
+        # Breakdown mini-bars (trend, momentum, volatility, volume)
+        breakdown_html = ""
+        breakdown_keys = ["trend", "momentum", "volatility", "volume"]
+        for key in breakdown_keys:
+            val = breakdown.get(key)
+            if val is None:
+                continue
+            bar_val = float(val)
+            # Normalize to 0-100 range (values are typically -1 to 1)
+            bar_pct = min(max(int((bar_val + 1) / 2 * 100), 0), 100)
+            if bar_val > 0.2:
+                bar_color = "#10B981"
+            elif bar_val < -0.2:
+                bar_color = "#EF4444"
+            else:
+                bar_color = "#F59E0B"
+            meaning = _ta_breakdown_meaning(key, bar_val)
+            breakdown_html += (
+                f'<div class="src-breakdown-row">'
+                f'<span class="src-breakdown-label">{_esc(key.title())}</span>'
+                f'<div class="src-breakdown-track">'
+                f'<div class="src-breakdown-center"></div>'
+                f'<div class="src-breakdown-fill" style="width:{bar_pct}%;background:{bar_color};"></div>'
+                f'</div>'
+                f'<span class="src-breakdown-val" style="color:{bar_color};">{bar_val:+.2f}</span>'
+                f'</div>'
+            )
+            if meaning:
+                breakdown_html += (
+                    f'<div class="src-breakdown-meaning">{_esc(meaning)}</div>'
+                )
+
+        ta_html = (
+            f'<div class="src-section">'
+            f'<div class="src-section-title">Technical Analysis</div>'
+            f'<div class="src-ta-header">'
+            f'<span class="src-ta-score" style="color:{score_color};">{score_display}</span>'
+        )
+        if rating_display:
+            ta_html += f'<span class="src-ta-rating">{rating_display}</span>'
+        if conf_display:
+            ta_html += f'<span class="src-ta-conf">{conf_display} confidence</span>'
+        ta_html += '</div>'
+        if explain_text:
+            ta_html += f'<div class="src-ta-explain">{_esc(explain_text)}</div>'
+        if breakdown_html:
+            ta_html += f'<div class="src-breakdown">{breakdown_html}</div>'
+
+        # Key levels: support and resistance (handle both flat and nested key_levels format)
+        key_levels = ta.get("key_levels") or {}
+        support_list = key_levels.get("support", []) if isinstance(key_levels, dict) else []
+        resistance_list = key_levels.get("resistance", []) if isinstance(key_levels, dict) else []
+        pivot_val = key_levels.get("pivot") if isinstance(key_levels, dict) else None
+        # Fallback to flat keys for older data format
+        flat_support = ta.get("support")
+        flat_resistance = ta.get("resistance")
+        if not support_list and flat_support is not None:
+            support_list = [flat_support]
+        if not resistance_list and flat_resistance is not None:
+            resistance_list = [flat_resistance]
+
+        if support_list or resistance_list:
+            ta_html += '<div class="src-key-levels">'
+            if support_list:
+                support_strs = ", ".join(f"${float(s):,.2f}" for s in support_list)
+                ta_html += (
+                    f'<span class="src-level">'
+                    f'<span class="src-level-label">Support (floor):</span>'
+                    f'<span class="src-level-val" style="color:#10B981;">{support_strs}</span>'
+                    f'</span>'
+                )
+            if resistance_list:
+                resistance_strs = ", ".join(f"${float(r):,.2f}" for r in resistance_list)
+                ta_html += (
+                    f'<span class="src-level">'
+                    f'<span class="src-level-label">Resistance (ceiling):</span>'
+                    f'<span class="src-level-val" style="color:#EF4444;">{resistance_strs}</span>'
+                    f'</span>'
+                )
+            if pivot_val is not None:
+                ta_html += (
+                    f'<span class="src-level">'
+                    f'<span class="src-level-label">Pivot:</span>'
+                    f'<span class="src-level-val">${float(pivot_val):,.2f}</span>'
+                    f'</span>'
+                )
+            ta_html += '</div>'
+
+            # Contextual key levels explanation
+            levels_explain = _build_key_levels_explanation(ta)
+            if levels_explain:
+                ta_html += f'<div class="src-ta-explain" style="margin-top:6px;">{_esc(levels_explain)}</div>'
+
+        ta_html += '</div>'
+        sections.append(ta_html)
+
+    # --- Prediction Markets ---
+    if pred and isinstance(pred, dict):
+        cards: list[str] = []
+        available_sources: list[str] = []
+
+        # Fed rate probabilities (handle both old flat and new nested format)
+        fed = pred.get("fed_rates") or pred.get("fed_rate")
+        if isinstance(fed, dict):
+            next_meeting = fed.get("next_meeting") or {}
+            probabilities = next_meeting.get("probabilities") if isinstance(next_meeting, dict) else None
+            fed_source = fed.get("source", "")
+            meeting_date = next_meeting.get("date", "") if isinstance(next_meeting, dict) else ""
+
+            if probabilities and isinstance(probabilities, dict):
+                # New format: multiple probability entries
+                available_sources.append("Fed rate probabilities")
+                for action_name, prob_val in probabilities.items():
+                    if prob_val is None:
+                        continue
+                    pval = float(prob_val)
+                    pct = int(pval * 100) if pval <= 1 else int(pval)
+                    bar_w = min(max(pct, 0), 100)
+                    action_lower = action_name.lower()
+                    # Color: rate cuts green (easing), hikes red (tightening), hold amber
+                    if "cut" in action_lower:
+                        val_color = "#10B981"
+                    elif "hike" in action_lower or "raise" in action_lower:
+                        val_color = "#EF4444"
+                    else:
+                        val_color = "#F59E0B"
+
+                    # Data-driven explanation for each probability
+                    if "cut" in action_lower:
+                        if pct < 5:
+                            explain = f"Markets see almost no chance of a rate cut ({pct}%)"
+                        elif pct < 30:
+                            explain = f"Rate cut unlikely at {pct}% — not priced in"
+                        elif pct < 60:
+                            explain = f"Moderate {pct}% chance of a rate cut — markets uncertain"
+                        else:
+                            explain = f"Markets pricing in a rate cut at {pct}%"
+                    elif "hike" in action_lower or "raise" in action_lower:
+                        if pct < 5:
+                            explain = f"Rate hike virtually ruled out at {pct}%"
+                        elif pct < 30:
+                            explain = f"Small {pct}% chance of a rate hike — unlikely but not zero"
+                        else:
+                            explain = f"Rate hike probability at {pct}% — tightening risk"
+                    elif "hold" in action_lower or "no change" in action_lower or "unchanged" in action_lower:
+                        if pct > 80:
+                            explain = f"Markets overwhelmingly ({pct}%) expect rates unchanged"
+                        elif pct > 50:
+                            explain = f"Rates likely unchanged at {pct}% — base case is hold"
+                        else:
+                            explain = f"Hold probability at {pct}% — mixed expectations"
+                    else:
+                        explain = f"{pct}% probability"
+
+                    source_label = f" ({_esc(fed_source)})" if fed_source else ""
+                    card_html = (
+                        f'<div class="src-pred-card">'
+                        f'<div class="src-pred-label">{_esc(action_name)}{source_label}</div>'
+                        f'<div class="src-pred-value" style="color:{val_color};">{pct}%</div>'
+                    )
+                    if bar_w > 0:
+                        card_html += (
+                            f'<div class="src-pred-bar">'
+                            f'<div class="src-pred-bar-fill" style="width:{bar_w}%;background:{val_color};"></div>'
+                            f'</div>'
+                        )
+                    card_html += f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                    card_html += '</div>'
+                    cards.append(card_html)
+
+                if meeting_date:
+                    cards.append(
+                        f'<div class="src-pred-card" style="opacity:0.7;">'
+                        f'<div class="src-pred-label">Next FOMC Meeting</div>'
+                        f'<div class="src-pred-value" style="color:#94a3b8;font-size:0.85em;">{_esc(meeting_date)}</div>'
+                        f'</div>'
+                    )
+            else:
+                # Old format: single consensus value
+                consensus = fed.get("consensus") or fed.get("next_move")
+                prob = fed.get("probability")
+                if consensus:
+                    available_sources.append("Fed rate outlook")
+                    prob_pct = ""
+                    explain = ""
+                    if prob is not None:
+                        pval = float(prob) if isinstance(prob, (int, float)) and float(prob) <= 1 else None
+                        if pval is not None:
+                            prob_pct = f"{int(pval * 100)}%"
+                            explain = f"{prob_pct} chance the Fed cuts rates by 25bp at the next meeting"
+                        else:
+                            prob_pct = str(prob)
+                    display_val = prob_pct if prob_pct else _esc(str(consensus))
+                    card_html = (
+                        f'<div class="src-pred-card">'
+                        f'<div class="src-pred-label">Fed Rate</div>'
+                        f'<div class="src-pred-value" style="color:#3b82f6;">{display_val}</div>'
+                    )
+                    if prob_pct and isinstance(prob, (int, float)) and float(prob) <= 1:
+                        bar_w = int(float(prob) * 100)
+                        card_html += (
+                            f'<div class="src-pred-bar">'
+                            f'<div class="src-pred-bar-fill" style="width:{bar_w}%;"></div>'
+                            f'</div>'
+                        )
+                    if explain:
+                        card_html += f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                    elif consensus:
+                        card_html += f'<div class="src-pred-explain">{_esc(str(consensus))}</div>'
+                    card_html += '</div>'
+                    cards.append(card_html)
+        elif isinstance(fed, str):
+            available_sources.append("Fed rate outlook")
+            cards.append(
+                f'<div class="src-pred-card">'
+                f'<div class="src-pred-label">Fed Rate</div>'
+                f'<div class="src-pred-value" style="color:#3b82f6;">{_esc(fed)}</div>'
+                f'</div>'
+            )
+
+        # Recession probability (handle both old and new format)
+        recession = pred.get("recession")
+        if isinstance(recession, dict):
+            prob = recession.get("probability_2026") or recession.get("probability") or recession.get("consensus")
+            rec_source = recession.get("source", "")
+            if prob is not None:
+                available_sources.append("recession risk")
+                if isinstance(prob, (int, float)) and float(prob) <= 1:
+                    pct_val = int(float(prob) * 100)
+                    prob_display = f"{pct_val}%"
+                    bar_w = pct_val
+                    # Data-driven explanation
+                    if pct_val > 50:
+                        explain = f"At {pct_val}%, markets see recession as more likely than not — risk-off positioning may be warranted"
+                    elif pct_val > 25:
+                        explain = f"At {pct_val}%, recession risk is elevated but not the base case — monitor leading indicators"
+                    else:
+                        explain = f"At {pct_val}%, markets see low recession probability — supportive of risk assets"
+                else:
+                    prob_display = str(prob)
+                    explain = ""
+                    bar_w = 0
+                rec_color = "#EF4444" if bar_w > 50 else "#F59E0B" if bar_w > 25 else "#10B981"
+                source_label = f" ({_esc(rec_source)})" if rec_source else ""
+                card_html = (
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">Recession Risk{source_label}</div>'
+                    f'<div class="src-pred-value" style="color:{rec_color};">{_esc(prob_display)}</div>'
+                )
+                if bar_w > 0:
+                    card_html += (
+                        f'<div class="src-pred-bar">'
+                        f'<div class="src-pred-bar-fill" style="width:{bar_w}%;background:{rec_color};"></div>'
+                        f'</div>'
+                    )
+                if explain:
+                    card_html += f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                card_html += '</div>'
+                cards.append(card_html)
+
+        # Inflation (handle both old and new format)
+        inflation = pred.get("inflation")
+        if isinstance(inflation, dict):
+            cpi_prob = inflation.get("cpi_above_3pct")
+            inf_source = inflation.get("source", "")
+            expectation = inflation.get("expectation") or inflation.get("consensus")
+
+            if cpi_prob is not None:
+                available_sources.append("inflation expectations")
+                pct_val = int(float(cpi_prob) * 100)
+                inf_color = "#EF4444" if pct_val > 50 else "#F59E0B" if pct_val > 25 else "#10B981"
+                if pct_val > 50:
+                    explain = f"{pct_val}% probability of CPI above 3% — persistent inflation may delay rate cuts"
+                else:
+                    explain = f"{pct_val}% probability of CPI above 3% — disinflation trend likely intact"
+                source_label = f" ({_esc(inf_source)})" if inf_source else ""
+                cards.append(
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">Inflation &gt;3%{source_label}</div>'
+                    f'<div class="src-pred-value" style="color:{inf_color};">{pct_val}%</div>'
+                    f'<div class="src-pred-bar">'
+                    f'<div class="src-pred-bar-fill" style="width:{pct_val}%;background:{inf_color};"></div>'
+                    f'</div>'
+                    f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                    f'</div>'
+                )
+            elif expectation is not None:
+                available_sources.append("inflation expectations")
+                exp_str = str(expectation)
+                explain = f"Market expects inflation around {exp_str}"
+                cards.append(
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">Inflation</div>'
+                    f'<div class="src-pred-value" style="color:#F59E0B;">{_esc(exp_str)}</div>'
+                    f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                    f'</div>'
+                )
+
+        # GDP outlook
+        gdp = pred.get("gdp")
+        if isinstance(gdp, dict):
+            q1_prob = gdp.get("q1_positive")
+            gdp_source = gdp.get("source", "")
+            if q1_prob is not None:
+                available_sources.append("GDP outlook")
+                pct_val = int(float(q1_prob) * 100)
+                gdp_color = "#10B981" if pct_val > 70 else "#F59E0B" if pct_val > 40 else "#EF4444"
+                if pct_val > 70:
+                    explain = f"{pct_val}% chance of positive Q1 GDP — strong growth expectations support equities"
+                elif pct_val > 40:
+                    explain = f"{pct_val}% chance of positive Q1 GDP — growth outlook uncertain"
+                else:
+                    explain = f"Only {pct_val}% chance of positive Q1 GDP — contraction fears elevated"
+                source_label = f" ({_esc(gdp_source)})" if gdp_source else ""
+                cards.append(
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">Q1 GDP Growth{source_label}</div>'
+                    f'<div class="src-pred-value" style="color:{gdp_color};">{pct_val}%</div>'
+                    f'<div class="src-pred-bar">'
+                    f'<div class="src-pred-bar-fill" style="width:{pct_val}%;background:{gdp_color};"></div>'
+                    f'</div>'
+                    f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                    f'</div>'
+                )
+
+        # S&P 500 targets
+        sp500 = pred.get("sp500")
+        if isinstance(sp500, dict):
+            targets = sp500.get("targets", [])
+            sp_source = sp500.get("source", "")
+            if targets and isinstance(targets, list):
+                available_sources.append("S&P 500 targets")
+                targets_html = ""
+                for t in targets:
+                    if isinstance(t, dict):
+                        level = t.get("level", 0)
+                        t_prob = t.get("probability", 0)
+                        targets_html += (
+                            f'<span style="display:inline-block;margin:2px 6px 2px 0;padding:3px 10px;'
+                            f'border:1px solid rgba(255,255,255,0.1);border-radius:6px;font-size:0.85em;">'
+                            f'<strong>{int(level):,}</strong> '
+                            f'<span style="opacity:0.7;">({int(float(t_prob)*100)}%)</span>'
+                            f'</span>'
+                        )
+                source_label = f" ({_esc(sp_source)})" if sp_source else ""
+                cards.append(
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">S&amp;P 500 Targets{source_label}</div>'
+                    f'<div style="margin-top:4px;">{targets_html}</div>'
+                    f'</div>'
+                )
+
+        if cards:
+            grid_html = "".join(cards)
+            # Data sparsity note
+            all_possible = ["Fed rate probabilities", "recession risk", "inflation expectations", "GDP outlook", "S&P 500 targets"]
+            missing = [s for s in all_possible if s not in available_sources]
+            sparsity_note = ""
+            if missing and len(missing) < len(all_possible):
+                sparsity_note = (
+                    f'<div class="src-source-label" style="opacity:0.6;font-style:italic;">'
+                    f'Limited data — missing: {_esc(", ".join(missing))}'
+                    f'</div>'
+                )
+            sections.append(
+                f'<div class="src-section">'
+                f'<div class="src-section-title">Prediction Markets</div>'
+                f'<div class="src-pred-grid">{grid_html}</div>'
+                f'<div class="src-source-label">Kalshi / Polymarket</div>'
+                f'{sparsity_note}'
+                f'</div>'
+            )
+
+    # --- Reddit Sentiment ---
+    if sent and isinstance(sent, dict):
+        mood_data = sent.get("market_mood") or sent
+        overall_mood = (
+            mood_data.get("overall_mood")
+            or mood_data.get("mood")
+            or sent.get("overall_mood")
+        )
+        per_symbol = sent.get("per_symbol", [])
+        trending = sent.get("trending", [])
+
+        # Build data-driven explanation
+        mood_explain_parts: list[str] = []
+
+        if overall_mood:
+            mood_str = str(overall_mood).lower()
+            if "bull" in mood_str or "positive" in mood_str or "optimistic" in mood_str:
+                mood_color = "#10B981"
+            elif "bear" in mood_str or "negative" in mood_str or "pessimistic" in mood_str:
+                mood_color = "#EF4444"
+            else:
+                mood_color = "#F59E0B"
+
+            # Per-symbol data summary
+            if per_symbol and isinstance(per_symbol, list):
+                total_posts = sum(int(s.get("post_count", 0)) for s in per_symbol if isinstance(s, dict))
+                bullish_syms = [s.get("symbol", "?") for s in per_symbol if isinstance(s, dict) and float(s.get("sentiment_score", 0)) > 0.2]
+                bearish_syms = [s.get("symbol", "?") for s in per_symbol if isinstance(s, dict) and float(s.get("sentiment_score", 0)) < -0.2]
+                mood_explain_parts.append(f"{total_posts} posts analyzed across {len(per_symbol)} symbols")
+                if bullish_syms:
+                    mood_explain_parts.append(f"Bullish on: {', '.join(bullish_syms)}")
+                if bearish_syms:
+                    mood_explain_parts.append(f"Bearish on: {', '.join(bearish_syms)}")
+            elif "bull" in mood_str:
+                mood_explain_parts.append("Social sentiment skews bullish across monitored subreddits")
+            elif "bear" in mood_str:
+                mood_explain_parts.append("Social sentiment skews bearish across monitored subreddits")
+            else:
+                mood_explain_parts.append("Mixed opinions across trading communities — no strong directional bias")
+
+            # Trending summary
+            if trending and isinstance(trending, list):
+                total_mentions = sum(int(item.get("mentions", 0)) for item in trending if isinstance(item, dict))
+                mood_explain_parts.append(f"{total_mentions} total mentions across {len(trending)} trending tickers")
+
+            # Divergence callout: sentiment vs technicals
+            if ta and isinstance(ta, dict):
+                bd = ta.get("breakdown") or {}
+                trend_val = float(bd.get("trend", 0))
+                if "bull" in mood_str and trend_val < -0.2:
+                    mood_explain_parts.append(
+                        "Note: Reddit sentiment is bullish but technical trend is negative "
+                        "— retail traders may be lagging a deteriorating setup"
+                    )
+                elif "bear" in mood_str and trend_val > 0.2:
+                    mood_explain_parts.append(
+                        "Note: Reddit sentiment is bearish despite positive technical trend "
+                        "— contrarian signal worth monitoring"
+                    )
+
+            mood_explain = ". ".join(mood_explain_parts) + "." if mood_explain_parts else ""
+
+            sent_html = (
+                f'<div class="src-section">'
+                f'<div class="src-section-title">Reddit Sentiment</div>'
+                f'<div class="src-sent-mood">'
+                f'<span class="src-sent-dot" style="background:{mood_color};box-shadow:0 0 6px {mood_color};"></span>'
+                f'<span style="color:{mood_color};">{_esc(str(overall_mood).title())}</span>'
+                f'</div>'
+            )
+            if mood_explain:
+                sent_html += f'<div class="src-sent-explain">{_esc(mood_explain)}</div>'
+
+            # Mention count for this insight's primary symbol with rank
+            symbol = ins.primary_symbol
+            if symbol and trending:
+                # Sort by mentions to find rank
+                sorted_trending = sorted(
+                    [item for item in trending if isinstance(item, dict)],
+                    key=lambda x: int(x.get("mentions", 0)),
+                    reverse=True,
+                )
+                for rank, item in enumerate(sorted_trending, 1):
+                    ticker = item.get("ticker", item.get("symbol", "")).upper()
+                    if ticker == symbol.upper():
+                        mentions = item.get("mentions") or item.get("count")
+                        upvotes = item.get("upvotes")
+                        if mentions is not None:
+                            rank_text = f", ranked #{rank} trending" if len(sorted_trending) > 1 else ""
+                            upvote_text = f", {upvotes} upvotes" if upvotes else ""
+                            sent_html += (
+                                f'<div class="src-sent-mentions">'
+                                f'{_esc(symbol)}: {mentions} mentions{upvote_text}{rank_text}'
+                                f'</div>'
+                            )
+                        break
+
+            # Per-symbol sentiment bars
+            if per_symbol and isinstance(per_symbol, list):
+                sym_items_html = ""
+                for sym_data in per_symbol[:6]:
+                    if not isinstance(sym_data, dict):
+                        continue
+                    sym_name = sym_data.get("symbol", "?")
+                    score = float(sym_data.get("sentiment_score", 0))
+                    post_count = int(sym_data.get("post_count", 0))
+                    bull_count = sym_data.get("bullish_count")
+                    bear_count = sym_data.get("bearish_count")
+                    bar_pct = min(int(abs(score) * 100), 100)
+                    bar_color = "#10B981" if score >= 0.3 else "#EF4444" if score <= -0.3 else "#94a3b8"
+                    label = "Bullish" if score >= 0.3 else "Bearish" if score <= -0.3 else "Neutral"
+
+                    detail_text = f"{post_count} posts"
+                    if bull_count is not None and bear_count is not None:
+                        detail_text += f" ({bull_count} bull / {bear_count} bear)"
+
+                    sym_items_html += (
+                        f'<div style="display:flex;align-items:center;gap:8px;margin:4px 0;font-size:0.8em;">'
+                        f'<span style="font-family:monospace;font-weight:600;width:50px;">{_esc(sym_name)}</span>'
+                        f'<div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">'
+                        f'<div style="height:100%;width:{bar_pct}%;background:{bar_color};border-radius:3px;"></div>'
+                        f'</div>'
+                        f'<span style="color:{bar_color};font-size:0.9em;width:50px;text-align:right;">{label}</span>'
+                        f'<span style="opacity:0.6;font-size:0.85em;">{detail_text}</span>'
+                        f'</div>'
+                    )
+                if sym_items_html:
+                    sent_html += (
+                        f'<div style="margin-top:8px;">'
+                        f'<div style="font-size:0.75em;opacity:0.7;margin-bottom:4px;">Sentiment by Symbol</div>'
+                        f'{sym_items_html}'
+                        f'</div>'
+                    )
+
+            # Trending tickers as chips
+            if trending:
+                tickers_html = ""
+                for item in trending[:8]:
+                    if isinstance(item, dict):
+                        sym = item.get("ticker", item.get("symbol", ""))
+                        mentions = item.get("mentions")
+                        if sym:
+                            mention_text = f" ({mentions})" if mentions else ""
+                            tickers_html += f'<span class="src-sent-ticker">{_esc(sym)}{mention_text}</span>'
+                    elif isinstance(item, str):
+                        tickers_html += f'<span class="src-sent-ticker">{_esc(item)}</span>'
+                if tickers_html:
+                    sent_html += f'<div class="src-sent-tickers">{tickers_html}</div>'
+
+            sent_html += (
+                '<div class="src-source-label">'
+                'r/wallstreetbets, r/stocks, r/investing. '
+                'Sentiment can lag institutional positioning by hours to days.'
+                '</div>'
+            )
+            sent_html += '</div>'
+            sections.append(sent_html)
+        elif not overall_mood and not trending and not per_symbol:
+            sections.append(
+                '<div class="src-section">'
+                '<div class="src-section-title">Reddit Sentiment</div>'
+                '<div class="src-sent-explain" style="font-style:italic;opacity:0.7;">'
+                'No sentiment data available — social media monitoring did not return data for this analysis period.'
+                '</div>'
+                '</div>'
+            )
+
+    if not sections:
+        return ""
+
+    content = "".join(sections)
+    return (
+        f'<div class="analysis-sources">'
+        f'<button class="sources-toggle" onclick="this.parentElement.classList.toggle(\'open\')">'
+        f'&#128202; Analysis Sources <span class="toggle-chevron">&#9660;</span>'
+        f'</button>'
+        f'<div class="sources-content">{content}</div>'
+        f'</div>'
+    )
+
+
 def _build_insight_card(ins: DeepInsight, index: int) -> str:
     """Build a single interactive insight card with colored left border."""
     action = ins.action or "WATCH"
@@ -1566,33 +2603,93 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
         levels_html += '</div>'
         details_parts.append(levels_html)
 
-    # Full thesis (rendered with markdown)
+    # Full thesis (rendered with markdown) + layman explanation
     if ins.thesis:
+        thesis_layman = generate_layman_explanation("synthesis", ins.thesis)
+        layman_div = ""
+        if thesis_layman:
+            layman_div = (
+                f'<div class="layman-explanation">{_esc(thesis_layman)}</div>'
+            )
         details_parts.append(
             f'<div class="detail-section">'
             f'<div class="detail-label">Analysis</div>'
             f'<div class="detail-content">{_markdown_to_html(ins.thesis)}</div>'
+            f'{layman_div}'
             f'</div>'
         )
 
-    # Key factors from supporting evidence
+    # Dedicated analyst sections from supporting evidence
     if ins.supporting_evidence:
-        evidence_items = ""
-        for ev in ins.supporting_evidence[:6]:
+        # Group evidence by analyst type
+        analyst_groups: dict[str, list[dict]] = {}
+        ungrouped: list[str] = []
+        for ev in ins.supporting_evidence[:10]:
             if isinstance(ev, dict):
-                analyst = ev.get("analyst", "")
-                finding = ev.get("finding", ev.get("summary", str(ev)))
-                evidence_items += (
-                    f'<li><strong style="color:#A5B4FC;">{_esc(str(analyst))}</strong>: '
-                    f'{_esc(str(finding))}</li>'
-                )
+                analyst = ev.get("analyst", "unknown")
+                if analyst not in analyst_groups:
+                    analyst_groups[analyst] = []
+                analyst_groups[analyst].append(ev)
             elif isinstance(ev, str):
-                evidence_items += f"<li>{_esc(ev)}</li>"
-        if evidence_items:
+                ungrouped.append(ev)
+
+        # Render each analyst group as a color-coded card
+        for analyst_key, findings in analyst_groups.items():
+            a_color = _ANALYST_COLORS.get(analyst_key, "#6366F1")
+            a_icon = _ANALYST_ICONS.get(analyst_key, "&#9679;")
+            a_name = _ANALYST_DISPLAY_NAMES.get(analyst_key, analyst_key.replace("_", " ").title())
+
+            findings_html = ""
+            for ev in findings:
+                finding_text = ev.get("finding", ev.get("summary", str(ev)))
+                conf = ev.get("confidence")
+                conf_html = ""
+                if conf is not None:
+                    conf_pct = int(float(conf) * 100)
+                    conf_bar_color = _confidence_color(float(conf))
+                    conf_html = (
+                        f'<div class="analyst-conf-bar">'
+                        f'<div class="analyst-conf-track">'
+                        f'<div class="analyst-conf-fill" style="width:{conf_pct}%;background:{conf_bar_color};"></div>'
+                        f'</div>'
+                        f'<span class="analyst-conf-val" style="color:{conf_bar_color};">{conf_pct}%</span>'
+                        f'</div>'
+                    )
+                # Generate layman explanation for this finding
+                finding_layman = generate_layman_explanation(analyst_key, str(finding_text))
+                layman_html = ""
+                if finding_layman:
+                    layman_html = (
+                        f'<div class="layman-explanation">{_esc(finding_layman)}</div>'
+                    )
+                findings_html += (
+                    f'<div class="analyst-finding">'
+                    f'<div class="analyst-finding-text">{_esc(str(finding_text))}</div>'
+                    f'{layman_html}'
+                    f'{conf_html}'
+                    f'</div>'
+                )
+
+            details_parts.append(
+                f'<div class="analyst-section" style="border-left:3px solid {a_color};">'
+                f'<div class="analyst-section-header">'
+                f'<span class="analyst-badge" style="background:{a_color}18;color:{a_color};border:1px solid {a_color}33;">'
+                f'{a_icon} {_esc(a_name)}'
+                f'</span>'
+                f'</div>'
+                f'{findings_html}'
+                f'</div>'
+            )
+
+        # Render any ungrouped string evidence
+        if ungrouped:
+            ungrouped_items = "".join(
+                f'<li>{_esc(ev)}</li>' for ev in ungrouped
+            )
             details_parts.append(
                 f'<div class="detail-section">'
-                f'<div class="detail-label">Key Factors</div>'
-                f'<ul class="detail-list">{evidence_items}</ul>'
+                f'<div class="detail-label">Additional Factors</div>'
+                f'<ul class="detail-list">{ungrouped_items}</ul>'
                 f'</div>'
             )
 
@@ -1626,6 +2723,9 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
 
     details_html = "".join(details_parts)
 
+    # Collapsible analysis sources (TA, predictions, sentiment)
+    sources_html = _build_analysis_sources_html(ins)
+
     return f"""
     <div class="insight-card" data-index="{index}" data-action="{_esc(action)}"
          data-confidence="{confidence}"
@@ -1639,8 +2739,12 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
             {symbols_html}
             {timeframe_html}
           </div>
-          <div class="mini-radial-gauge" id="mini-gauge-{index}"
-               data-value="{confidence_pct}" data-color="{conf_color}"></div>
+          <div class="confidence-bar-inline">
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill" style="width:{confidence_pct}%;background:{conf_color};"></div>
+            </div>
+            <span class="confidence-bar-label" style="color:{conf_color};">{confidence_pct}%</span>
+          </div>
         </div>
         <h3 class="insight-title">{_esc(ins.title)}</h3>
         <p class="insight-thesis-preview">{_esc((ins.thesis or '')[:180])}{'...' if ins.thesis and len(ins.thesis) > 180 else ''}</p>
@@ -1653,6 +2757,7 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
       </div>
       <div class="insight-details" id="details-{index}">
         {details_html}
+        {sources_html}
       </div>
     </div>
 """
@@ -2376,11 +3481,107 @@ body {{
   font-weight: 500;
 }}
 
-/* Mini radial gauge (ApexCharts) */
-.mini-radial-gauge {{
-  width: 60px;
-  height: 60px;
-  flex-shrink: 0;
+/* Confidence progress bar (inline in insight cards) */
+.confidence-bar-inline {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 100px;
+}}
+.confidence-bar-track {{
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 60px;
+}}
+.confidence-bar-fill {{
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}}
+.confidence-bar-label {{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+}}
+
+/* Layman explanation text */
+.layman-explanation {{
+  font-style: italic;
+  color: #94A3B8;
+  font-size: 13px;
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(255,255,255,0.1);
+  line-height: 1.6;
+}}
+
+/* Analyst section cards (per-analyst evidence) */
+.analyst-section {{
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}}
+.analyst-section:last-child {{
+  margin-bottom: 0;
+}}
+.analyst-section-header {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}}
+.analyst-badge {{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}}
+.analyst-finding {{
+  margin-bottom: 10px;
+}}
+.analyst-finding:last-child {{
+  margin-bottom: 0;
+}}
+.analyst-finding-text {{
+  font-size: 14px;
+  line-height: 1.7;
+  color: #CBD5E1;
+}}
+.analyst-conf-bar {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}}
+.analyst-conf-track {{
+  flex: 1;
+  max-width: 120px;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}}
+.analyst-conf-fill {{
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}}
+.analyst-conf-val {{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
 }}
 
 /* Charts row */
@@ -2616,6 +3817,9 @@ body {{
   .insight-card.expanded .insight-details {{ padding: 0 16px 16px; }}
   .insights-toolbar {{ flex-direction: column; align-items: flex-start; }}
   .trading-levels {{ flex-direction: column; }}
+  .src-pred-grid {{ grid-template-columns: 1fr; }}
+  .src-breakdown-row {{ grid-template-columns: 70px 1fr 44px; gap: 6px; }}
+  .src-key-levels {{ flex-direction: column; gap: 8px; }}
 }}
 
 /* === ANIMATIONS === */
@@ -2693,6 +3897,257 @@ body {{
   visibility: visible;
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}}
+
+/* === ANALYSIS SOURCES SECTION === */
+.analysis-sources {{
+  margin-top: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.02);
+}}
+.sources-toggle {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.04);
+  border: none;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}}
+.sources-toggle:hover {{
+  background: rgba(255,255,255,0.08);
+}}
+.toggle-chevron {{
+  margin-left: auto;
+  transition: transform 0.3s;
+  font-size: 10px;
+}}
+.analysis-sources.open .toggle-chevron {{
+  transform: rotate(180deg);
+}}
+.sources-content {{
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s;
+  padding: 0 16px;
+}}
+.analysis-sources.open .sources-content {{
+  max-height: 800px;
+  padding: 16px;
+}}
+.src-section {{
+  padding: 14px;
+  margin-bottom: 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
+}}
+.src-section:last-child {{
+  margin-bottom: 0;
+}}
+.src-section-title {{
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #64748b;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}}
+
+/* Technical Analysis */
+.src-ta-header {{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}}
+.src-ta-score {{
+  font-size: 22px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}}
+.src-ta-rating {{
+  font-size: 14px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+}}
+.src-ta-conf {{
+  font-size: 12px;
+  color: #94a3b8;
+}}
+.src-ta-explain {{
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}}
+.src-breakdown {{
+  display: grid;
+  gap: 8px;
+}}
+.src-breakdown-row {{
+  display: grid;
+  grid-template-columns: 90px 1fr 50px;
+  align-items: center;
+  gap: 10px;
+}}
+.src-breakdown-label {{
+  font-size: 12px;
+  color: #94a3b8;
+  text-transform: capitalize;
+}}
+.src-breakdown-track {{
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}}
+.src-breakdown-center {{
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255,255,255,0.15);
+}}
+.src-breakdown-fill {{
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s;
+}}
+.src-breakdown-val {{
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  text-align: right;
+}}
+.src-breakdown-meaning {{
+  font-size: 11px;
+  color: #64748b;
+  grid-column: 1 / -1;
+  margin-top: -4px;
+}}
+.src-key-levels {{
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  flex-wrap: wrap;
+}}
+.src-level {{
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}}
+.src-level-label {{
+  color: #64748b;
+}}
+.src-level-val {{
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}}
+
+/* Prediction Markets */
+.src-pred-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}}
+.src-pred-card {{
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.05);
+}}
+.src-pred-label {{
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+}}
+.src-pred-value {{
+  font-size: 18px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}}
+.src-pred-bar {{
+  height: 4px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}}
+.src-pred-bar-fill {{
+  height: 100%;
+  border-radius: 2px;
+  background: #3b82f6;
+}}
+.src-pred-explain {{
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-top: 4px;
+}}
+.src-source-label {{
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}}
+
+/* Sentiment */
+.src-sent-mood {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}}
+.src-sent-dot {{
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}}
+.src-sent-explain {{
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-bottom: 10px;
+}}
+.src-sent-tickers {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}}
+.src-sent-ticker {{
+  font-size: 11px;
+  padding: 3px 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}}
+.src-sent-mentions {{
+  font-size: 12px;
+  color: #cbd5e1;
+  margin-bottom: 4px;
 }}
 </style>
 </head>
@@ -2976,36 +4431,6 @@ body {{
     document.querySelector('#chart-actions').innerHTML =
       '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No action data</div>';
   }}
-
-  // Mini radial gauges for insight cards
-  document.querySelectorAll('.mini-radial-gauge').forEach(function(el) {{
-    var val = parseInt(el.getAttribute('data-value'));
-    var color = el.getAttribute('data-color');
-    new ApexCharts(el, {{
-      chart: {{ type: 'radialBar', height: 60, width: 60, sparkline: {{ enabled: true }} }},
-      series: [val],
-      colors: [color],
-      plotOptions: {{
-        radialBar: {{
-          hollow: {{ size: '40%' }},
-          track: {{ background: 'rgba(255,255,255,0.06)' }},
-          dataLabels: {{
-            name: {{ show: false }},
-            value: {{
-              show: true,
-              fontSize: '11px',
-              fontFamily: 'JetBrains Mono, monospace',
-              fontWeight: 700,
-              color: color,
-              offsetY: 4,
-              formatter: function(v) {{ return v + '%'; }}
-            }}
-          }}
-        }}
-      }},
-      stroke: {{ lineCap: 'round' }}
-    }}).render();
-  }});
 
 }})();
 </script>

@@ -68,19 +68,23 @@ Analyze the heatmap and produce a structured analysis:
    - **Rotation Signals**: Capital flowing from one sector group to another
    - **Cross-Sector Themes**: Common patterns across multiple sectors (e.g., all dividend stocks rallying)
 
-3. **STOCK SELECTIONS** (select 6-10 stocks for deep dive):
+3. **STOCK SELECTIONS** (select 10-15 specific individual stocks AND commodity futures for deep dive):
    For each stock:
-   - symbol: Ticker symbol
-   - sector: Sector classification
+   - symbol: Ticker symbol (must be a specific individual equity or commodity future)
+   - sector: Sector classification (or "Commodities" for futures)
    - reason: WHY this stock is interesting — reference the specific pattern observed
    - opportunity_type: One of: momentum, divergence, breakout, mean_reversion, cross_sector
    - priority: high, medium, or low
    - expected_insight_value: 0.0-1.0, how likely a deep dive will yield actionable insight
 
+   IMPORTANT: Do NOT select sector ETFs (XLK, XLF, XLE, XLV, XLC, XLY, XLP, XLI, XLB, XLRE, XLU, etc.) for deep dive. Every selection must be a specific individual equity (e.g., AAPL, JPM, AMZN) or commodity future (e.g., GC=F for gold, CL=F for oil, SI=F for silver, HG=F for copper, NG=F for natural gas).
+
    Selection criteria:
+   - Prioritize specific companies with clear catalysts over broad sector plays
    - Prioritize **diversity** across opportunity types (don't pick 8 momentum plays)
    - Include at least one divergence play (stock moving against its sector)
    - Include at least one cross-sector theme play
+   - Include at least 2 commodity futures if macro themes warrant (e.g., GC=F for gold, CL=F for oil)
    - Favor stocks where the heatmap pattern creates an analytical question worth investigating
    - Higher priority for stocks where multiple signals converge
 
@@ -116,12 +120,20 @@ Return your analysis as valid JSON:
       "expected_insight_value": 0.85
     }},
     {{
-      "symbol": "XOM",
+      "symbol": "DVN",
       "sector": "Energy",
-      "reason": "Diverging positively from a weak energy sector — up +1.1% while sector ETF XLE is down -0.8%. Classic quality divergence pattern.",
+      "reason": "Diverging positively from a weak energy sector — up +1.1% while most energy names are down. Strong free cash flow yield and buyback catalyst.",
       "opportunity_type": "divergence",
       "priority": "high",
       "expected_insight_value": 0.80
+    }},
+    {{
+      "symbol": "GC=F",
+      "sector": "Commodities",
+      "reason": "Gold futures rallying +1.5% on safe-haven bid, aligning with risk-off macro signals and falling real yields.",
+      "opportunity_type": "cross_sector",
+      "priority": "medium",
+      "expected_insight_value": 0.75
     }}
   ],
   "sectors_to_watch": ["Technology", "Energy", "Financials"],

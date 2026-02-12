@@ -14,6 +14,7 @@ This engine discovers opportunities autonomously without requiring user-provided
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -98,6 +99,10 @@ from analysis.memory_service import InstitutionalMemoryService  # type: ignore[i
 from analysis.pattern_extractor import PatternExtractor  # type: ignore[import-not-found]
 from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
 from llm.client_pool import pool_query_llm  # type: ignore[import-not-found]
+
+# Optional alternative data sources (availability flags)
+_HAS_PREDICTIONS = importlib.util.find_spec("data.adapters.prediction_markets") is not None
+_HAS_SENTIMENT = importlib.util.find_spec("data.adapters.reddit_sentiment") is not None
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +237,9 @@ class AutonomousDeepEngine:
         # Phase 1: Macro Scanner
         self.macro_scanner = MacroScanner()
 
+        # Limit concurrent LLM calls to avoid overloading the client pool
+        self._llm_semaphore = asyncio.Semaphore(5)
+
         self._last_analysis_time: datetime | None = None
 
     async def _get_portfolio_holdings(self) -> dict[str, dict[str, float]]:
@@ -270,6 +278,45 @@ class AutonomousDeepEngine:
 
         except Exception as e:
             logger.warning(f"Failed to fetch portfolio holdings (non-fatal): {e}")
+            return {}
+
+    async def _prefetch_prediction_data(self) -> dict:
+        """Pre-fetch prediction market data before pipeline starts.
+
+        Returns:
+            Dict of macro prediction categories, or empty dict on failure.
+        """
+        if not _HAS_PREDICTIONS:
+            return {}
+        try:
+            from data.adapters.prediction_markets import get_prediction_market_aggregator  # type: ignore[import-not-found]
+
+            aggregator = get_prediction_market_aggregator()
+            data = await aggregator.get_macro_predictions()
+            logger.info(f"Pre-fetched prediction market data: {len(data)} categories")
+            return data
+        except Exception as e:
+            logger.warning(f"Failed to pre-fetch prediction data: {e}")
+            return {}
+
+    async def _prefetch_sentiment_data(self) -> dict:
+        """Pre-fetch Reddit sentiment data before pipeline starts.
+
+        Returns:
+            Dict with 'trending' and 'market_mood' keys, or empty dict on failure.
+        """
+        if not _HAS_SENTIMENT:
+            return {}
+        try:
+            from data.adapters.reddit_sentiment import get_reddit_sentiment_adapter  # type: ignore[import-not-found]
+
+            adapter = get_reddit_sentiment_adapter()
+            trending = await adapter.get_trending_tickers(limit=50)
+            market_mood = await adapter.get_market_sentiment()
+            logger.info(f"Pre-fetched sentiment data: {len(trending)} trending tickers")
+            return {"trending": trending, "market_mood": market_mood}
+        except Exception as e:
+            logger.warning(f"Failed to pre-fetch sentiment data: {e}")
             return {}
 
     def _build_portfolio_synthesis_context(
@@ -352,16 +399,39 @@ class AutonomousDeepEngine:
         logger.info(f"Starting autonomous analysis {analysis_id}")
 
         try:
-            # ===== PHASE 1 + PHASE 2: Macro Scan & Heatmap Fetch (concurrent) =====
-            # These two phases are independent -- only Phase 3 (HeatmapAnalysis)
-            # needs both results.  Running them concurrently saves wall-clock time.
-            logger.info("Phase 1+2: Scanning macro environment & fetching heatmap concurrently...")
+            # ===== PRE-FETCH + PHASE 1 + PHASE 2 (all concurrent) =====
+            # Macro scan, heatmap fetch, and alternative data pre-fetches are
+            # all independent -- run them concurrently to save wall-clock time.
+            logger.info("Phase 1+2 + data pre-fetch: Scanning macro, fetching heatmap & alternative data concurrently...")
             await self._update_task_progress(task_id, "macro_scan", 10, "Scanning macro environment & fetching heatmap...")
 
             macro_coro = self._run_macro_scan()
             heatmap_coro = self._run_heatmap_fetch()
-            phase1_result, phase2_result = await asyncio.gather(
-                macro_coro, heatmap_coro, return_exceptions=True
+            prediction_coro = self._prefetch_prediction_data()
+            sentiment_coro = self._prefetch_sentiment_data()
+            phase1_result, phase2_result, prediction_data, sentiment_data = await asyncio.gather(
+                macro_coro, heatmap_coro, prediction_coro, sentiment_coro,
+                return_exceptions=True,
+            )
+
+            # --- Handle pre-fetch results (non-blocking) ---
+            if isinstance(prediction_data, BaseException):
+                logger.warning(f"Prediction pre-fetch failed: {prediction_data}")
+                prediction_data = {}
+            if isinstance(sentiment_data, BaseException):
+                logger.warning(f"Sentiment pre-fetch failed: {sentiment_data}")
+                sentiment_data = {}
+
+            # Store pre-fetched data on instance for downstream access
+            self._prediction_data = prediction_data
+            self._sentiment_data = sentiment_data
+
+            # Build pre-fetch phase summary
+            prediction_count = len(prediction_data) if isinstance(prediction_data, dict) else 0
+            trending_count = len(sentiment_data.get("trending", [])) if isinstance(sentiment_data, dict) else 0
+            result.phase_summaries["data_prefetch"] = (
+                f"Pre-fetched {prediction_count} prediction categories "
+                f"and {trending_count} trending tickers from alternative data sources."
             )
 
             # --- Handle Phase 1 (macro scan) result ---
@@ -538,8 +608,19 @@ class AutonomousDeepEngine:
         # Run all symbols concurrently (semaphore gates actual LLM calls)
         analyst_reports: dict[str, dict[str, Any]] = {}
 
+        # Pre-build context for all symbols at once to avoid redundant fetches
+        pre_context = await self.context_builder.build_context(
+            symbols=symbols_to_analyze,
+            include_price_history=True,
+            include_technical=True,
+            include_economic=True,
+            include_sectors=True,
+            include_rich_technical=True,
+            include_fundamentals=True,
+        )
+
         async def _analyze_symbol(sym: str) -> tuple[str, dict[str, Any]]:
-            reports = await self._run_analysts_for_symbol(sym, discovery_context)
+            reports = await self._run_analysts_for_symbol(sym, discovery_context, pre_built_context=pre_context)
             return sym, reports
 
         gather_results = await asyncio.gather(
@@ -623,6 +704,7 @@ class AutonomousDeepEngine:
                 insights_data,
                 macro_result,
                 heatmap_analysis_result,
+                pre_context=pre_context,
             )
             result.insights = saved_insights
 
@@ -654,10 +736,21 @@ class AutonomousDeepEngine:
     async def _run_heatmap_fetch(self) -> HeatmapData:
         """Run Phase 2: Heatmap Fetch.
 
+        Attempts to use the dynamic universe from universe_builder for a
+        broader stock universe. Falls back to the default static holdings.
+
         Returns:
             HeatmapData with sector and stock heatmap entries.
         """
         fetcher = get_heatmap_fetcher()
+        # Attempt to inject dynamic holdings into the fetcher
+        try:
+            from analysis.agents.heatmap_fetcher import get_dynamic_holdings  # type: ignore[import-not-found]
+            dynamic_holdings = await get_dynamic_holdings()
+            if dynamic_holdings:
+                fetcher._fallback_holdings = dynamic_holdings
+        except Exception as exc:
+            logger.debug("Dynamic holdings unavailable for heatmap fetch: %s", exc)
         return await fetcher.fetch_heatmap_data()
 
     async def _run_heatmap_analysis(
@@ -1029,12 +1122,32 @@ class AutonomousDeepEngine:
 
         return "\n".join(lines)
 
+    def _extract_ta_for_symbol(self, symbol: str, context: dict) -> dict | None:
+        """Extract technical analysis data for a symbol from pre-built context."""
+        rich_ta = context.get("rich_technical", {})
+        if not rich_ta or symbol not in rich_ta:
+            return None
+        ta = rich_ta[symbol]
+        # Return the signal_summary which has composite_score, rating, confidence, breakdown, key_levels
+        summary = ta.get("signal_summary")
+        if summary:
+            return {
+                "composite_score": summary.get("composite_score"),
+                "rating": summary.get("rating"),
+                "confidence": summary.get("confidence"),
+                "breakdown": summary.get("breakdown"),
+                "key_levels": summary.get("key_levels"),
+                "signals": summary.get("signals", []),
+            }
+        return None
+
     async def _store_insights_from_heatmap(
         self,
         session: Any,
         insights_data: list[dict[str, Any]],
         macro_result: MacroScanResult,
         heatmap_analysis: HeatmapAnalysis,
+        pre_context: dict[str, Any] | None = None,
     ) -> list[DeepInsight]:
         """Store insights in database with heatmap metadata.
 
@@ -1043,6 +1156,7 @@ class AutonomousDeepEngine:
             insights_data: List of insight dictionaries.
             macro_result: Macro scan results for context.
             heatmap_analysis: Heatmap analysis for context.
+            pre_context: Pre-built market context with rich_technical data.
 
         Returns:
             List of created DeepInsight objects.
@@ -1096,6 +1210,9 @@ class AutonomousDeepEngine:
                     historical_precedent=data.get("historical_precedent"),
                     analysts_involved=data.get("analysts_involved", []),
                     data_sources=data_sources,
+                    prediction_market_data=getattr(self, '_prediction_data', None) or None,
+                    sentiment_data=getattr(self, '_sentiment_data', None) or None,
+                    technical_analysis_data=self._extract_ta_for_symbol(primary_symbol, pre_context) if pre_context and primary_symbol else None,
                 )
 
                 session.add(insight)
@@ -1109,10 +1226,11 @@ class AutonomousDeepEngine:
             await session.commit()
             logger.info(f"Stored {len(stored)} insights to database")
 
-            # Extract patterns from each stored insight
+            # Extract patterns from each stored insight (in parallel)
             try:
                 pattern_extractor = PatternExtractor(session)
-                for insight in stored:
+
+                async def _extract_pattern(insight: DeepInsight) -> None:
                     try:
                         insight_dict = {
                             "id": insight.id,
@@ -1124,14 +1242,21 @@ class AutonomousDeepEngine:
                             "time_horizon": insight.time_horizon,
                             "primary_symbol": insight.primary_symbol,
                             "risk_factors": insight.risk_factors or [],
+                            "related_symbols": insight.related_symbols or [],
+                            "sector": (insight.discovery_context or {}).get("sector"),
                         }
                         await pattern_extractor.extract_from_insight(insight_dict)
                         logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
                     except Exception as pe:
-                        logger.warning(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                        logger.error(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}", exc_info=True)
+
+                await asyncio.gather(
+                    *[_extract_pattern(ins) for ins in stored],
+                    return_exceptions=True,
+                )
                 await session.commit()
             except Exception as e:
-                logger.warning(f"[AUTO] Pattern extraction phase failed: {e}")
+                logger.error(f"[AUTO] Pattern extraction phase failed: {e}", exc_info=True)
 
             # Auto-initiate outcome tracking for actionable insights
             try:
@@ -1170,6 +1295,19 @@ class AutonomousDeepEngine:
                     logger.info(f"[AUTO] Started outcome tracking for {tracked_count}/{len(stored)} heatmap insights")
             except Exception as e:
                 logger.warning(f"[AUTO] Outcome tracking phase failed: {e}")
+
+            # Compute statistical features for discovered symbols
+            try:
+                from analysis.statistical_calculator import StatisticalFeatureCalculator  # type: ignore[import-not-found]
+
+                symbols = list({ins.primary_symbol for ins in stored if ins.primary_symbol})
+                if symbols:
+                    calculator = StatisticalFeatureCalculator(session)
+                    await calculator.compute_all_features(symbols)
+                    await session.commit()
+                    logger.info(f"[AUTO] Statistical features computed for {len(symbols)} heatmap symbols")
+            except Exception as e:
+                logger.warning(f"[AUTO] Statistical feature computation failed: {e}")
 
         return stored
 
@@ -1318,15 +1456,26 @@ class AutonomousDeepEngine:
             )
 
             analyst_reports: dict[str, dict[str, Any]] = {}
-            for symbol in symbols_to_analyze:
+
+            async def _analyze_one(sym: str) -> tuple[str, dict[str, Any] | None]:
                 try:
-                    symbol_reports = await self._run_analysts_for_symbol(
-                        symbol, discovery_context
-                    )
-                    analyst_reports[symbol] = symbol_reports
+                    reports = await self._run_analysts_for_symbol(sym, discovery_context)
+                    return sym, reports
                 except Exception as e:
-                    logger.error(f"Deep dive failed for {symbol}: {e}")
-                    result.errors.append(f"Deep dive {symbol}: {str(e)}")
+                    logger.error(f"Deep dive failed for {sym}: {e}")
+                    result.errors.append(f"Deep dive {sym}: {str(e)}")
+                    return sym, None
+
+            gather_results = await asyncio.gather(
+                *[_analyze_one(sym) for sym in symbols_to_analyze],
+                return_exceptions=True,
+            )
+            for r in gather_results:
+                if isinstance(r, BaseException):
+                    logger.error(f"Deep dive failed: {r}")
+                    result.errors.append(f"Deep dive: {str(r)}")
+                elif r[1] is not None:
+                    analyst_reports[r[0]] = r[1]
 
             result.analyst_reports = analyst_reports
             result.phases_completed.append("deep_dive")
@@ -1517,8 +1666,16 @@ class AutonomousDeepEngine:
         Returns:
             OpportunityList with candidate opportunities.
         """
-        # Get all stocks in screening universe
-        all_stocks = get_all_screening_stocks()
+        # Get all stocks in screening universe (dynamic)
+        try:
+            from analysis.agents.universe_builder import get_screening_universe  # type: ignore[import-not-found]
+            universe = await get_screening_universe()
+            all_stocks: list[str] = []
+            for symbols in universe.values():
+                all_stocks.extend(symbols)
+            all_stocks = list(set(all_stocks))
+        except Exception:
+            all_stocks = get_all_screening_stocks()
 
         # Fetch stock data for screening
         screened_candidates = await self._screen_stocks(all_stocks)
@@ -1562,52 +1719,90 @@ class AutonomousDeepEngine:
 
     async def _screen_stocks(
         self,
-        symbols: list[str],
+        symbols: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Screen stocks and return candidates with data.
 
+        Uses asyncio.gather with run_in_executor to fetch yfinance data
+        concurrently instead of blocking the event loop sequentially.
+
+        If *symbols* is None or empty, the dynamic screening universe from
+        ``universe_builder`` is used. Falls back to the synchronous
+        hardcoded list from ``opportunity_hunter`` on failure.
+
         Args:
-            symbols: List of stock symbols to screen.
+            symbols: List of stock symbols to screen. If None, uses
+                the dynamic universe.
 
         Returns:
             List of screened candidate dictionaries.
         """
+        # Resolve symbols from the dynamic universe when none provided
+        resolved_symbols: list[str] = symbols or []
+        if not resolved_symbols:
+            try:
+                from analysis.agents.universe_builder import get_screening_universe  # type: ignore[import-not-found]
+                universe = await get_screening_universe()
+                all_syms: list[str] = []
+                for syms in universe.values():
+                    all_syms.extend(syms)
+                resolved_symbols = list(set(all_syms))
+            except Exception:
+                from analysis.agents.opportunity_hunter import get_all_screening_stocks_sync  # type: ignore[import-not-found]
+                resolved_symbols = get_all_screening_stocks_sync()
+
         import yfinance as yf  # type: ignore[import-not-found]
 
-        candidates: list[dict[str, Any]] = []
+        loop = asyncio.get_event_loop()
+        yf_semaphore = asyncio.Semaphore(20)
 
-        for symbol in symbols:
-            try:
-                ticker = yf.Ticker(symbol)
-                hist = ticker.history(period="1mo")
+        async def _screen_one(symbol: str) -> dict[str, Any] | None:
+            async with yf_semaphore:
+                try:
+                    ticker = yf.Ticker(symbol)
+                    hist = await loop.run_in_executor(
+                        None, lambda t=ticker: t.history(period="1mo")
+                    )
 
-                if hist.empty or len(hist) < 5:
-                    continue
+                    if hist.empty or len(hist) < 5:
+                        return None
 
-                current = hist["Close"].iloc[-1]
-                return_5d = ((current / hist["Close"].iloc[-5]) - 1) * 100
-                return_20d = ((current / hist["Close"].iloc[0]) - 1) * 100
-                avg_volume = hist["Volume"].mean()
-                current_volume = hist["Volume"].iloc[-1]
+                    current = hist["Close"].iloc[-1]
+                    return_5d = ((current / hist["Close"].iloc[-5]) - 1) * 100
+                    return_20d = ((current / hist["Close"].iloc[0]) - 1) * 100
+                    avg_volume = hist["Volume"].mean()
+                    current_volume = hist["Volume"].iloc[-1]
 
-                data = {
-                    "symbol": symbol,
-                    "sector": SYMBOL_TO_SECTOR.get(symbol, "Unknown"),
-                    "price": current,
-                    "return_5d": return_5d,
-                    "return_20d": return_20d,
-                    "avg_volume": avg_volume,
-                    "volume_ratio": current_volume / avg_volume if avg_volume > 0 else 1.0,
-                }
+                    data = {
+                        "symbol": symbol,
+                        "sector": SYMBOL_TO_SECTOR.get(symbol, "Unknown"),
+                        "price": current,
+                        "return_5d": return_5d,
+                        "return_20d": return_20d,
+                        "avg_volume": avg_volume,
+                        "volume_ratio": current_volume / avg_volume if avg_volume > 0 else 1.0,
+                    }
 
-                # Apply technical screen
-                if passes_technical_screen(data):
-                    data["screen_score"] = calculate_screen_score(data)
-                    candidates.append(data)
+                    # Apply technical screen
+                    if passes_technical_screen(data):
+                        data["screen_score"] = calculate_screen_score(data)
+                        return data
 
-            except Exception as e:
-                logger.warning(f"Failed to screen {symbol}: {e}")
-                continue
+                    return None
+                except Exception as e:
+                    logger.warning(f"Failed to screen {symbol}: {e}")
+                    return None
+
+        results = await asyncio.gather(
+            *[_screen_one(sym) for sym in resolved_symbols],
+            return_exceptions=True,
+        )
+
+        # Filter out None values and exceptions
+        candidates: list[dict[str, Any]] = [
+            r for r in results
+            if isinstance(r, dict)
+        ]
 
         # Sort by screen score
         candidates.sort(key=lambda x: x.get("screen_score", 0), reverse=True)
@@ -1636,24 +1831,33 @@ class AutonomousDeepEngine:
         self,
         symbol: str,
         discovery_context: str,
+        pre_built_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run all analysts for a single symbol.
 
         Args:
             symbol: Stock symbol to analyze.
             discovery_context: Pre-built discovery context.
+            pre_built_context: Optional pre-built market context covering all
+                symbols. When provided, skips the per-symbol build_context()
+                call, saving redundant data fetches.
 
         Returns:
             Dictionary mapping analyst names to their reports.
         """
-        # Build symbol-specific context
-        agent_context = await self.context_builder.build_context(
-            symbols=[symbol],
-            include_price_history=True,
-            include_technical=True,
-            include_economic=False,
-            include_sectors=False,
-        )
+        # Use pre-built context if available, otherwise build per-symbol
+        if pre_built_context is not None:
+            agent_context = pre_built_context
+        else:
+            agent_context = await self.context_builder.build_context(
+                symbols=[symbol],
+                include_price_history=True,
+                include_technical=True,
+                include_economic=True,
+                include_sectors=True,
+                include_rich_technical=True,
+                include_fundamentals=True,
+            )
 
         reports: dict[str, Any] = {}
 
@@ -1713,10 +1917,11 @@ class AutonomousDeepEngine:
         # Prepend discovery context
         full_context = f"{discovery_context}\n\n{formatted_context}"
 
-        # Query LLM
+        # Query LLM (semaphore limits concurrent LLM calls across all analysts)
         for attempt in range(self.max_retries + 1):
             try:
-                response = await self._query_llm(prompt, full_context, analyst_name)
+                async with self._llm_semaphore:
+                    response = await self._query_llm(prompt, full_context, analyst_name)
                 parsed = parse_func(response)
 
                 if hasattr(parsed, "to_dict"):
@@ -1976,6 +2181,9 @@ class AutonomousDeepEngine:
                     historical_precedent=data.get("historical_precedent"),
                     analysts_involved=data.get("analysts_involved", []),
                     data_sources=data_sources,
+                    prediction_market_data=getattr(self, '_prediction_data', None) or None,
+                    sentiment_data=getattr(self, '_sentiment_data', None) or None,
+                    technical_analysis_data=None,  # No pre_context in legacy pipeline
                 )
 
                 session.add(insight)
@@ -1989,10 +2197,11 @@ class AutonomousDeepEngine:
             await session.commit()
             logger.info(f"Stored {len(stored)} insights to database")
 
-            # Extract patterns from each stored insight
+            # Extract patterns from each stored insight (in parallel)
             try:
                 pattern_extractor = PatternExtractor(session)
-                for insight in stored:
+
+                async def _extract_pattern_legacy(insight: DeepInsight) -> None:
                     try:
                         insight_dict = {
                             "id": insight.id,
@@ -2004,14 +2213,21 @@ class AutonomousDeepEngine:
                             "time_horizon": insight.time_horizon,
                             "primary_symbol": insight.primary_symbol,
                             "risk_factors": insight.risk_factors or [],
+                            "related_symbols": insight.related_symbols or [],
+                            "sector": (insight.discovery_context or {}).get("sector"),
                         }
                         await pattern_extractor.extract_from_insight(insight_dict)
                         logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
                     except Exception as pe:
-                        logger.warning(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}")
+                        logger.error(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}", exc_info=True)
+
+                await asyncio.gather(
+                    *[_extract_pattern_legacy(ins) for ins in stored],
+                    return_exceptions=True,
+                )
                 await session.commit()
             except Exception as e:
-                logger.warning(f"[AUTO] Pattern extraction phase failed: {e}")
+                logger.error(f"[AUTO] Pattern extraction phase failed: {e}", exc_info=True)
 
             # Auto-initiate outcome tracking for actionable insights
             try:
@@ -2050,6 +2266,19 @@ class AutonomousDeepEngine:
                     logger.info(f"[AUTO] Started outcome tracking for {tracked_count}/{len(stored)} legacy insights")
             except Exception as e:
                 logger.warning(f"[AUTO] Outcome tracking phase failed: {e}")
+
+            # Compute statistical features for discovered symbols
+            try:
+                from analysis.statistical_calculator import StatisticalFeatureCalculator  # type: ignore[import-not-found]
+
+                symbols = list({ins.primary_symbol for ins in stored if ins.primary_symbol})
+                if symbols:
+                    calculator = StatisticalFeatureCalculator(session)
+                    await calculator.compute_all_features(symbols)
+                    await session.commit()
+                    logger.info(f"[AUTO] Statistical features computed for {len(symbols)} legacy symbols")
+            except Exception as e:
+                logger.warning(f"[AUTO] Statistical feature computation failed: {e}")
 
         return stored
 

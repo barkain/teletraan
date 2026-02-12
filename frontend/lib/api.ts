@@ -432,7 +432,7 @@ export const chatApi = {
 
 // Import types
 import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact } from '@/types';
-import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
+import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, PatternsSummary, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
 import type { FollowUpResearch, ResearchListResponse, ResearchListParams, ResearchCreateRequest } from '@/lib/types/research';
 import type { ReportListResponse, ReportDetail, PublishResponse } from '@/lib/types/report';
 
@@ -463,6 +463,8 @@ export const knowledgeApi = {
     },
     get: (id: string) =>
       fetchApi<KnowledgePattern>(`/api/v1/knowledge/patterns/${id}`),
+    summary: () =>
+      fetchApi<PatternsSummary>('/api/v1/knowledge/patterns/summary'),
     matching: async (params?: MatchingPatternsParams): Promise<KnowledgePatternsResponse> => {
       const queryParams: Record<string, string | number | boolean | undefined> = {};
       if (params?.symbols) {

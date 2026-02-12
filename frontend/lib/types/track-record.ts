@@ -36,6 +36,10 @@ export interface InsightOutcome {
   outcome_category?: OutcomeCategory;
   validation_notes?: string;
   days_remaining?: number;
+  symbol?: string;
+  insight_title?: string;
+  insight_action?: string;
+  unrealized_return_pct?: number;
 }
 
 // Track record statistics from knowledge API
@@ -43,8 +47,8 @@ export interface TrackRecordStats {
   total_insights: number;
   successful: number;
   success_rate: number;
-  by_type: Record<string, { total: number; successful: number; rate: number }>;
-  by_action: Record<string, { total: number; successful: number; rate: number }>;
+  by_type: Record<string, { total: number; successful: number; success_rate: number; avg_return?: number | null }>;
+  by_action: Record<string, { total: number; successful: number; success_rate: number; avg_return?: number | null }>;
   avg_return_successful: number;
   avg_return_failed: number;
 }

@@ -42,24 +42,30 @@ After the team has completed deep dives on a set of stocks, you review the overa
 ## Your Task
 Evaluate whether the analyzed stocks provide adequate coverage across:
 
-1. **Sector Diversification**: Are all major sectors represented, especially those flagged by macro analysis?
+1. **Individual Stock Coverage**: Identify specific stocks or commodity futures that were mentioned in earlier phases but not deep-dived. Prioritize: companies with specific catalysts, commodity futures aligned with macro themes, and international ADRs with relative value.
 2. **Theme Coverage**: Do the analyzed stocks cover the key macro themes identified?
 3. **Risk Balance**: Is there a mix of offensive (growth/momentum) and defensive positions?
 4. **Contrarian Views**: Are there any contrarian or mean-reversion opportunities being missed?
 5. **Opportunity Types**: Are different opportunity types represented (momentum, breakout, divergence, etc.)?
+6. **Commodity Futures**: Consider commodity futures as a distinct asset class that may need coverage if macro themes identified inflation, energy, or materials opportunities.
+
+## IMPORTANT Rules for Gap-Filling
+- Do NOT suggest adding sector ETFs to fill coverage gaps. If a sector is under-represented, suggest the best 2-3 individual stocks in that sector.
+- Always recommend specific individual stocks or commodity futures, never broad sector proxies.
 
 ## Decision Framework
 - **SUFFICIENT** (is_sufficient=true): The current coverage is good enough. Set this when:
-  - Most sectors of interest are represented
-  - Key macro themes have stock-level coverage
-  - Adding more stocks would yield diminishing returns
+  - Key individual stocks and commodity futures from earlier phases have been covered
+  - Key macro themes have specific stock-level or commodity-level coverage
+  - Adding more individual names would yield diminishing returns
   - This is iteration 2 (hard cap — always mark sufficient on iteration 2)
 
 - **INSUFFICIENT** (is_sufficient=false): Additional stocks needed. Set this when:
-  - A sector flagged as "overweight" by macro has zero representation
-  - A major theme has no stock-level coverage
+  - Specific stocks or commodity futures mentioned in earlier phases were not deep-dived
+  - A major theme has no stock-level coverage (fill with individual stocks, NOT sector ETFs)
   - All analyzed stocks are in the same direction (all bullish or all bearish)
-  - Only recommend 2-5 additional stocks that would ADD SIGNIFICANT VALUE
+  - Commodity futures aligned with macro inflation/energy/materials themes have no coverage
+  - Only recommend 2-5 additional individual stocks or commodity futures that would ADD SIGNIFICANT VALUE
 
 ## Output Format
 Return valid JSON:
@@ -106,8 +112,11 @@ Return valid JSON:
 - Maximum 5 additional stocks per iteration
 - On iteration 2, you MUST set is_sufficient=true (hard cap)
 - Do NOT recommend stocks already analyzed
+- Do NOT recommend sector ETFs (e.g., XLE, XLK, GLD) — always suggest individual stocks or commodity futures instead
+- If a sector is under-represented, suggest the best 2-3 individual stocks in that sector
 - Prioritize gaps that align with macro themes
-- Consider the marginal value of each additional stock
+- Consider commodity futures (e.g., CL=F, GC=F, NG=F) when macro themes point to inflation, energy, or materials
+- Consider the marginal value of each additional stock or commodity future
 - Use valid opportunity_type values: momentum, mean_reversion, breakout, catalyst, sector_leader, divergence
 """
 

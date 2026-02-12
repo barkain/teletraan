@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { formatRelativeTime, getSeverityClasses, getInsightTypeLabel } from '@/lib/hooks/use-insights';
+import { formatRelativeTime, getInsightTypeLabel } from '@/lib/hooks/use-insights';
 import type { Insight } from '@/types';
 import {
   TrendingUp,
@@ -14,7 +14,9 @@ import {
   Building2,
   DollarSign,
   Info,
-  AlertCircle,
+  Eye,
+  ShieldAlert,
+  Gauge,
 } from 'lucide-react';
 
 interface InsightCardProps {
@@ -22,8 +24,48 @@ interface InsightCardProps {
   onClick?: () => void;
 }
 
+// --- Severity-to-action mapping for layman language ---
+
+interface SeverityActionInfo {
+  label: string;
+  explanation: string;
+  borderColor: string;
+  badgeBg: string;
+  badgeText: string;
+}
+
+function getSeverityAction(severity: Insight['severity']): SeverityActionInfo {
+  switch (severity) {
+    case 'alert':
+      return {
+        label: 'Sell',
+        explanation: 'Consider selling -- warning signs detected',
+        borderColor: 'border-l-red-500',
+        badgeBg: 'bg-red-500',
+        badgeText: 'text-white',
+      };
+    case 'warning':
+      return {
+        label: 'Watch',
+        explanation: 'Keep an eye on this -- conditions are shifting',
+        borderColor: 'border-l-blue-500',
+        badgeBg: 'bg-blue-500',
+        badgeText: 'text-white',
+      };
+    case 'info':
+    default:
+      return {
+        label: 'Hold',
+        explanation: 'Conditions look stable -- no immediate action needed',
+        borderColor: 'border-l-yellow-500',
+        badgeBg: 'bg-yellow-500',
+        badgeText: 'text-white',
+      };
+  }
+}
+
 function getTypeIcon(type: Insight['type']) {
-  const iconClass = 'h-4 w-4';
+  const iconClass = 'h-3.5 w-3.5';
   switch (type) {
     case 'pattern':
       return <TrendingUp className={iconClass} />;
@@ -44,92 +86,134 @@ function getSeverityIcon(severity: Insight['severity']) {
   const iconClass = 'h-3 w-3';
   switch (severity) {
     case 'alert':
-      return <AlertCircle className={iconClass} />;
+      return <ShieldAlert className={iconClass} />;
     case 'warning':
-      return <AlertTriangle className={iconClass} />;
+      return <Eye className={iconClass} />;
     case 'info':
     default:
       return <Info className={iconClass} />;
   }
 }
 
-function getSeverityBadgeVariant(severity: Insight['severity']): 'default' | 'secondary' | 'destructive' | 'outline' {
-  switch (severity) {
-    case 'alert':
-      return 'destructive';
-    case 'warning':
-      return 'secondary';
-    case 'info':
+function getConfidenceLabel(percent: number): { label: string; color: string } {
+  if (percent >= 80) return { label: 'High confidence', color: 'bg-green-500' };
+  if (percent >= 60) return { label: 'Moderate confidence', color: 'bg-yellow-500' };
+  return { label: 'Low confidence', color: 'bg-red-500' };
+}
+
+/** Generate a simple plain-English summary from insight type */
+function getLaymanSummary(type: Insight['type'], severity: Insight['severity']): string {
+  const urgency = severity === 'alert' ? 'Urgent' : severity === 'warning' ? 'Notable' : 'Informational';
+  switch (type) {
+    case 'pattern':
+      return `${urgency} price pattern detected that may signal a trend change`;
+    case 'anomaly':
+      return `${urgency} unusual market behavior that deviates from normal patterns`;
+    case 'sector':
+      return `${urgency} shift in sector performance worth monitoring`;
+    case 'technical':
+      return `${urgency} technical indicator signal based on price and volume data`;
+    case 'economic':
+      return `${urgency} economic data point that may affect market direction`;
     default:
-      return 'outline';
+      return `${urgency} market signal detected`;
   }
 }
 
 export function InsightCard({ insight, onClick }: InsightCardProps) {
-  const severityClasses = getSeverityClasses(insight.severity);
   const confidencePercent = insight.confidence ? Math.round(insight.confidence * 100) : null;
+  const severityAction = getSeverityAction(insight.severity);
+  const confidenceInfo = confidencePercent !== null ? getConfidenceLabel(confidencePercent) : null;
 
   return (
     <Card
       className={cn(
-        'cursor-pointer transition-all hover:shadow-md',
+        'cursor-pointer',
+        'bg-card/80 backdrop-blur-sm border border-border/50',
         'border-l-4',
-        insight.severity === 'alert' && 'border-l-red-500',
-        insight.severity === 'warning' && 'border-l-yellow-500',
-        insight.severity === 'info' && 'border-l-blue-500'
+        severityAction.borderColor,
+        'hover:scale-[1.02] hover:shadow-lg transition-all duration-200'
       )}
       onClick={onClick}
     >
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
+      {/* Header: Action badge left, Confidence gauge right */}
+      <div className="px-5 pt-4 pb-2">
+        <div className="flex items-start justify-between gap-3">
+          {/* Left: Action + Type badges */}
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant="outline" className="gap-1">
+            <Badge className={cn('gap-1 font-semibold', severityAction.badgeBg, severityAction.badgeText)}>
+              {getSeverityIcon(insight.severity)}
+              {severityAction.label}
+            </Badge>
+            <Badge variant="outline" className="gap-1 text-xs">
               {getTypeIcon(insight.type)}
               {getInsightTypeLabel(insight.type)}
             </Badge>
-            <Badge variant={getSeverityBadgeVariant(insight.severity)} className="gap-1">
-              {getSeverityIcon(insight.severity)}
-              {insight.severity}
-            </Badge>
-            {insight.symbol && (
-              <Link
-                href={`/stocks/${insight.symbol}`}
-                onClick={(e) => e.stopPropagation()}
-                className="hover:underline"
-              >
-                <Badge variant="secondary">{insight.symbol}</Badge>
-              </Link>
-            )}
           </div>
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
+
+          {/* Right: Confidence gauge */}
+          {confidenceInfo && confidencePercent !== null && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
+              <div className="flex flex-col items-end gap-0.5">
+                <div className="flex items-center gap-1.5">
+                  <div className="h-2 w-16 bg-secondary rounded-full overflow-hidden">
+                    <div
+                      className={cn('h-full rounded-full transition-all', confidenceInfo.color)}
+                      style={{ width: `${confidencePercent}%` }}
+                    />
+                  </div>
+                  <span className="text-xs font-semibold tabular-nums">{confidencePercent}%</span>
+                </div>
+                <span className="text-[10px] text-muted-foreground leading-none">{confidenceInfo.label}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <CardContent className="px-5 pb-4 pt-0 space-y-2.5">
+        {/* Symbol + Timestamp row */}
+        <div className="flex items-center gap-2">
+          {insight.symbol && (
+            <Link
+              href={`/stocks/${insight.symbol}`}
+              onClick={(e) => e.stopPropagation()}
+              className="hover:underline"
+            >
+              <Badge variant="secondary" className="font-mono font-bold text-sm px-2.5 py-0.5">
+                {insight.symbol}
+              </Badge>
+            </Link>
+          )}
+          <span className="text-xs text-muted-foreground ml-auto whitespace-nowrap">
             {formatRelativeTime(insight.created_at)}
           </span>
         </div>
-        <CardTitle className="text-base mt-2">{insight.title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <CardDescription className="line-clamp-2">
+
+        {/* Title */}
+        <h3 className="text-sm font-semibold leading-snug line-clamp-2">
+          {insight.title}
+        </h3>
+
+        {/* Layman summary */}
+        <p className="text-xs text-muted-foreground italic leading-relaxed">
+          {getLaymanSummary(insight.type, insight.severity)}
+        </p>
+
+        {/* Description */}
+        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
           {insight.description || insight.content}
-        </CardDescription>
-        {confidencePercent !== null && (
-          <div className="mt-3">
-            <div className="flex items-center justify-between text-xs mb-1">
-              <span className="text-muted-foreground">Confidence</span>
-              <span className="font-medium">{confidencePercent}%</span>
-            </div>
-            <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-              <div
-                className={cn(
-                  'h-full rounded-full transition-all',
-                  confidencePercent >= 80 && 'bg-green-500',
-                  confidencePercent >= 60 && confidencePercent < 80 && 'bg-yellow-500',
-                  confidencePercent < 60 && 'bg-red-500'
-                )}
-                style={{ width: `${confidencePercent}%` }}
-              />
-            </div>
-          </div>
-        )}
+        </p>
+
+        {/* Action explanation */}
+        <div className={cn(
+          'flex items-start gap-2 rounded-md px-3 py-2 text-xs',
+          'bg-muted/60'
+        )}>
+          {getSeverityIcon(insight.severity)}
+          <span className="text-muted-foreground">{severityAction.explanation}</span>
+        </div>
       </CardContent>
     </Card>
   );

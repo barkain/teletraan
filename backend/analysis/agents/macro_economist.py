@@ -28,6 +28,14 @@ MACRO_ECONOMIST_PROMPT = """You are a Macro Economist specializing in Federal Re
 - GDP growth rate
 - Dollar index (DXY)
 
+## Prediction Market Probabilities
+When prediction market data is provided, compare market-implied expectations with your economic analysis:
+- Are prediction markets pricing in rate cuts that your indicators don't support?
+- Does the recession probability align with leading economic indicators?
+- Is inflation expectation in line with CPI trend data?
+
+Highlight any divergences between prediction market pricing and your economic analysis -- these divergences often represent trading opportunities or risks.
+
 ## Your Task
 Analyze economic data and identify:
 1. **Fed policy trajectory** - Where is policy headed?
@@ -406,6 +414,26 @@ def format_macro_context(market_data: dict) -> str:
     if "historical_context" in market_data:
         context_parts.append("\n=== HISTORICAL CONTEXT ===")
         context_parts.append(market_data["historical_context"])
+
+    # Prediction market data (optional)
+    predictions = market_data.get("predictions")
+    if predictions:
+        from analysis.context_builder import format_prediction_context  # type: ignore[import-not-found]
+
+        prediction_text = format_prediction_context(predictions)
+        if prediction_text:
+            context_parts.append("")
+            context_parts.append(prediction_text)
+
+    # Fundamental data (optional)
+    fundamentals = market_data.get("fundamentals")
+    if fundamentals:
+        from analysis.context_builder import format_fundamental_context  # type: ignore[import-not-found]
+
+        fundamental_text = format_fundamental_context(fundamentals)
+        if fundamental_text:
+            context_parts.append("")
+            context_parts.append(fundamental_text)
 
     return "\n".join(context_parts)
 

@@ -453,7 +453,8 @@ class ETLOrchestrator:
         """Daily job to compute statistical features for watchlist.
 
         Computes momentum, mean-reversion, volatility, seasonality,
-        and cross-sectional features for all watchlist symbols.
+        and cross-sectional features for all watchlist symbols plus
+        symbols from recent insights (last 30 days).
 
         Args:
             symbols: List of symbols to compute. Uses DEFAULT_SYMBOLS if not provided.
@@ -461,25 +462,49 @@ class ETLOrchestrator:
         Returns:
             Dict containing features_computed and symbols counts.
         """
-        symbols = symbols or self.DEFAULT_SYMBOLS
-        logger.info(f"Computing daily statistical features for {len(symbols)} symbols")
+        base_symbols = symbols or self.DEFAULT_SYMBOLS
 
         async with async_session_factory() as session:
+            # Also include symbols from recent insights (last 30 days)
+            insight_symbols: list[str] = []
+            try:
+                from datetime import datetime as _dt
+
+                from sqlalchemy import distinct as _distinct
+
+                from models.deep_insight import DeepInsight
+
+                cutoff = _dt.utcnow() - timedelta(days=30)
+                result = await session.execute(
+                    select(_distinct(DeepInsight.primary_symbol))
+                    .where(DeepInsight.primary_symbol.isnot(None))
+                    .where(DeepInsight.created_at >= cutoff)
+                )
+                insight_symbols = [row[0] for row in result.all() if row[0]]
+            except Exception as e:
+                logger.warning(f"Failed to fetch insight symbols: {e}")
+
+            all_symbols = list(set(base_symbols + insight_symbols))
+            logger.info(
+                f"Computing daily statistical features for {len(all_symbols)} symbols "
+                f"({len(base_symbols)} base + {len(insight_symbols)} from insights)"
+            )
+
             calculator = StatisticalFeatureCalculator(session)
 
             # Compute all features
-            features = await calculator.compute_all_features(symbols)
+            features = await calculator.compute_all_features(all_symbols)
 
             await session.commit()
 
             logger.info(
                 f"Feature computation complete: {len(features)} features computed "
-                f"for {len(symbols)} symbols"
+                f"for {len(all_symbols)} symbols"
             )
 
             return {
                 "features_computed": len(features),
-                "symbols": len(symbols),
+                "symbols": len(all_symbols),
             }
 
     def start(self) -> None:
