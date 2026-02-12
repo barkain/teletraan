@@ -1512,6 +1512,55 @@ def _build_phase_timeline(
     <div class="phase-accordion-list">{items}</div>"""
 
 
+def _ta_rating_explanation(rating: str) -> str:
+    """Return a plain-English explanation for a technical analysis rating."""
+    explanations = {
+        "strong buy": "Multiple technical indicators align bullish — a strong entry signal",
+        "buy": "Most indicators lean positive — conditions favor buying",
+        "neutral": "Mixed signals from indicators — no clear direction",
+        "sell": "Most indicators lean negative — caution advised",
+        "strong sell": "Multiple indicators align bearish — significant downside risk",
+    }
+    return explanations.get(rating.lower().strip(), "")
+
+
+def _ta_breakdown_meaning(key: str, val: float) -> str:
+    """Return a short plain-English meaning for a TA breakdown metric."""
+    if key == "trend":
+        if val > 0.5:
+            return "Strong upward price trend"
+        if val > 0:
+            return "Mild upward trend"
+        if val > -0.5:
+            return "Mild downward trend"
+        return "Strong downward price trend"
+    if key == "momentum":
+        if val > 0.5:
+            return "Strong buying pressure"
+        if val > 0:
+            return "Mild buying pressure"
+        if val > -0.5:
+            return "Mild selling pressure"
+        return "Strong selling pressure"
+    if key == "volatility":
+        if val > 0.5:
+            return "Very large price swings"
+        if val > 0:
+            return "Moderate price swings"
+        if val > -0.5:
+            return "Below-average price swings"
+        return "Very low price swings"
+    if key == "volume":
+        if val > 0.5:
+            return "Very high trading activity"
+        if val > 0:
+            return "Above-average trading activity"
+        if val > -0.5:
+            return "Below-average trading activity"
+        return "Very low trading activity"
+    return ""
+
+
 def _build_analysis_sources_html(ins: DeepInsight) -> str:
     """Build a collapsible Analysis Sources section for an insight card.
 
@@ -1552,6 +1601,9 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
             else ""
         )
 
+        # Rating explanation text
+        explain_text = _ta_rating_explanation(str(rating)) if rating else ""
+
         # Breakdown mini-bars (trend, momentum, volatility, volume)
         breakdown_html = ""
         breakdown_keys = ["trend", "momentum", "volatility", "volume"]
@@ -1568,15 +1620,21 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
                 bar_color = "#EF4444"
             else:
                 bar_color = "#F59E0B"
+            meaning = _ta_breakdown_meaning(key, bar_val)
             breakdown_html += (
                 f'<div class="src-breakdown-row">'
                 f'<span class="src-breakdown-label">{_esc(key.title())}</span>'
                 f'<div class="src-breakdown-track">'
+                f'<div class="src-breakdown-center"></div>'
                 f'<div class="src-breakdown-fill" style="width:{bar_pct}%;background:{bar_color};"></div>'
                 f'</div>'
                 f'<span class="src-breakdown-val" style="color:{bar_color};">{bar_val:+.2f}</span>'
                 f'</div>'
             )
+            if meaning:
+                breakdown_html += (
+                    f'<div class="src-breakdown-meaning">{_esc(meaning)}</div>'
+                )
 
         ta_html = (
             f'<div class="src-section">'
@@ -1589,62 +1647,130 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
         if conf_display:
             ta_html += f'<span class="src-ta-conf">{conf_display} confidence</span>'
         ta_html += '</div>'
+        if explain_text:
+            ta_html += f'<div class="src-ta-explain">{_esc(explain_text)}</div>'
         if breakdown_html:
             ta_html += f'<div class="src-breakdown">{breakdown_html}</div>'
+
+        # Key levels: support and resistance
+        support = ta.get("support")
+        resistance = ta.get("resistance")
+        if support is not None or resistance is not None:
+            ta_html += '<div class="src-key-levels">'
+            if support is not None:
+                ta_html += (
+                    f'<span class="src-level">'
+                    f'<span class="src-level-label">Support (floor):</span>'
+                    f'<span class="src-level-val" style="color:#10B981;">${float(support):,.2f}</span>'
+                    f'</span>'
+                )
+            if resistance is not None:
+                ta_html += (
+                    f'<span class="src-level">'
+                    f'<span class="src-level-label">Resistance (ceiling):</span>'
+                    f'<span class="src-level-val" style="color:#EF4444;">${float(resistance):,.2f}</span>'
+                    f'</span>'
+                )
+            ta_html += '</div>'
+
         ta_html += '</div>'
         sections.append(ta_html)
 
     # --- Prediction Markets ---
     if pred and isinstance(pred, dict):
-        highlights: list[str] = []
+        cards: list[str] = []
 
         fed = pred.get("fed_rates") or pred.get("fed_rate")
         if isinstance(fed, dict):
             consensus = fed.get("consensus") or fed.get("next_move")
+            prob = fed.get("probability")
             if consensus:
-                highlights.append(
-                    f'<span class="src-pred-item">'
-                    f'<strong>Fed Rate:</strong> {_esc(str(consensus))}'
-                    f'</span>'
+                prob_pct = ""
+                explain = ""
+                if prob is not None:
+                    pval = float(prob) if isinstance(prob, (int, float)) and float(prob) <= 1 else None
+                    if pval is not None:
+                        prob_pct = f"{int(pval * 100)}%"
+                        explain = f"{prob_pct} chance the Fed cuts rates by 25 basis points at the next meeting"
+                    else:
+                        prob_pct = str(prob)
+                display_val = prob_pct if prob_pct else _esc(str(consensus))
+                card_html = (
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">Fed Rate</div>'
+                    f'<div class="src-pred-value" style="color:#3b82f6;">{display_val}</div>'
                 )
+                if prob_pct and isinstance(prob, (int, float)) and float(prob) <= 1:
+                    bar_w = int(float(prob) * 100)
+                    card_html += (
+                        f'<div class="src-pred-bar">'
+                        f'<div class="src-pred-bar-fill" style="width:{bar_w}%;"></div>'
+                        f'</div>'
+                    )
+                if explain:
+                    card_html += f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                elif consensus:
+                    card_html += f'<div class="src-pred-explain">{_esc(str(consensus))}</div>'
+                card_html += '</div>'
+                cards.append(card_html)
         elif isinstance(fed, str):
-            highlights.append(
-                f'<span class="src-pred-item">'
-                f'<strong>Fed Rate:</strong> {_esc(fed)}'
-                f'</span>'
+            cards.append(
+                f'<div class="src-pred-card">'
+                f'<div class="src-pred-label">Fed Rate</div>'
+                f'<div class="src-pred-value" style="color:#3b82f6;">{_esc(fed)}</div>'
+                f'</div>'
             )
 
         recession = pred.get("recession")
         if isinstance(recession, dict):
             prob = recession.get("probability") or recession.get("consensus")
             if prob is not None:
-                prob_display = (
-                    f"{int(float(prob) * 100)}%"
-                    if isinstance(prob, (int, float)) and float(prob) <= 1
-                    else str(prob)
+                if isinstance(prob, (int, float)) and float(prob) <= 1:
+                    pct_val = int(float(prob) * 100)
+                    prob_display = f"{pct_val}%"
+                    explain = f"{prob_display} probability of recession in 2026 according to prediction markets"
+                    bar_w = pct_val
+                else:
+                    prob_display = str(prob)
+                    explain = ""
+                    bar_w = 0
+                rec_color = "#EF4444" if bar_w > 50 else "#F59E0B" if bar_w > 25 else "#10B981"
+                card_html = (
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">Recession</div>'
+                    f'<div class="src-pred-value" style="color:{rec_color};">{_esc(prob_display)}</div>'
                 )
-                highlights.append(
-                    f'<span class="src-pred-item">'
-                    f'<strong>Recession:</strong> {_esc(prob_display)}'
-                    f'</span>'
-                )
+                if bar_w > 0:
+                    card_html += (
+                        f'<div class="src-pred-bar">'
+                        f'<div class="src-pred-bar-fill" style="width:{bar_w}%;background:{rec_color};"></div>'
+                        f'</div>'
+                    )
+                if explain:
+                    card_html += f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                card_html += '</div>'
+                cards.append(card_html)
 
         inflation = pred.get("inflation")
         if isinstance(inflation, dict):
             expectation = inflation.get("expectation") or inflation.get("consensus")
             if expectation is not None:
-                highlights.append(
-                    f'<span class="src-pred-item">'
-                    f'<strong>Inflation:</strong> {_esc(str(expectation))}'
-                    f'</span>'
+                exp_str = str(expectation)
+                explain = f"Market expects inflation around {exp_str}"
+                cards.append(
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">Inflation</div>'
+                    f'<div class="src-pred-value" style="color:#F59E0B;">{_esc(exp_str)}</div>'
+                    f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                    f'</div>'
                 )
 
-        if highlights:
-            items_html = "".join(highlights)
+        if cards:
+            grid_html = "".join(cards)
             sections.append(
                 f'<div class="src-section">'
                 f'<div class="src-section-title">Prediction Markets</div>'
-                f'<div class="src-pred-highlights">{items_html}</div>'
+                f'<div class="src-pred-grid">{grid_html}</div>'
                 f'<div class="src-source-label">Kalshi / Polymarket</div>'
                 f'</div>'
             )
@@ -1662,10 +1788,13 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
             mood_str = str(overall_mood).lower()
             if "bull" in mood_str or "positive" in mood_str or "optimistic" in mood_str:
                 mood_color = "#10B981"
+                mood_explain = "Retail traders are feeling optimistic — social sentiment skews bullish"
             elif "bear" in mood_str or "negative" in mood_str or "pessimistic" in mood_str:
                 mood_color = "#EF4444"
+                mood_explain = "Retail traders are cautious — social sentiment skews bearish"
             else:
                 mood_color = "#F59E0B"
+                mood_explain = "Retail sentiment is mixed — no strong directional bias from social channels"
 
             sent_html = (
                 f'<div class="src-section">'
@@ -1674,6 +1803,7 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
                 f'<span class="src-sent-dot" style="background:{mood_color};box-shadow:0 0 6px {mood_color};"></span>'
                 f'<span style="color:{mood_color};">{_esc(str(overall_mood).title())}</span>'
                 f'</div>'
+                f'<div class="src-sent-explain">{_esc(mood_explain)}</div>'
             )
 
             # Mention count for this insight's symbol
@@ -1690,6 +1820,19 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
                                 f'</div>'
                             )
                         break
+
+            # Trending tickers as chips
+            if trending:
+                tickers_html = ""
+                for item in trending[:8]:
+                    if isinstance(item, dict):
+                        sym = item.get("symbol", "")
+                        if sym:
+                            tickers_html += f'<span class="src-sent-ticker">{_esc(sym)}</span>'
+                    elif isinstance(item, str):
+                        tickers_html += f'<span class="src-sent-ticker">{_esc(item)}</span>'
+                if tickers_html:
+                    sent_html += f'<div class="src-sent-tickers">{tickers_html}</div>'
 
             sent_html += '<div class="src-source-label">r/wallstreetbets, r/stocks</div>'
             sent_html += '</div>'
@@ -2817,6 +2960,9 @@ body {{
   .insight-card.expanded .insight-details {{ padding: 0 16px 16px; }}
   .insights-toolbar {{ flex-direction: column; align-items: flex-start; }}
   .trading-levels {{ flex-direction: column; }}
+  .src-pred-grid {{ grid-template-columns: 1fr; }}
+  .src-breakdown-row {{ grid-template-columns: 70px 1fr 44px; gap: 6px; }}
+  .src-key-levels {{ flex-direction: column; gap: 8px; }}
 }}
 
 /* === ANIMATIONS === */
@@ -2894,6 +3040,257 @@ body {{
   visibility: visible;
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}}
+
+/* === ANALYSIS SOURCES SECTION === */
+.analysis-sources {{
+  margin-top: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.02);
+}}
+.sources-toggle {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.04);
+  border: none;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}}
+.sources-toggle:hover {{
+  background: rgba(255,255,255,0.08);
+}}
+.toggle-chevron {{
+  margin-left: auto;
+  transition: transform 0.3s;
+  font-size: 10px;
+}}
+.analysis-sources.open .toggle-chevron {{
+  transform: rotate(180deg);
+}}
+.sources-content {{
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s;
+  padding: 0 16px;
+}}
+.analysis-sources.open .sources-content {{
+  max-height: 800px;
+  padding: 16px;
+}}
+.src-section {{
+  padding: 14px;
+  margin-bottom: 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
+}}
+.src-section:last-child {{
+  margin-bottom: 0;
+}}
+.src-section-title {{
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #64748b;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}}
+
+/* Technical Analysis */
+.src-ta-header {{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}}
+.src-ta-score {{
+  font-size: 22px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}}
+.src-ta-rating {{
+  font-size: 14px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+}}
+.src-ta-conf {{
+  font-size: 12px;
+  color: #94a3b8;
+}}
+.src-ta-explain {{
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}}
+.src-breakdown {{
+  display: grid;
+  gap: 8px;
+}}
+.src-breakdown-row {{
+  display: grid;
+  grid-template-columns: 90px 1fr 50px;
+  align-items: center;
+  gap: 10px;
+}}
+.src-breakdown-label {{
+  font-size: 12px;
+  color: #94a3b8;
+  text-transform: capitalize;
+}}
+.src-breakdown-track {{
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}}
+.src-breakdown-center {{
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255,255,255,0.15);
+}}
+.src-breakdown-fill {{
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s;
+}}
+.src-breakdown-val {{
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  text-align: right;
+}}
+.src-breakdown-meaning {{
+  font-size: 11px;
+  color: #64748b;
+  grid-column: 1 / -1;
+  margin-top: -4px;
+}}
+.src-key-levels {{
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  flex-wrap: wrap;
+}}
+.src-level {{
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}}
+.src-level-label {{
+  color: #64748b;
+}}
+.src-level-val {{
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}}
+
+/* Prediction Markets */
+.src-pred-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}}
+.src-pred-card {{
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.05);
+}}
+.src-pred-label {{
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+}}
+.src-pred-value {{
+  font-size: 18px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}}
+.src-pred-bar {{
+  height: 4px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}}
+.src-pred-bar-fill {{
+  height: 100%;
+  border-radius: 2px;
+  background: #3b82f6;
+}}
+.src-pred-explain {{
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-top: 4px;
+}}
+.src-source-label {{
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}}
+
+/* Sentiment */
+.src-sent-mood {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}}
+.src-sent-dot {{
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}}
+.src-sent-explain {{
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-bottom: 10px;
+}}
+.src-sent-tickers {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}}
+.src-sent-ticker {{
+  font-size: 11px;
+  padding: 3px 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}}
+.src-sent-mentions {{
+  font-size: 12px;
+  color: #cbd5e1;
+  margin-bottom: 4px;
 }}
 </style>
 </head>
