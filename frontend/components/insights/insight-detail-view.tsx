@@ -19,10 +19,15 @@ import {
   Plus,
   MessageSquare,
   ChevronRight,
+  ChevronDown,
   ArrowLeft,
   Loader2,
   Database,
   Briefcase,
+  BarChart3,
+  Activity,
+  Globe,
+  MessageCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -30,6 +35,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -169,6 +175,313 @@ function InsightDetailsSkeleton() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ============================================
+// Analysis Dimension Helpers
+// ============================================
+
+const TA_RATING_STYLES: Record<string, string> = {
+  'strong buy': 'bg-green-600 text-white',
+  'buy': 'bg-green-500 text-white',
+  'neutral': 'bg-gray-500 text-white',
+  'sell': 'bg-orange-500 text-white',
+  'strong sell': 'bg-red-600 text-white',
+};
+
+function getRatingBadgeClass(rating: string): string {
+  return TA_RATING_STYLES[rating.toLowerCase()] ?? 'bg-gray-500 text-white';
+}
+
+function getMoodBadgeClass(mood: string): string {
+  const lower = mood.toLowerCase();
+  if (lower.includes('bullish')) return 'bg-green-600 text-white';
+  if (lower.includes('bearish')) return 'bg-red-600 text-white';
+  return 'bg-gray-500 text-white';
+}
+
+/** Renders a horizontal bar for a value in [-1, +1] range */
+function SignalBar({ label, value }: { label: string; value: number }) {
+  // Normalize: -1 maps to 0%, 0 maps to 50%, +1 maps to 100%
+  const pct = Math.round((value + 1) * 50);
+  const isPositive = value >= 0;
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-xs text-muted-foreground w-20 shrink-0 capitalize">{label}</span>
+      <div className="flex-1 h-2 rounded-full bg-muted relative overflow-hidden">
+        {/* Center line */}
+        <div className="absolute left-1/2 top-0 h-full w-px bg-muted-foreground/30" />
+        {/* Value bar: grows from center */}
+        <div
+          className={cn(
+            'absolute top-0 h-full rounded-full transition-all',
+            isPositive ? 'bg-green-500' : 'bg-red-500'
+          )}
+          style={
+            isPositive
+              ? { left: '50%', width: `${value * 50}%` }
+              : { left: `${50 + value * 50}%`, width: `${Math.abs(value) * 50}%` }
+          }
+        />
+      </div>
+      <span className={cn('text-xs font-mono w-10 text-right', isPositive ? 'text-green-500' : 'text-red-500')}>
+        {value > 0 ? '+' : ''}{value.toFixed(2)}
+      </span>
+    </div>
+  );
+}
+
+// ============================================
+// Analysis Dimensions Section
+// ============================================
+
+function AnalysisDimensionsSection({ insight }: { insight: DeepInsight }) {
+  const ta = insight.technical_analysis_data;
+  const pred = insight.prediction_market_data;
+  const sent = insight.sentiment_data;
+
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="flex items-center gap-2 w-full py-2 group">
+        <BarChart3 className="h-4 w-4" />
+        <span className="text-sm font-semibold">Analysis Dimensions</span>
+        <ChevronDown className="h-4 w-4 ml-auto transition-transform group-data-[state=open]:rotate-180" />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-5 pt-3">
+        {/* Technical Analysis */}
+        {ta && (
+          <div className="space-y-3">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <Activity className="h-3.5 w-3.5" />
+              Technical Analysis
+            </h4>
+            <div className="rounded-lg border border-border/50 bg-muted/20 p-4 space-y-4">
+              {/* Rating and confidence row */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <Badge className={cn('text-xs px-3 py-1', getRatingBadgeClass(ta.rating))}>
+                  {ta.rating}
+                </Badge>
+                <span className="text-sm text-muted-foreground">
+                  Score: <span className="font-mono font-medium text-foreground">{ta.composite_score.toFixed(2)}</span>
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  Confidence: <span className="font-mono font-medium text-foreground">{Math.round(ta.confidence * 100)}%</span>
+                </span>
+              </div>
+
+              {/* Breakdown bars */}
+              {ta.breakdown && (
+                <div className="space-y-2">
+                  <SignalBar label="Trend" value={ta.breakdown.trend} />
+                  <SignalBar label="Momentum" value={ta.breakdown.momentum} />
+                  <SignalBar label="Volatility" value={ta.breakdown.volatility} />
+                  <SignalBar label="Volume" value={ta.breakdown.volume} />
+                </div>
+              )}
+
+              {/* Support / Resistance levels */}
+              {ta.key_levels && (
+                <div className="flex flex-wrap gap-4 text-xs">
+                  {ta.key_levels.support.length > 0 && (
+                    <div>
+                      <span className="text-muted-foreground">Support: </span>
+                      <span className="font-mono text-green-500">
+                        {ta.key_levels.support.map((l) => l.toLocaleString()).join(', ')}
+                      </span>
+                    </div>
+                  )}
+                  {ta.key_levels.resistance.length > 0 && (
+                    <div>
+                      <span className="text-muted-foreground">Resistance: </span>
+                      <span className="font-mono text-red-500">
+                        {ta.key_levels.resistance.map((l) => l.toLocaleString()).join(', ')}
+                      </span>
+                    </div>
+                  )}
+                  {ta.key_levels.pivot != null && (
+                    <div>
+                      <span className="text-muted-foreground">Pivot: </span>
+                      <span className="font-mono text-foreground">{ta.key_levels.pivot.toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Signals */}
+              {ta.signals && ta.signals.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {ta.signals.map((sig, i) => (
+                    <Badge key={i} variant="outline" className="text-xs">
+                      {sig}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Prediction Markets */}
+        {pred && (
+          <div className="space-y-3">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <Globe className="h-3.5 w-3.5" />
+              Prediction Markets
+            </h4>
+            <div className="rounded-lg border border-border/50 bg-muted/20 p-4 space-y-3">
+              {/* Fed rate probabilities */}
+              {pred.fed_rates?.next_meeting?.probabilities && (
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-xs font-medium text-foreground">Fed Rate Probabilities</span>
+                    {pred.fed_rates.next_meeting.date && (
+                      <span className="text-xs text-muted-foreground">({pred.fed_rates.next_meeting.date})</span>
+                    )}
+                    {pred.fed_rates.source && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">{pred.fed_rates.source}</Badge>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(pred.fed_rates.next_meeting.probabilities).map(([action, prob]) => (
+                      <div key={action} className="flex items-center gap-1.5 text-xs">
+                        <span className="text-muted-foreground capitalize">{action}:</span>
+                        <span className="font-mono font-medium text-foreground">{typeof prob === 'number' ? `${Math.round(prob * 100)}%` : String(prob)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recession probability */}
+              {pred.recession?.probability_2026 != null && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">Recession Probability (2026):</span>
+                  <span className="font-mono font-medium text-foreground">{Math.round(pred.recession.probability_2026 * 100)}%</span>
+                  {pred.recession.source && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{pred.recession.source}</Badge>
+                  )}
+                </div>
+              )}
+
+              {/* Inflation */}
+              {pred.inflation?.cpi_above_3pct != null && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">CPI &gt; 3% Probability:</span>
+                  <span className="font-mono font-medium text-foreground">{Math.round(pred.inflation.cpi_above_3pct * 100)}%</span>
+                  {pred.inflation.source && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{pred.inflation.source}</Badge>
+                  )}
+                </div>
+              )}
+
+              {/* GDP */}
+              {pred.gdp?.q1_positive != null && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-muted-foreground">Q1 GDP Positive:</span>
+                  <span className="font-mono font-medium text-foreground">{Math.round(pred.gdp.q1_positive * 100)}%</span>
+                  {pred.gdp.source && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{pred.gdp.source}</Badge>
+                  )}
+                </div>
+              )}
+
+              {/* S&P 500 targets */}
+              {pred.sp500?.targets && pred.sp500.targets.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-xs font-medium text-foreground">S&P 500 Targets</span>
+                    {pred.sp500.source && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">{pred.sp500.source}</Badge>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {pred.sp500.targets.map((t, i) => (
+                      <div key={i} className="flex items-center gap-1 text-xs rounded-md border border-border/50 bg-background px-2 py-1">
+                        <span className="font-mono font-medium">{t.level.toLocaleString()}</span>
+                        <span className="text-muted-foreground">({Math.round(t.probability * 100)}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Reddit / Social Sentiment */}
+        {sent && (
+          <div className="space-y-3">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <MessageCircle className="h-3.5 w-3.5" />
+              Social Sentiment
+            </h4>
+            <div className="rounded-lg border border-border/50 bg-muted/20 p-4 space-y-3">
+              {/* Overall mood */}
+              {sent.overall_mood && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Overall Mood:</span>
+                  <Badge className={cn('text-xs px-2 py-0.5', getMoodBadgeClass(sent.overall_mood))}>
+                    {sent.overall_mood}
+                  </Badge>
+                </div>
+              )}
+
+              {/* Trending tickers */}
+              {sent.trending && sent.trending.length > 0 && (
+                <div>
+                  <span className="text-xs text-muted-foreground block mb-1.5">Trending Tickers</span>
+                  <div className="flex flex-wrap gap-2">
+                    {sent.trending.map((item, i) => (
+                      <div key={i} className="flex items-center gap-1.5 text-xs rounded-md border border-border/50 bg-background px-2 py-1">
+                        <span className="font-mono font-medium">{item.ticker}</span>
+                        <span className="text-muted-foreground">{item.mentions} mentions</span>
+                        {item.upvotes != null && (
+                          <span className="text-muted-foreground">/ {item.upvotes} upvotes</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Per-symbol sentiment */}
+              {sent.per_symbol && sent.per_symbol.length > 0 && (
+                <div>
+                  <span className="text-xs text-muted-foreground block mb-1.5">Per-Symbol Sentiment</span>
+                  <div className="space-y-1.5">
+                    {sent.per_symbol.map((sym, i) => {
+                      const scoreColor = sym.sentiment_score >= 0.3
+                        ? 'text-green-500'
+                        : sym.sentiment_score <= -0.3
+                          ? 'text-red-500'
+                          : 'text-gray-400';
+                      return (
+                        <div key={i} className="flex items-center gap-3 text-xs">
+                          <span className="font-mono font-medium w-16">{sym.symbol}</span>
+                          <span className={cn('font-mono w-12 text-right', scoreColor)}>
+                            {sym.sentiment_score > 0 ? '+' : ''}{sym.sentiment_score.toFixed(2)}
+                          </span>
+                          <span className="text-muted-foreground">{sym.post_count} posts</span>
+                          {sym.bullish_count != null && sym.bearish_count != null && (
+                            <span className="text-muted-foreground">
+                              (<span className="text-green-500">{sym.bullish_count}</span>
+                              {' / '}
+                              <span className="text-red-500">{sym.bearish_count}</span>)
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -445,6 +758,14 @@ function InsightDetailsPanel({
             context={insight.discovery_context}
             className="border-0 shadow-none p-0"
           />
+        </>
+      )}
+
+      {/* Analysis Dimensions - collapsible section for TA, prediction markets, sentiment */}
+      {(insight.technical_analysis_data || insight.prediction_market_data || insight.sentiment_data) && (
+        <>
+          <Separator />
+          <AnalysisDimensionsSection insight={insight} />
         </>
       )}
 

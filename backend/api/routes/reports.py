@@ -1512,6 +1512,203 @@ def _build_phase_timeline(
     <div class="phase-accordion-list">{items}</div>"""
 
 
+def _build_analysis_sources_html(ins: DeepInsight) -> str:
+    """Build a collapsible Analysis Sources section for an insight card.
+
+    Renders available technical analysis, prediction market, and sentiment
+    data in a compact expandable panel.  Returns an empty string when none
+    of the three data fields are populated.
+    """
+    ta = ins.technical_analysis_data
+    pred = ins.prediction_market_data
+    sent = ins.sentiment_data
+
+    if not ta and not pred and not sent:
+        return ""
+
+    sections: list[str] = []
+
+    # --- Technical Analysis ---
+    if ta and isinstance(ta, dict):
+        score = ta.get("composite_score")
+        rating = ta.get("rating", "")
+        confidence = ta.get("confidence")
+        breakdown = ta.get("breakdown") or {}
+
+        # Score color: green positive, red negative, amber near zero
+        score_val = float(score) if score is not None else 0.0
+        if score_val > 0.2:
+            score_color = "#10B981"
+        elif score_val < -0.2:
+            score_color = "#EF4444"
+        else:
+            score_color = "#F59E0B"
+
+        score_display = f"{score_val:+.2f}" if score is not None else "N/A"
+        rating_display = _esc(str(rating)) if rating else ""
+        conf_display = (
+            f"{int(float(confidence) * 100)}%"
+            if confidence is not None
+            else ""
+        )
+
+        # Breakdown mini-bars (trend, momentum, volatility, volume)
+        breakdown_html = ""
+        breakdown_keys = ["trend", "momentum", "volatility", "volume"]
+        for key in breakdown_keys:
+            val = breakdown.get(key)
+            if val is None:
+                continue
+            bar_val = float(val)
+            # Normalize to 0-100 range (values are typically -1 to 1)
+            bar_pct = min(max(int((bar_val + 1) / 2 * 100), 0), 100)
+            if bar_val > 0.2:
+                bar_color = "#10B981"
+            elif bar_val < -0.2:
+                bar_color = "#EF4444"
+            else:
+                bar_color = "#F59E0B"
+            breakdown_html += (
+                f'<div class="src-breakdown-row">'
+                f'<span class="src-breakdown-label">{_esc(key.title())}</span>'
+                f'<div class="src-breakdown-track">'
+                f'<div class="src-breakdown-fill" style="width:{bar_pct}%;background:{bar_color};"></div>'
+                f'</div>'
+                f'<span class="src-breakdown-val" style="color:{bar_color};">{bar_val:+.2f}</span>'
+                f'</div>'
+            )
+
+        ta_html = (
+            f'<div class="src-section">'
+            f'<div class="src-section-title">Technical Analysis</div>'
+            f'<div class="src-ta-header">'
+            f'<span class="src-ta-score" style="color:{score_color};">{score_display}</span>'
+        )
+        if rating_display:
+            ta_html += f'<span class="src-ta-rating">{rating_display}</span>'
+        if conf_display:
+            ta_html += f'<span class="src-ta-conf">{conf_display} confidence</span>'
+        ta_html += '</div>'
+        if breakdown_html:
+            ta_html += f'<div class="src-breakdown">{breakdown_html}</div>'
+        ta_html += '</div>'
+        sections.append(ta_html)
+
+    # --- Prediction Markets ---
+    if pred and isinstance(pred, dict):
+        highlights: list[str] = []
+
+        fed = pred.get("fed_rates") or pred.get("fed_rate")
+        if isinstance(fed, dict):
+            consensus = fed.get("consensus") or fed.get("next_move")
+            if consensus:
+                highlights.append(
+                    f'<span class="src-pred-item">'
+                    f'<strong>Fed Rate:</strong> {_esc(str(consensus))}'
+                    f'</span>'
+                )
+        elif isinstance(fed, str):
+            highlights.append(
+                f'<span class="src-pred-item">'
+                f'<strong>Fed Rate:</strong> {_esc(fed)}'
+                f'</span>'
+            )
+
+        recession = pred.get("recession")
+        if isinstance(recession, dict):
+            prob = recession.get("probability") or recession.get("consensus")
+            if prob is not None:
+                prob_display = (
+                    f"{int(float(prob) * 100)}%"
+                    if isinstance(prob, (int, float)) and float(prob) <= 1
+                    else str(prob)
+                )
+                highlights.append(
+                    f'<span class="src-pred-item">'
+                    f'<strong>Recession:</strong> {_esc(prob_display)}'
+                    f'</span>'
+                )
+
+        inflation = pred.get("inflation")
+        if isinstance(inflation, dict):
+            expectation = inflation.get("expectation") or inflation.get("consensus")
+            if expectation is not None:
+                highlights.append(
+                    f'<span class="src-pred-item">'
+                    f'<strong>Inflation:</strong> {_esc(str(expectation))}'
+                    f'</span>'
+                )
+
+        if highlights:
+            items_html = "".join(highlights)
+            sections.append(
+                f'<div class="src-section">'
+                f'<div class="src-section-title">Prediction Markets</div>'
+                f'<div class="src-pred-highlights">{items_html}</div>'
+                f'<div class="src-source-label">Kalshi / Polymarket</div>'
+                f'</div>'
+            )
+
+    # --- Reddit Sentiment ---
+    if sent and isinstance(sent, dict):
+        mood_data = sent.get("market_mood") or sent
+        overall_mood = (
+            mood_data.get("overall_mood")
+            or mood_data.get("mood")
+            or sent.get("overall_mood")
+        )
+
+        if overall_mood:
+            mood_str = str(overall_mood).lower()
+            if "bull" in mood_str or "positive" in mood_str or "optimistic" in mood_str:
+                mood_color = "#10B981"
+            elif "bear" in mood_str or "negative" in mood_str or "pessimistic" in mood_str:
+                mood_color = "#EF4444"
+            else:
+                mood_color = "#F59E0B"
+
+            sent_html = (
+                f'<div class="src-section">'
+                f'<div class="src-section-title">Reddit Sentiment</div>'
+                f'<div class="src-sent-mood">'
+                f'<span class="src-sent-dot" style="background:{mood_color};box-shadow:0 0 6px {mood_color};"></span>'
+                f'<span style="color:{mood_color};">{_esc(str(overall_mood).title())}</span>'
+                f'</div>'
+            )
+
+            # Mention count for this insight's symbol
+            trending = sent.get("trending", [])
+            symbol = ins.primary_symbol
+            if symbol and trending:
+                for item in trending:
+                    if isinstance(item, dict) and item.get("symbol", "").upper() == symbol.upper():
+                        mentions = item.get("mentions") or item.get("count")
+                        if mentions is not None:
+                            sent_html += (
+                                f'<div class="src-sent-mentions">'
+                                f'{_esc(symbol)}: {mentions} mentions'
+                                f'</div>'
+                            )
+                        break
+
+            sent_html += '<div class="src-source-label">r/wallstreetbets, r/stocks</div>'
+            sent_html += '</div>'
+            sections.append(sent_html)
+
+    if not sections:
+        return ""
+
+    content = "".join(sections)
+    return (
+        f'<div class="analysis-sources">'
+        f'<button class="sources-toggle" onclick="this.parentElement.classList.toggle(\'open\')">'
+        f'&#128202; Analysis Sources <span class="toggle-chevron">&#9660;</span>'
+        f'</button>'
+        f'<div class="sources-content">{content}</div>'
+        f'</div>'
+    )
+
+
 def _build_insight_card(ins: DeepInsight, index: int) -> str:
     """Build a single interactive insight card with colored left border."""
     action = ins.action or "WATCH"
@@ -1626,6 +1823,9 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
 
     details_html = "".join(details_parts)
 
+    # Collapsible analysis sources (TA, predictions, sentiment)
+    sources_html = _build_analysis_sources_html(ins)
+
     return f"""
     <div class="insight-card" data-index="{index}" data-action="{_esc(action)}"
          data-confidence="{confidence}"
@@ -1653,6 +1853,7 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
       </div>
       <div class="insight-details" id="details-{index}">
         {details_html}
+        {sources_html}
       </div>
     </div>
 """

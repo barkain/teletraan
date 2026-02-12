@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
 from enum import Enum
 
 class InsightAction(str, Enum):
@@ -58,6 +58,11 @@ class DeepInsightResponse(DeepInsightBase):
     stop_loss: Optional[str] = None
     timeframe: Optional[str] = None
     discovery_context: Optional[dict] = None
+
+    # Additional analysis data
+    technical_analysis_data: dict[str, Any] | None = None
+    prediction_market_data: dict[str, Any] | None = None
+    sentiment_data: dict[str, Any] | None = None
 
     class Config:
         from_attributes = True

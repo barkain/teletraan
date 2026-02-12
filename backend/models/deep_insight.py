@@ -136,6 +136,11 @@ class DeepInsight(TimestampMixin, Base):
         nullable=True,
     )  # Macro regime, sector signals, discovery metadata
 
+    # Additional data fields
+    technical_analysis_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    prediction_market_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    sentiment_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
     # Parent insight linking (for follow-up insights derived from conversations)
     parent_insight_id: Mapped[int | None] = mapped_column(
         ForeignKey("deep_insights.id", ondelete="SET NULL"),

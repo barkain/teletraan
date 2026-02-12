@@ -703,6 +703,7 @@ class AutonomousDeepEngine:
                 insights_data,
                 macro_result,
                 heatmap_analysis_result,
+                pre_context=pre_context,
             )
             result.insights = saved_insights
 
@@ -1109,12 +1110,32 @@ class AutonomousDeepEngine:
 
         return "\n".join(lines)
 
+    def _extract_ta_for_symbol(self, symbol: str, context: dict) -> dict | None:
+        """Extract technical analysis data for a symbol from pre-built context."""
+        rich_ta = context.get("rich_technical", {})
+        if not rich_ta or symbol not in rich_ta:
+            return None
+        ta = rich_ta[symbol]
+        # Return the signal_summary which has composite_score, rating, confidence, breakdown, key_levels
+        summary = ta.get("signal_summary")
+        if summary:
+            return {
+                "composite_score": summary.get("composite_score"),
+                "rating": summary.get("rating"),
+                "confidence": summary.get("confidence"),
+                "breakdown": summary.get("breakdown"),
+                "key_levels": summary.get("key_levels"),
+                "signals": summary.get("signals", []),
+            }
+        return None
+
     async def _store_insights_from_heatmap(
         self,
         session: Any,
         insights_data: list[dict[str, Any]],
         macro_result: MacroScanResult,
         heatmap_analysis: HeatmapAnalysis,
+        pre_context: dict[str, Any] | None = None,
     ) -> list[DeepInsight]:
         """Store insights in database with heatmap metadata.
 
@@ -1123,6 +1144,7 @@ class AutonomousDeepEngine:
             insights_data: List of insight dictionaries.
             macro_result: Macro scan results for context.
             heatmap_analysis: Heatmap analysis for context.
+            pre_context: Pre-built market context with rich_technical data.
 
         Returns:
             List of created DeepInsight objects.
@@ -1176,6 +1198,9 @@ class AutonomousDeepEngine:
                     historical_precedent=data.get("historical_precedent"),
                     analysts_involved=data.get("analysts_involved", []),
                     data_sources=data_sources,
+                    prediction_market_data=getattr(self, '_prediction_data', None) or None,
+                    sentiment_data=getattr(self, '_sentiment_data', None) or None,
+                    technical_analysis_data=self._extract_ta_for_symbol(primary_symbol, pre_context) if pre_context and primary_symbol else None,
                 )
 
                 session.add(insight)
@@ -2103,6 +2128,9 @@ class AutonomousDeepEngine:
                     historical_precedent=data.get("historical_precedent"),
                     analysts_involved=data.get("analysts_involved", []),
                     data_sources=data_sources,
+                    prediction_market_data=getattr(self, '_prediction_data', None) or None,
+                    sentiment_data=getattr(self, '_sentiment_data', None) or None,
+                    technical_analysis_data=None,  # No pre_context in legacy pipeline
                 )
 
                 session.add(insight)
