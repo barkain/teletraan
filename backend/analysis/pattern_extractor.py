@@ -55,18 +55,18 @@ Respond in JSON array format.
 ## Example Output Format
 ```json
 [
-  {
+  {{
     "pattern_name": "RSI Oversold Bounce",
     "pattern_type": "TECHNICAL_SETUP",
-    "trigger_conditions": {
+    "trigger_conditions": {{
       "rsi_below": 30,
       "volume_surge_pct": 150,
       "price_at_support": true
-    },
+    }},
     "expected_outcome": "Price rebounds 2-5% within 5 trading days",
     "confidence": 0.7,
     "description": "When RSI drops below 30 with volume surge at key support, expect a short-term bounce."
-  }
+  }}
 ]
 ```
 
@@ -96,16 +96,16 @@ Determine if this insight contains an actionable pattern with:
 
 If a pattern exists, provide:
 ```json
-{
+{{
   "pattern_name": "Short descriptive name",
   "pattern_type": "One of [TECHNICAL_SETUP, MACRO_CORRELATION, SECTOR_ROTATION, EARNINGS_PATTERN, SEASONALITY, CROSS_ASSET]",
-  "trigger_conditions": {
+  "trigger_conditions": {{
     "condition_key": "value"
-  },
+  }},
   "expected_outcome": "What typically happens",
   "confidence": 0.5,
   "description": "Full description of the pattern"
-}
+}}
 ```
 
 If NO clear repeatable pattern exists, respond with:

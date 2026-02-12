@@ -1513,7 +1513,7 @@ def _build_phase_timeline(
 
 
 def _ta_rating_explanation(rating: str) -> str:
-    """Return a plain-English explanation for a technical analysis rating."""
+    """Return a fallback explanation for a technical analysis rating (used only when data-driven explanation unavailable)."""
     explanations = {
         "strong buy": "Multiple technical indicators align bullish — a strong entry signal",
         "buy": "Most indicators lean positive — conditions favor buying",
@@ -1522,6 +1522,75 @@ def _ta_rating_explanation(rating: str) -> str:
         "strong sell": "Multiple indicators align bearish — significant downside risk",
     }
     return explanations.get(rating.lower().strip(), "")
+
+
+def _build_ta_data_driven_explanation(ta: dict) -> str:
+    """Build a data-driven explanation referencing actual TA values."""
+    parts: list[str] = []
+    score = ta.get("composite_score")
+    bd = ta.get("breakdown") or {}
+
+    # Composite score context
+    if score is not None:
+        score_val = float(score)
+        score_abs = abs(score_val)
+        direction = "bullish" if score_val >= 0 else "bearish"
+        strength = "strongly" if score_abs > 0.6 else "moderately" if score_abs > 0.3 else "mildly"
+        parts.append(f"Composite score {score_val:+.2f} — {strength} {direction}")
+
+    if bd:
+        # Identify which dimensions are driving the rating
+        drivers: list[str] = []
+        for key in ("trend", "momentum", "volume"):
+            val = bd.get(key)
+            if val is not None and abs(float(val)) > 0.3:
+                drivers.append(f"{key} at {float(val):+.2f}")
+        if drivers:
+            parts.append(f"Driven by {', '.join(drivers)}")
+
+        # Divergence callouts
+        trend_val = float(bd.get("trend", 0))
+        momentum_val = float(bd.get("momentum", 0))
+        volume_val = float(bd.get("volume", 0))
+        volatility_val = float(bd.get("volatility", 0))
+
+        divergences: list[str] = []
+        if trend_val > 0.2 and momentum_val < -0.2:
+            divergences.append("Trend is positive but momentum is fading — potential reversal risk")
+        elif trend_val < -0.2 and momentum_val > 0.2:
+            divergences.append("Momentum building despite weak trend — watch for breakout")
+        if momentum_val > 0.3 and volume_val < -0.2:
+            divergences.append("Momentum rising on declining volume — move may lack conviction")
+        if volatility_val > 0.5:
+            divergences.append(f"Volatility elevated at {volatility_val:+.2f} — expect outsized moves")
+        if divergences:
+            parts.append(". ".join(divergences))
+
+    return ". ".join(parts) + "." if parts else ""
+
+
+def _build_key_levels_explanation(ta: dict) -> str:
+    """Build contextual explanation for key support/resistance levels."""
+    kl = ta.get("key_levels") or {}
+    support_list = kl.get("support", [])
+    resistance_list = kl.get("resistance", [])
+    parts: list[str] = []
+
+    if isinstance(support_list, list) and support_list:
+        nearest = max(float(s) for s in support_list)
+        parts.append(f"Nearest support at ${nearest:,.2f} — a break below could accelerate selling")
+    if isinstance(resistance_list, list) and resistance_list:
+        nearest = min(float(r) for r in resistance_list)
+        parts.append(f"Nearest resistance at ${nearest:,.2f} — needs a break above for continuation")
+    if support_list and resistance_list:
+        try:
+            rng = min(float(r) for r in resistance_list) - max(float(s) for s in support_list)
+            if rng > 0:
+                parts.append(f"Trading range: ${rng:,.2f} between key support and resistance")
+        except (TypeError, ValueError):
+            pass
+
+    return ". ".join(parts) + "." if parts else ""
 
 
 def _ta_breakdown_meaning(key: str, val: float) -> str:
@@ -1601,8 +1670,10 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
             else ""
         )
 
-        # Rating explanation text
-        explain_text = _ta_rating_explanation(str(rating)) if rating else ""
+        # Data-driven explanation text (falls back to generic if no data)
+        explain_text = _build_ta_data_driven_explanation(ta) or (
+            _ta_rating_explanation(str(rating)) if rating else ""
+        )
 
         # Breakdown mini-bars (trend, momentum, volatility, volume)
         breakdown_html = ""
@@ -1652,26 +1723,50 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
         if breakdown_html:
             ta_html += f'<div class="src-breakdown">{breakdown_html}</div>'
 
-        # Key levels: support and resistance
-        support = ta.get("support")
-        resistance = ta.get("resistance")
-        if support is not None or resistance is not None:
+        # Key levels: support and resistance (handle both flat and nested key_levels format)
+        key_levels = ta.get("key_levels") or {}
+        support_list = key_levels.get("support", []) if isinstance(key_levels, dict) else []
+        resistance_list = key_levels.get("resistance", []) if isinstance(key_levels, dict) else []
+        pivot_val = key_levels.get("pivot") if isinstance(key_levels, dict) else None
+        # Fallback to flat keys for older data format
+        flat_support = ta.get("support")
+        flat_resistance = ta.get("resistance")
+        if not support_list and flat_support is not None:
+            support_list = [flat_support]
+        if not resistance_list and flat_resistance is not None:
+            resistance_list = [flat_resistance]
+
+        if support_list or resistance_list:
             ta_html += '<div class="src-key-levels">'
-            if support is not None:
+            if support_list:
+                support_strs = ", ".join(f"${float(s):,.2f}" for s in support_list)
                 ta_html += (
                     f'<span class="src-level">'
                     f'<span class="src-level-label">Support (floor):</span>'
-                    f'<span class="src-level-val" style="color:#10B981;">${float(support):,.2f}</span>'
+                    f'<span class="src-level-val" style="color:#10B981;">{support_strs}</span>'
                     f'</span>'
                 )
-            if resistance is not None:
+            if resistance_list:
+                resistance_strs = ", ".join(f"${float(r):,.2f}" for r in resistance_list)
                 ta_html += (
                     f'<span class="src-level">'
                     f'<span class="src-level-label">Resistance (ceiling):</span>'
-                    f'<span class="src-level-val" style="color:#EF4444;">${float(resistance):,.2f}</span>'
+                    f'<span class="src-level-val" style="color:#EF4444;">{resistance_strs}</span>'
+                    f'</span>'
+                )
+            if pivot_val is not None:
+                ta_html += (
+                    f'<span class="src-level">'
+                    f'<span class="src-level-label">Pivot:</span>'
+                    f'<span class="src-level-val">${float(pivot_val):,.2f}</span>'
                     f'</span>'
                 )
             ta_html += '</div>'
+
+            # Contextual key levels explanation
+            levels_explain = _build_key_levels_explanation(ta)
+            if levels_explain:
+                ta_html += f'<div class="src-ta-explain" style="margin-top:6px;">{_esc(levels_explain)}</div>'
 
         ta_html += '</div>'
         sections.append(ta_html)
@@ -1679,41 +1774,120 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
     # --- Prediction Markets ---
     if pred and isinstance(pred, dict):
         cards: list[str] = []
+        available_sources: list[str] = []
 
+        # Fed rate probabilities (handle both old flat and new nested format)
         fed = pred.get("fed_rates") or pred.get("fed_rate")
         if isinstance(fed, dict):
-            consensus = fed.get("consensus") or fed.get("next_move")
-            prob = fed.get("probability")
-            if consensus:
-                prob_pct = ""
-                explain = ""
-                if prob is not None:
-                    pval = float(prob) if isinstance(prob, (int, float)) and float(prob) <= 1 else None
-                    if pval is not None:
-                        prob_pct = f"{int(pval * 100)}%"
-                        explain = f"{prob_pct} chance the Fed cuts rates by 25 basis points at the next meeting"
+            next_meeting = fed.get("next_meeting") or {}
+            probabilities = next_meeting.get("probabilities") if isinstance(next_meeting, dict) else None
+            fed_source = fed.get("source", "")
+            meeting_date = next_meeting.get("date", "") if isinstance(next_meeting, dict) else ""
+
+            if probabilities and isinstance(probabilities, dict):
+                # New format: multiple probability entries
+                available_sources.append("Fed rate probabilities")
+                for action_name, prob_val in probabilities.items():
+                    if prob_val is None:
+                        continue
+                    pval = float(prob_val)
+                    pct = int(pval * 100) if pval <= 1 else int(pval)
+                    bar_w = min(max(pct, 0), 100)
+                    action_lower = action_name.lower()
+                    # Color: rate cuts green (easing), hikes red (tightening), hold amber
+                    if "cut" in action_lower:
+                        val_color = "#10B981"
+                    elif "hike" in action_lower or "raise" in action_lower:
+                        val_color = "#EF4444"
                     else:
-                        prob_pct = str(prob)
-                display_val = prob_pct if prob_pct else _esc(str(consensus))
-                card_html = (
-                    f'<div class="src-pred-card">'
-                    f'<div class="src-pred-label">Fed Rate</div>'
-                    f'<div class="src-pred-value" style="color:#3b82f6;">{display_val}</div>'
-                )
-                if prob_pct and isinstance(prob, (int, float)) and float(prob) <= 1:
-                    bar_w = int(float(prob) * 100)
-                    card_html += (
-                        f'<div class="src-pred-bar">'
-                        f'<div class="src-pred-bar-fill" style="width:{bar_w}%;"></div>'
+                        val_color = "#F59E0B"
+
+                    # Data-driven explanation for each probability
+                    if "cut" in action_lower:
+                        if pct < 5:
+                            explain = f"Markets see almost no chance of a rate cut ({pct}%)"
+                        elif pct < 30:
+                            explain = f"Rate cut unlikely at {pct}% — not priced in"
+                        elif pct < 60:
+                            explain = f"Moderate {pct}% chance of a rate cut — markets uncertain"
+                        else:
+                            explain = f"Markets pricing in a rate cut at {pct}%"
+                    elif "hike" in action_lower or "raise" in action_lower:
+                        if pct < 5:
+                            explain = f"Rate hike virtually ruled out at {pct}%"
+                        elif pct < 30:
+                            explain = f"Small {pct}% chance of a rate hike — unlikely but not zero"
+                        else:
+                            explain = f"Rate hike probability at {pct}% — tightening risk"
+                    elif "hold" in action_lower or "no change" in action_lower or "unchanged" in action_lower:
+                        if pct > 80:
+                            explain = f"Markets overwhelmingly ({pct}%) expect rates unchanged"
+                        elif pct > 50:
+                            explain = f"Rates likely unchanged at {pct}% — base case is hold"
+                        else:
+                            explain = f"Hold probability at {pct}% — mixed expectations"
+                    else:
+                        explain = f"{pct}% probability"
+
+                    source_label = f" ({_esc(fed_source)})" if fed_source else ""
+                    card_html = (
+                        f'<div class="src-pred-card">'
+                        f'<div class="src-pred-label">{_esc(action_name)}{source_label}</div>'
+                        f'<div class="src-pred-value" style="color:{val_color};">{pct}%</div>'
+                    )
+                    if bar_w > 0:
+                        card_html += (
+                            f'<div class="src-pred-bar">'
+                            f'<div class="src-pred-bar-fill" style="width:{bar_w}%;background:{val_color};"></div>'
+                            f'</div>'
+                        )
+                    card_html += f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                    card_html += '</div>'
+                    cards.append(card_html)
+
+                if meeting_date:
+                    cards.append(
+                        f'<div class="src-pred-card" style="opacity:0.7;">'
+                        f'<div class="src-pred-label">Next FOMC Meeting</div>'
+                        f'<div class="src-pred-value" style="color:#94a3b8;font-size:0.85em;">{_esc(meeting_date)}</div>'
                         f'</div>'
                     )
-                if explain:
-                    card_html += f'<div class="src-pred-explain">{_esc(explain)}</div>'
-                elif consensus:
-                    card_html += f'<div class="src-pred-explain">{_esc(str(consensus))}</div>'
-                card_html += '</div>'
-                cards.append(card_html)
+            else:
+                # Old format: single consensus value
+                consensus = fed.get("consensus") or fed.get("next_move")
+                prob = fed.get("probability")
+                if consensus:
+                    available_sources.append("Fed rate outlook")
+                    prob_pct = ""
+                    explain = ""
+                    if prob is not None:
+                        pval = float(prob) if isinstance(prob, (int, float)) and float(prob) <= 1 else None
+                        if pval is not None:
+                            prob_pct = f"{int(pval * 100)}%"
+                            explain = f"{prob_pct} chance the Fed cuts rates by 25bp at the next meeting"
+                        else:
+                            prob_pct = str(prob)
+                    display_val = prob_pct if prob_pct else _esc(str(consensus))
+                    card_html = (
+                        f'<div class="src-pred-card">'
+                        f'<div class="src-pred-label">Fed Rate</div>'
+                        f'<div class="src-pred-value" style="color:#3b82f6;">{display_val}</div>'
+                    )
+                    if prob_pct and isinstance(prob, (int, float)) and float(prob) <= 1:
+                        bar_w = int(float(prob) * 100)
+                        card_html += (
+                            f'<div class="src-pred-bar">'
+                            f'<div class="src-pred-bar-fill" style="width:{bar_w}%;"></div>'
+                            f'</div>'
+                        )
+                    if explain:
+                        card_html += f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                    elif consensus:
+                        card_html += f'<div class="src-pred-explain">{_esc(str(consensus))}</div>'
+                    card_html += '</div>'
+                    cards.append(card_html)
         elif isinstance(fed, str):
+            available_sources.append("Fed rate outlook")
             cards.append(
                 f'<div class="src-pred-card">'
                 f'<div class="src-pred-label">Fed Rate</div>'
@@ -1721,23 +1895,33 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
                 f'</div>'
             )
 
+        # Recession probability (handle both old and new format)
         recession = pred.get("recession")
         if isinstance(recession, dict):
-            prob = recession.get("probability") or recession.get("consensus")
+            prob = recession.get("probability_2026") or recession.get("probability") or recession.get("consensus")
+            rec_source = recession.get("source", "")
             if prob is not None:
+                available_sources.append("recession risk")
                 if isinstance(prob, (int, float)) and float(prob) <= 1:
                     pct_val = int(float(prob) * 100)
                     prob_display = f"{pct_val}%"
-                    explain = f"{prob_display} probability of recession in 2026 according to prediction markets"
                     bar_w = pct_val
+                    # Data-driven explanation
+                    if pct_val > 50:
+                        explain = f"At {pct_val}%, markets see recession as more likely than not — risk-off positioning may be warranted"
+                    elif pct_val > 25:
+                        explain = f"At {pct_val}%, recession risk is elevated but not the base case — monitor leading indicators"
+                    else:
+                        explain = f"At {pct_val}%, markets see low recession probability — supportive of risk assets"
                 else:
                     prob_display = str(prob)
                     explain = ""
                     bar_w = 0
                 rec_color = "#EF4444" if bar_w > 50 else "#F59E0B" if bar_w > 25 else "#10B981"
+                source_label = f" ({_esc(rec_source)})" if rec_source else ""
                 card_html = (
                     f'<div class="src-pred-card">'
-                    f'<div class="src-pred-label">Recession</div>'
+                    f'<div class="src-pred-label">Recession Risk{source_label}</div>'
                     f'<div class="src-pred-value" style="color:{rec_color};">{_esc(prob_display)}</div>'
                 )
                 if bar_w > 0:
@@ -1751,10 +1935,34 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
                 card_html += '</div>'
                 cards.append(card_html)
 
+        # Inflation (handle both old and new format)
         inflation = pred.get("inflation")
         if isinstance(inflation, dict):
+            cpi_prob = inflation.get("cpi_above_3pct")
+            inf_source = inflation.get("source", "")
             expectation = inflation.get("expectation") or inflation.get("consensus")
-            if expectation is not None:
+
+            if cpi_prob is not None:
+                available_sources.append("inflation expectations")
+                pct_val = int(float(cpi_prob) * 100)
+                inf_color = "#EF4444" if pct_val > 50 else "#F59E0B" if pct_val > 25 else "#10B981"
+                if pct_val > 50:
+                    explain = f"{pct_val}% probability of CPI above 3% — persistent inflation may delay rate cuts"
+                else:
+                    explain = f"{pct_val}% probability of CPI above 3% — disinflation trend likely intact"
+                source_label = f" ({_esc(inf_source)})" if inf_source else ""
+                cards.append(
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">Inflation &gt;3%{source_label}</div>'
+                    f'<div class="src-pred-value" style="color:{inf_color};">{pct_val}%</div>'
+                    f'<div class="src-pred-bar">'
+                    f'<div class="src-pred-bar-fill" style="width:{pct_val}%;background:{inf_color};"></div>'
+                    f'</div>'
+                    f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                    f'</div>'
+                )
+            elif expectation is not None:
+                available_sources.append("inflation expectations")
                 exp_str = str(expectation)
                 explain = f"Market expects inflation around {exp_str}"
                 cards.append(
@@ -1765,13 +1973,78 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
                     f'</div>'
                 )
 
+        # GDP outlook
+        gdp = pred.get("gdp")
+        if isinstance(gdp, dict):
+            q1_prob = gdp.get("q1_positive")
+            gdp_source = gdp.get("source", "")
+            if q1_prob is not None:
+                available_sources.append("GDP outlook")
+                pct_val = int(float(q1_prob) * 100)
+                gdp_color = "#10B981" if pct_val > 70 else "#F59E0B" if pct_val > 40 else "#EF4444"
+                if pct_val > 70:
+                    explain = f"{pct_val}% chance of positive Q1 GDP — strong growth expectations support equities"
+                elif pct_val > 40:
+                    explain = f"{pct_val}% chance of positive Q1 GDP — growth outlook uncertain"
+                else:
+                    explain = f"Only {pct_val}% chance of positive Q1 GDP — contraction fears elevated"
+                source_label = f" ({_esc(gdp_source)})" if gdp_source else ""
+                cards.append(
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">Q1 GDP Growth{source_label}</div>'
+                    f'<div class="src-pred-value" style="color:{gdp_color};">{pct_val}%</div>'
+                    f'<div class="src-pred-bar">'
+                    f'<div class="src-pred-bar-fill" style="width:{pct_val}%;background:{gdp_color};"></div>'
+                    f'</div>'
+                    f'<div class="src-pred-explain">{_esc(explain)}</div>'
+                    f'</div>'
+                )
+
+        # S&P 500 targets
+        sp500 = pred.get("sp500")
+        if isinstance(sp500, dict):
+            targets = sp500.get("targets", [])
+            sp_source = sp500.get("source", "")
+            if targets and isinstance(targets, list):
+                available_sources.append("S&P 500 targets")
+                targets_html = ""
+                for t in targets:
+                    if isinstance(t, dict):
+                        level = t.get("level", 0)
+                        t_prob = t.get("probability", 0)
+                        targets_html += (
+                            f'<span style="display:inline-block;margin:2px 6px 2px 0;padding:3px 10px;'
+                            f'border:1px solid rgba(255,255,255,0.1);border-radius:6px;font-size:0.85em;">'
+                            f'<strong>{int(level):,}</strong> '
+                            f'<span style="opacity:0.7;">({int(float(t_prob)*100)}%)</span>'
+                            f'</span>'
+                        )
+                source_label = f" ({_esc(sp_source)})" if sp_source else ""
+                cards.append(
+                    f'<div class="src-pred-card">'
+                    f'<div class="src-pred-label">S&amp;P 500 Targets{source_label}</div>'
+                    f'<div style="margin-top:4px;">{targets_html}</div>'
+                    f'</div>'
+                )
+
         if cards:
             grid_html = "".join(cards)
+            # Data sparsity note
+            all_possible = ["Fed rate probabilities", "recession risk", "inflation expectations", "GDP outlook", "S&P 500 targets"]
+            missing = [s for s in all_possible if s not in available_sources]
+            sparsity_note = ""
+            if missing and len(missing) < len(all_possible):
+                sparsity_note = (
+                    f'<div class="src-source-label" style="opacity:0.6;font-style:italic;">'
+                    f'Limited data — missing: {_esc(", ".join(missing))}'
+                    f'</div>'
+                )
             sections.append(
                 f'<div class="src-section">'
                 f'<div class="src-section-title">Prediction Markets</div>'
                 f'<div class="src-pred-grid">{grid_html}</div>'
                 f'<div class="src-source-label">Kalshi / Polymarket</div>'
+                f'{sparsity_note}'
                 f'</div>'
             )
 
@@ -1783,18 +2056,59 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
             or mood_data.get("mood")
             or sent.get("overall_mood")
         )
+        per_symbol = sent.get("per_symbol", [])
+        trending = sent.get("trending", [])
+
+        # Build data-driven explanation
+        mood_explain_parts: list[str] = []
 
         if overall_mood:
             mood_str = str(overall_mood).lower()
             if "bull" in mood_str or "positive" in mood_str or "optimistic" in mood_str:
                 mood_color = "#10B981"
-                mood_explain = "Retail traders are feeling optimistic — social sentiment skews bullish"
             elif "bear" in mood_str or "negative" in mood_str or "pessimistic" in mood_str:
                 mood_color = "#EF4444"
-                mood_explain = "Retail traders are cautious — social sentiment skews bearish"
             else:
                 mood_color = "#F59E0B"
-                mood_explain = "Retail sentiment is mixed — no strong directional bias from social channels"
+
+            # Per-symbol data summary
+            if per_symbol and isinstance(per_symbol, list):
+                total_posts = sum(int(s.get("post_count", 0)) for s in per_symbol if isinstance(s, dict))
+                bullish_syms = [s.get("symbol", "?") for s in per_symbol if isinstance(s, dict) and float(s.get("sentiment_score", 0)) > 0.2]
+                bearish_syms = [s.get("symbol", "?") for s in per_symbol if isinstance(s, dict) and float(s.get("sentiment_score", 0)) < -0.2]
+                mood_explain_parts.append(f"{total_posts} posts analyzed across {len(per_symbol)} symbols")
+                if bullish_syms:
+                    mood_explain_parts.append(f"Bullish on: {', '.join(bullish_syms)}")
+                if bearish_syms:
+                    mood_explain_parts.append(f"Bearish on: {', '.join(bearish_syms)}")
+            elif "bull" in mood_str:
+                mood_explain_parts.append("Social sentiment skews bullish across monitored subreddits")
+            elif "bear" in mood_str:
+                mood_explain_parts.append("Social sentiment skews bearish across monitored subreddits")
+            else:
+                mood_explain_parts.append("Mixed opinions across trading communities — no strong directional bias")
+
+            # Trending summary
+            if trending and isinstance(trending, list):
+                total_mentions = sum(int(item.get("mentions", 0)) for item in trending if isinstance(item, dict))
+                mood_explain_parts.append(f"{total_mentions} total mentions across {len(trending)} trending tickers")
+
+            # Divergence callout: sentiment vs technicals
+            if ta and isinstance(ta, dict):
+                bd = ta.get("breakdown") or {}
+                trend_val = float(bd.get("trend", 0))
+                if "bull" in mood_str and trend_val < -0.2:
+                    mood_explain_parts.append(
+                        "Note: Reddit sentiment is bullish but technical trend is negative "
+                        "— retail traders may be lagging a deteriorating setup"
+                    )
+                elif "bear" in mood_str and trend_val > 0.2:
+                    mood_explain_parts.append(
+                        "Note: Reddit sentiment is bearish despite positive technical trend "
+                        "— contrarian signal worth monitoring"
+                    )
+
+            mood_explain = ". ".join(mood_explain_parts) + "." if mood_explain_parts else ""
 
             sent_html = (
                 f'<div class="src-section">'
@@ -1803,40 +2117,103 @@ def _build_analysis_sources_html(ins: DeepInsight) -> str:
                 f'<span class="src-sent-dot" style="background:{mood_color};box-shadow:0 0 6px {mood_color};"></span>'
                 f'<span style="color:{mood_color};">{_esc(str(overall_mood).title())}</span>'
                 f'</div>'
-                f'<div class="src-sent-explain">{_esc(mood_explain)}</div>'
             )
+            if mood_explain:
+                sent_html += f'<div class="src-sent-explain">{_esc(mood_explain)}</div>'
 
-            # Mention count for this insight's symbol
-            trending = sent.get("trending", [])
+            # Mention count for this insight's primary symbol with rank
             symbol = ins.primary_symbol
             if symbol and trending:
-                for item in trending:
-                    if isinstance(item, dict) and item.get("symbol", "").upper() == symbol.upper():
+                # Sort by mentions to find rank
+                sorted_trending = sorted(
+                    [item for item in trending if isinstance(item, dict)],
+                    key=lambda x: int(x.get("mentions", 0)),
+                    reverse=True,
+                )
+                for rank, item in enumerate(sorted_trending, 1):
+                    ticker = item.get("ticker", item.get("symbol", "")).upper()
+                    if ticker == symbol.upper():
                         mentions = item.get("mentions") or item.get("count")
+                        upvotes = item.get("upvotes")
                         if mentions is not None:
+                            rank_text = f", ranked #{rank} trending" if len(sorted_trending) > 1 else ""
+                            upvote_text = f", {upvotes} upvotes" if upvotes else ""
                             sent_html += (
                                 f'<div class="src-sent-mentions">'
-                                f'{_esc(symbol)}: {mentions} mentions'
+                                f'{_esc(symbol)}: {mentions} mentions{upvote_text}{rank_text}'
                                 f'</div>'
                             )
                         break
+
+            # Per-symbol sentiment bars
+            if per_symbol and isinstance(per_symbol, list):
+                sym_items_html = ""
+                for sym_data in per_symbol[:6]:
+                    if not isinstance(sym_data, dict):
+                        continue
+                    sym_name = sym_data.get("symbol", "?")
+                    score = float(sym_data.get("sentiment_score", 0))
+                    post_count = int(sym_data.get("post_count", 0))
+                    bull_count = sym_data.get("bullish_count")
+                    bear_count = sym_data.get("bearish_count")
+                    bar_pct = min(int(abs(score) * 100), 100)
+                    bar_color = "#10B981" if score >= 0.3 else "#EF4444" if score <= -0.3 else "#94a3b8"
+                    label = "Bullish" if score >= 0.3 else "Bearish" if score <= -0.3 else "Neutral"
+
+                    detail_text = f"{post_count} posts"
+                    if bull_count is not None and bear_count is not None:
+                        detail_text += f" ({bull_count} bull / {bear_count} bear)"
+
+                    sym_items_html += (
+                        f'<div style="display:flex;align-items:center;gap:8px;margin:4px 0;font-size:0.8em;">'
+                        f'<span style="font-family:monospace;font-weight:600;width:50px;">{_esc(sym_name)}</span>'
+                        f'<div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">'
+                        f'<div style="height:100%;width:{bar_pct}%;background:{bar_color};border-radius:3px;"></div>'
+                        f'</div>'
+                        f'<span style="color:{bar_color};font-size:0.9em;width:50px;text-align:right;">{label}</span>'
+                        f'<span style="opacity:0.6;font-size:0.85em;">{detail_text}</span>'
+                        f'</div>'
+                    )
+                if sym_items_html:
+                    sent_html += (
+                        f'<div style="margin-top:8px;">'
+                        f'<div style="font-size:0.75em;opacity:0.7;margin-bottom:4px;">Sentiment by Symbol</div>'
+                        f'{sym_items_html}'
+                        f'</div>'
+                    )
 
             # Trending tickers as chips
             if trending:
                 tickers_html = ""
                 for item in trending[:8]:
                     if isinstance(item, dict):
-                        sym = item.get("symbol", "")
+                        sym = item.get("ticker", item.get("symbol", ""))
+                        mentions = item.get("mentions")
                         if sym:
-                            tickers_html += f'<span class="src-sent-ticker">{_esc(sym)}</span>'
+                            mention_text = f" ({mentions})" if mentions else ""
+                            tickers_html += f'<span class="src-sent-ticker">{_esc(sym)}{mention_text}</span>'
                     elif isinstance(item, str):
                         tickers_html += f'<span class="src-sent-ticker">{_esc(item)}</span>'
                 if tickers_html:
                     sent_html += f'<div class="src-sent-tickers">{tickers_html}</div>'
 
-            sent_html += '<div class="src-source-label">r/wallstreetbets, r/stocks</div>'
+            sent_html += (
+                '<div class="src-source-label">'
+                'r/wallstreetbets, r/stocks, r/investing. '
+                'Sentiment can lag institutional positioning by hours to days.'
+                '</div>'
+            )
             sent_html += '</div>'
             sections.append(sent_html)
+        elif not overall_mood and not trending and not per_symbol:
+            sections.append(
+                '<div class="src-section">'
+                '<div class="src-section-title">Reddit Sentiment</div>'
+                '<div class="src-sent-explain" style="font-style:italic;opacity:0.7;">'
+                'No sentiment data available — social media monitoring did not return data for this analysis period.'
+                '</div>'
+                '</div>'
+            )
 
     if not sections:
         return ""

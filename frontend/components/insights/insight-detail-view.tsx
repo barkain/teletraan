@@ -198,14 +198,81 @@ const TA_RATING_STYLES: Record<string, string> = {
   'strong sell': 'bg-red-600 text-white',
 };
 
-/** Plain-English explanations for the overall composite rating */
-const RATING_EXPLANATIONS: Record<string, string> = {
-  'strong buy': 'Strong bullish signal -- multiple indicators align upward',
-  'buy': 'Moderately bullish -- more indicators point up than down',
-  'neutral': 'Mixed signals -- no clear direction from indicators',
-  'sell': 'Moderately bearish -- more indicators point down than up',
-  'strong sell': 'Strong bearish signal -- multiple indicators align downward',
-};
+/** Build a data-driven explanation referencing actual TA values */
+function buildTARatingExplanation(ta: NonNullable<DeepInsight['technical_analysis_data']>): string {
+  const parts: string[] = [];
+  const score = ta.composite_score;
+  const bd = ta.breakdown;
+
+  // Composite score context
+  if (score != null) {
+    const scoreAbs = Math.abs(score);
+    const direction = score >= 0 ? 'bullish' : 'bearish';
+    const strength = scoreAbs > 0.6 ? 'strongly' : scoreAbs > 0.3 ? 'moderately' : 'mildly';
+    parts.push(`Composite score ${score >= 0 ? '+' : ''}${score.toFixed(2)} -- ${strength} ${direction}`);
+  }
+
+  if (bd) {
+    // Identify which dimensions are driving the rating
+    const drivers: string[] = [];
+    if (Math.abs(bd.trend) > 0.3) {
+      drivers.push(`trend at ${bd.trend >= 0 ? '+' : ''}${bd.trend.toFixed(2)}`);
+    }
+    if (Math.abs(bd.momentum) > 0.3) {
+      drivers.push(`momentum at ${bd.momentum >= 0 ? '+' : ''}${bd.momentum.toFixed(2)}`);
+    }
+    if (Math.abs(bd.volume) > 0.3) {
+      drivers.push(`volume at ${bd.volume >= 0 ? '+' : ''}${bd.volume.toFixed(2)}`);
+    }
+    if (drivers.length > 0) {
+      parts.push(`Driven by ${drivers.join(', ')}`);
+    }
+
+    // Divergence callouts -- when indicators disagree
+    const divergences: string[] = [];
+    if (bd.trend > 0.2 && bd.momentum < -0.2) {
+      divergences.push('Trend is positive but momentum is fading -- potential reversal risk');
+    } else if (bd.trend < -0.2 && bd.momentum > 0.2) {
+      divergences.push('Momentum is building despite weak trend -- watch for breakout');
+    }
+    if (bd.momentum > 0.3 && bd.volume < -0.2) {
+      divergences.push('Momentum rising on declining volume -- move may lack conviction');
+    }
+    if (bd.volatility > 0.5) {
+      divergences.push(`Volatility elevated at ${bd.volatility >= 0 ? '+' : ''}${bd.volatility.toFixed(2)} -- expect outsized moves`);
+    }
+    if (divergences.length > 0) {
+      parts.push(divergences.join('. '));
+    }
+  }
+
+  return parts.length > 0 ? parts.join('. ') + '.' : 'Technical indicators have been evaluated.';
+}
+
+/** Build contextual key-levels explanation referencing actual prices */
+function buildKeyLevelsExplanation(
+  ta: NonNullable<DeepInsight['technical_analysis_data']>,
+): string | null {
+  const kl = ta.key_levels;
+  if (!kl) return null;
+
+  const parts: string[] = [];
+  if (kl.support.length > 0) {
+    const nearest = Math.max(...kl.support);
+    parts.push(`Nearest support at $${nearest.toLocaleString()} -- a break below could accelerate selling`);
+  }
+  if (kl.resistance.length > 0) {
+    const nearest = Math.min(...kl.resistance);
+    parts.push(`Nearest resistance at $${nearest.toLocaleString()} -- needs a break above for continuation`);
+  }
+  if (kl.pivot != null && kl.support.length > 0 && kl.resistance.length > 0) {
+    const range = Math.min(...kl.resistance) - Math.max(...kl.support);
+    if (range > 0) {
+      parts.push(`Trading range: $${range.toLocaleString()} between key support and resistance`);
+    }
+  }
+  return parts.length > 0 ? parts.join('. ') + '.' : null;
+}
 
 /** Map a breakdown value (-1..+1) to a human-readable label, arrow, and explanation */
 function describeBreakdownValue(
@@ -287,13 +354,52 @@ function getMoodEmoji(mood: string): string {
   return '⚪';
 }
 
-function getMoodExplanation(mood: string): string {
+/** Build a data-driven sentiment explanation from actual data */
+function buildSentimentExplanation(
+  sent: NonNullable<DeepInsight['sentiment_data']>,
+  ta: DeepInsight['technical_analysis_data'],
+): string {
+  const parts: string[] = [];
+  const mood = sent.overall_mood ?? '';
   const lower = mood.toLowerCase();
-  if (lower.includes('very bullish')) return 'Reddit communities are very optimistic about the market';
-  if (lower.includes('bullish')) return 'Social sentiment is generally positive';
-  if (lower.includes('very bearish')) return 'Reddit communities are highly pessimistic';
-  if (lower.includes('bearish')) return 'Social sentiment is cautious';
-  return 'Mixed opinions across trading communities';
+
+  // Per-symbol data summary
+  if (sent.per_symbol && sent.per_symbol.length > 0) {
+    const totalPosts = sent.per_symbol.reduce((sum, s) => sum + s.post_count, 0);
+    const bullishSymbols = sent.per_symbol.filter((s) => s.sentiment_score > 0.2);
+    const bearishSymbols = sent.per_symbol.filter((s) => s.sentiment_score < -0.2);
+    parts.push(`${totalPosts} posts analyzed across ${sent.per_symbol.length} symbols`);
+    if (bullishSymbols.length > 0) {
+      parts.push(`Bullish on: ${bullishSymbols.map((s) => s.symbol).join(', ')}`);
+    }
+    if (bearishSymbols.length > 0) {
+      parts.push(`Bearish on: ${bearishSymbols.map((s) => s.symbol).join(', ')}`);
+    }
+  } else if (lower.includes('bullish')) {
+    parts.push('Social sentiment skews bullish across monitored subreddits');
+  } else if (lower.includes('bearish')) {
+    parts.push('Social sentiment skews bearish across monitored subreddits');
+  } else {
+    parts.push('Mixed opinions across trading communities -- no strong directional bias');
+  }
+
+  // Trending summary
+  if (sent.trending && sent.trending.length > 0) {
+    const totalMentions = sent.trending.reduce((sum, t) => sum + t.mentions, 0);
+    parts.push(`${totalMentions} total mentions across ${sent.trending.length} trending tickers`);
+  }
+
+  // Divergence callout: sentiment vs technicals
+  if (ta?.breakdown) {
+    const trendSignal = ta.breakdown.trend;
+    if (lower.includes('bullish') && trendSignal < -0.2) {
+      parts.push('Note: Reddit sentiment is bullish but technical trend is negative -- retail traders may be lagging a deteriorating setup');
+    } else if (lower.includes('bearish') && trendSignal > 0.2) {
+      parts.push('Note: Reddit sentiment is bearish despite positive technical trend -- contrarian signal worth monitoring');
+    }
+  }
+
+  return parts.length > 0 ? parts.join('. ') + '.' : 'No detailed sentiment data available.';
 }
 
 /** Normalize a -1..+1 value to 0..1 for the radar chart */
@@ -484,8 +590,9 @@ function AnalysisDimensionsSection({ insight }: { insight: DeepInsight }) {
   if (!ta && !pred && !sent) return null;
 
   const ratingExplanation = ta
-    ? RATING_EXPLANATIONS[ta.rating.toLowerCase()] ?? 'Technical indicators have been evaluated'
+    ? buildTARatingExplanation(ta)
     : '';
+  const keyLevelsExplanation = ta ? buildKeyLevelsExplanation(ta) : null;
 
   return (
     <Collapsible>
@@ -588,6 +695,9 @@ function AnalysisDimensionsSection({ insight }: { insight: DeepInsight }) {
                       </Tooltip>
                     )}
                   </div>
+                  {keyLevelsExplanation && (
+                    <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{keyLevelsExplanation}</p>
+                  )}
                 </div>
               )}
 
@@ -649,29 +759,54 @@ function AnalysisDimensionsSection({ insight }: { insight: DeepInsight }) {
 
               {/* Recession probability */}
               {pred.recession?.probability_2026 != null && (
-                <ProbabilityBar
-                  label="Recession Risk (2026)"
-                  probability={pred.recession.probability_2026}
-                  source={pred.recession.source}
-                />
+                <div className="space-y-1">
+                  <ProbabilityBar
+                    label="Recession Risk (2026)"
+                    probability={pred.recession.probability_2026}
+                    source={pred.recession.source}
+                  />
+                  <p className="text-xs text-muted-foreground pl-1">
+                    {pred.recession.probability_2026 > 0.5
+                      ? `At ${Math.round(pred.recession.probability_2026 * 100)}%, markets see recession as more likely than not -- risk-off positioning may be warranted`
+                      : pred.recession.probability_2026 > 0.25
+                        ? `At ${Math.round(pred.recession.probability_2026 * 100)}%, recession risk is elevated but not the base case -- monitor leading indicators`
+                        : `At ${Math.round(pred.recession.probability_2026 * 100)}%, markets see low recession probability -- supportive of risk assets`}
+                  </p>
+                </div>
               )}
 
               {/* Inflation */}
               {pred.inflation?.cpi_above_3pct != null && (
-                <ProbabilityBar
-                  label="Inflation above 3%"
-                  probability={pred.inflation.cpi_above_3pct}
-                  source={pred.inflation.source}
-                />
+                <div className="space-y-1">
+                  <ProbabilityBar
+                    label="Inflation above 3%"
+                    probability={pred.inflation.cpi_above_3pct}
+                    source={pred.inflation.source}
+                  />
+                  <p className="text-xs text-muted-foreground pl-1">
+                    {pred.inflation.cpi_above_3pct > 0.5
+                      ? `${Math.round(pred.inflation.cpi_above_3pct * 100)}% probability of CPI above 3% -- persistent inflation may delay rate cuts`
+                      : `${Math.round(pred.inflation.cpi_above_3pct * 100)}% probability of CPI above 3% -- disinflation trend likely intact`}
+                  </p>
+                </div>
               )}
 
               {/* GDP */}
               {pred.gdp?.q1_positive != null && (
-                <ProbabilityBar
-                  label="Q1 GDP Growth (positive)"
-                  probability={pred.gdp.q1_positive}
-                  source={pred.gdp.source}
-                />
+                <div className="space-y-1">
+                  <ProbabilityBar
+                    label="Q1 GDP Growth (positive)"
+                    probability={pred.gdp.q1_positive}
+                    source={pred.gdp.source}
+                  />
+                  <p className="text-xs text-muted-foreground pl-1">
+                    {pred.gdp.q1_positive > 0.7
+                      ? `${Math.round(pred.gdp.q1_positive * 100)}% chance of positive Q1 GDP -- strong growth expectations support equities`
+                      : pred.gdp.q1_positive > 0.4
+                        ? `${Math.round(pred.gdp.q1_positive * 100)}% chance of positive Q1 GDP -- growth outlook is uncertain`
+                        : `Only ${Math.round(pred.gdp.q1_positive * 100)}% chance of positive Q1 GDP -- contraction fears are elevated`}
+                  </p>
+                </div>
               )}
 
               {/* S&P 500 targets */}
@@ -698,6 +833,28 @@ function AnalysisDimensionsSection({ insight }: { insight: DeepInsight }) {
                   </div>
                 </div>
               )}
+
+              {/* Data coverage note */}
+              {(() => {
+                const availableSources: string[] = [];
+                if (pred.fed_rates?.next_meeting?.probabilities) availableSources.push('Fed rate probabilities');
+                if (pred.recession?.probability_2026 != null) availableSources.push('recession risk');
+                if (pred.inflation?.cpi_above_3pct != null) availableSources.push('inflation expectations');
+                if (pred.gdp?.q1_positive != null) availableSources.push('GDP outlook');
+                if (pred.sp500?.targets && pred.sp500.targets.length > 0) availableSources.push('S&P 500 targets');
+
+                const allPossible = ['Fed rate probabilities', 'recession risk', 'inflation expectations', 'GDP outlook', 'S&P 500 targets'];
+                const missing = allPossible.filter((s) => !availableSources.includes(s));
+
+                if (missing.length > 0 && missing.length < allPossible.length) {
+                  return (
+                    <p className="text-xs text-muted-foreground/70 italic pt-2 border-t border-border/20">
+                      Limited prediction market data -- missing: {missing.join(', ')}. Available data may not fully represent market consensus.
+                    </p>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
         )}
@@ -712,7 +869,7 @@ function AnalysisDimensionsSection({ insight }: { insight: DeepInsight }) {
             </div>
 
             <div className="p-4 space-y-4">
-              {/* Overall mood */}
+              {/* Overall mood with data-driven explanation */}
               {sent.overall_mood && (
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -721,8 +878,15 @@ function AnalysisDimensionsSection({ insight }: { insight: DeepInsight }) {
                       {sent.overall_mood} {getMoodEmoji(sent.overall_mood)}
                     </Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground pl-1">{getMoodExplanation(sent.overall_mood)}</p>
+                  <p className="text-xs text-muted-foreground pl-1 leading-relaxed">
+                    {buildSentimentExplanation(sent, ta)}
+                  </p>
                 </div>
+              )}
+              {!sent.overall_mood && !sent.trending?.length && !sent.per_symbol?.length && (
+                <p className="text-xs text-muted-foreground italic">
+                  No sentiment data available -- social media monitoring did not return data for this analysis period.
+                </p>
               )}
 
               {/* Trending tickers */}
@@ -773,31 +937,43 @@ function AnalysisDimensionsSection({ insight }: { insight: DeepInsight }) {
                           ? 'Bearish'
                           : 'Neutral';
                       return (
-                        <div key={i} className="flex items-center gap-3 text-sm">
-                          <span className="font-mono font-semibold w-16 shrink-0">{sym.symbol}</span>
-                          <div className="flex-1">
-                            <div className="h-2 rounded-full bg-muted overflow-hidden">
-                              <div
-                                className={cn('h-full rounded-full transition-all', barColor)}
-                                style={{ width: `${Math.min(barPct, 100)}%` }}
-                              />
+                        <div key={i}>
+                          <div className="flex items-center gap-3 text-sm">
+                            <span className="font-mono font-semibold w-16 shrink-0">{sym.symbol}</span>
+                            <div className="flex-1">
+                              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                <div
+                                  className={cn('h-full rounded-full transition-all', barColor)}
+                                  style={{ width: `${Math.min(barPct, 100)}%` }}
+                                />
+                              </div>
                             </div>
-                          </div>
-                          <span className={cn(
-                            'text-xs font-medium w-14 text-right',
-                            isPositive ? 'text-green-500' : 'text-red-500'
-                          )}>
-                            {sentimentLabel}
-                          </span>
-                          <span className="text-xs text-muted-foreground w-20 text-right">
-                            {sym.post_count} posts
-                          </span>
-                          {sym.bullish_count != null && sym.bearish_count != null && (
-                            <span className="text-xs text-muted-foreground">
-                              (<span className="text-green-500">{sym.bullish_count}</span>
-                              {' / '}
-                              <span className="text-red-500">{sym.bearish_count}</span>)
+                            <span className={cn(
+                              'text-xs font-medium w-14 text-right',
+                              isPositive ? 'text-green-500' : 'text-red-500'
+                            )}>
+                              {sentimentLabel}
                             </span>
+                            <span className="text-xs text-muted-foreground w-20 text-right">
+                              {sym.post_count} posts
+                            </span>
+                            {sym.bullish_count != null && sym.bearish_count != null && (
+                              <span className="text-xs text-muted-foreground">
+                                (<span className="text-green-500">{sym.bullish_count}</span>
+                                {' / '}
+                                <span className="text-red-500">{sym.bearish_count}</span>)
+                              </span>
+                            )}
+                          </div>
+                          {/* Per-symbol contextual note */}
+                          {sym.bullish_count != null && sym.bearish_count != null && (sym.bullish_count + sym.bearish_count) > 0 && (
+                            <p className="text-[11px] text-muted-foreground/70 pl-[76px] mt-0.5">
+                              {sym.bullish_count > sym.bearish_count * 2
+                                ? `Strongly bullish skew (${sym.bullish_count} bullish vs ${sym.bearish_count} bearish posts)`
+                                : sym.bearish_count > sym.bullish_count * 2
+                                  ? `Strongly bearish skew (${sym.bearish_count} bearish vs ${sym.bullish_count} bullish posts)`
+                                  : `Split sentiment (${sym.bullish_count} bullish, ${sym.bearish_count} bearish) -- no clear retail consensus`}
+                            </p>
                           )}
                         </div>
                       );
@@ -805,6 +981,11 @@ function AnalysisDimensionsSection({ insight }: { insight: DeepInsight }) {
                   </div>
                 </div>
               )}
+
+              {/* Source attribution */}
+              <p className="text-[10px] text-muted-foreground/60 pt-2 border-t border-border/20">
+                Source: r/wallstreetbets, r/stocks, r/investing. Sentiment scores derived from post analysis. Reddit sentiment can lag institutional positioning by hours to days.
+              </p>
             </div>
           </div>
         )}
