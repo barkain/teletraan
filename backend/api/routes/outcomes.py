@@ -34,8 +34,23 @@ def _compute_days_remaining(outcome: InsightOutcome) -> Optional[int]:
     return (outcome.tracking_end_date - today).days
 
 
+def _compute_unrealized_return(outcome: InsightOutcome) -> Optional[float]:
+    """Calculate unrealized return for active tracking outcomes."""
+    if outcome.tracking_status != TrackingStatus.TRACKING.value:
+        return None
+    if outcome.current_price is None or outcome.initial_price is None or outcome.initial_price == 0:
+        return None
+    return ((outcome.current_price - outcome.initial_price) / outcome.initial_price) * 100
+
+
 def _outcome_to_response(outcome: InsightOutcome) -> InsightOutcomeResponse:
     """Convert InsightOutcome model to response schema."""
+    # Extract insight metadata if the relationship is loaded
+    insight = getattr(outcome, "deep_insight", None)
+    symbol = getattr(insight, "primary_symbol", None) if insight else None
+    insight_title = getattr(insight, "title", None) if insight else None
+    insight_action = getattr(insight, "action", None) if insight else None
+
     return InsightOutcomeResponse(
         id=outcome.id,
         insight_id=outcome.insight_id,
@@ -51,6 +66,10 @@ def _outcome_to_response(outcome: InsightOutcome) -> InsightOutcomeResponse:
         outcome_category=outcome.outcome_category,
         validation_notes=outcome.validation_notes,
         days_remaining=_compute_days_remaining(outcome),
+        symbol=symbol,
+        insight_title=insight_title,
+        insight_action=insight_action,
+        unrealized_return_pct=_compute_unrealized_return(outcome),
     )
 
 

@@ -24,6 +24,10 @@ class InsightOutcomeResponse(BaseModel):
     outcome_category: Optional[str] = Field(default=None, description="Outcome category classification")
     validation_notes: Optional[str] = Field(default=None, description="Notes on validation result")
     days_remaining: Optional[int] = Field(default=None, description="Days remaining in tracking period")
+    symbol: Optional[str] = Field(default=None, description="Primary symbol from linked insight")
+    insight_title: Optional[str] = Field(default=None, description="Title of the linked insight")
+    insight_action: Optional[str] = Field(default=None, description="Action from the linked insight (BUY, SELL, HOLD)")
+    unrealized_return_pct: Optional[float] = Field(default=None, description="Unrealized return percentage for active tracking")
 
     model_config = {"from_attributes": True}
 

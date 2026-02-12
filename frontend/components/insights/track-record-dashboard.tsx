@@ -49,6 +49,7 @@ import type {
   TrackRecordStats,
   OutcomeSummary,
 } from '@/lib/types/track-record';
+import { Progress } from '@/components/ui/progress';
 import {
   BarChart3,
   Target,
@@ -61,6 +62,7 @@ import {
   ChevronDown,
   ExternalLink,
   ArrowUpDown,
+  Eye,
 } from 'lucide-react';
 
 // ============================================
@@ -692,6 +694,336 @@ function RecentOutcomesList({ outcomes, isLoading }: RecentOutcomesListProps) {
 }
 
 // ============================================
+// Active Predictions Components
+// ============================================
+
+type ActiveSortField = 'symbol' | 'unrealized' | 'daysRemaining' | 'direction';
+type ActiveSortDir = 'asc' | 'desc';
+
+interface ActivePredictionsListProps {
+  outcomes: InsightOutcome[];
+  isLoading: boolean;
+}
+
+function ActivePredictionsList({ outcomes, isLoading }: ActivePredictionsListProps) {
+  const [sortField, setSortField] = React.useState<ActiveSortField>('unrealized');
+  const [sortDir, setSortDir] = React.useState<ActiveSortDir>('desc');
+
+  const sorted = React.useMemo(() => {
+    return [...outcomes].sort((a, b) => {
+      const mul = sortDir === 'asc' ? 1 : -1;
+      switch (sortField) {
+        case 'symbol':
+          return mul * (a.symbol ?? '').localeCompare(b.symbol ?? '');
+        case 'unrealized':
+          return mul * ((a.unrealized_return_pct ?? 0) - (b.unrealized_return_pct ?? 0));
+        case 'daysRemaining':
+          return mul * ((a.days_remaining ?? 0) - (b.days_remaining ?? 0));
+        case 'direction':
+          return mul * (a.predicted_direction ?? '').localeCompare(b.predicted_direction ?? '');
+        default:
+          return 0;
+      }
+    });
+  }, [outcomes, sortField, sortDir]);
+
+  const handleSort = (field: ActiveSortField) => {
+    if (sortField === field) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir(field === 'symbol' ? 'asc' : 'desc');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} className="h-12 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (outcomes.length === 0) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        No active predictions being tracked
+      </div>
+    );
+  }
+
+  const ActiveSortableHeader = ({
+    field,
+    children,
+  }: {
+    field: ActiveSortField;
+    children: React.ReactNode;
+  }) => (
+    <TableHead
+      className="cursor-pointer hover:bg-muted/50 transition-colors"
+      onClick={() => handleSort(field)}
+    >
+      <div className="flex items-center gap-1">
+        {children}
+        {sortField === field ? (
+          sortDir === 'desc' ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : (
+            <ChevronUp className="h-3 w-3" />
+          )
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-30" />
+        )}
+      </div>
+    </TableHead>
+  );
+
+  return (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <ActiveSortableHeader field="symbol">Symbol</ActiveSortableHeader>
+            <ActiveSortableHeader field="direction">Direction</ActiveSortableHeader>
+            <TableHead>Entry Price</TableHead>
+            <TableHead>Current Price</TableHead>
+            <ActiveSortableHeader field="unrealized">Unrealized</ActiveSortableHeader>
+            <ActiveSortableHeader field="daysRemaining">Time Left</ActiveSortableHeader>
+            <TableHead className="w-[140px]">Progress</TableHead>
+            <TableHead className="w-[40px]"></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {sorted.map((outcome) => {
+            const unrealized = outcome.unrealized_return_pct ?? 0;
+            const totalDays =
+              outcome.tracking_start_date && outcome.tracking_end_date
+                ? Math.max(
+                    1,
+                    (new Date(outcome.tracking_end_date).getTime() -
+                      new Date(outcome.tracking_start_date).getTime()) /
+                      (1000 * 60 * 60 * 24)
+                  )
+                : 28;
+            const elapsed = totalDays - (outcome.days_remaining ?? 0);
+            const progressPct = Math.min(100, Math.max(0, (elapsed / totalDays) * 100));
+
+            // Determine if the current move aligns with predicted direction
+            const isAligned =
+              (outcome.predicted_direction === 'bullish' && unrealized > 0) ||
+              (outcome.predicted_direction === 'bearish' && unrealized < 0) ||
+              (outcome.predicted_direction === 'neutral' && Math.abs(unrealized) < 1);
+
+            return (
+              <TableRow key={outcome.id} className="group">
+                <TableCell>
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-sm">{outcome.symbol ?? '---'}</span>
+                    <span className="text-xs text-muted-foreground truncate max-w-[200px]">
+                      {outcome.insight_title ?? `Insight #${outcome.insight_id}`}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1.5">
+                    <Badge
+                      variant={
+                        outcome.predicted_direction === 'bullish'
+                          ? 'default'
+                          : outcome.predicted_direction === 'bearish'
+                          ? 'destructive'
+                          : 'secondary'
+                      }
+                      className="text-xs capitalize"
+                    >
+                      {outcome.insight_action ?? outcome.predicted_direction}
+                    </Badge>
+                    {outcome.predicted_direction === 'bullish' ? (
+                      <TrendingUp className="h-3 w-3 text-green-500" />
+                    ) : outcome.predicted_direction === 'bearish' ? (
+                      <TrendingDown className="h-3 w-3 text-red-500" />
+                    ) : null}
+                  </div>
+                </TableCell>
+                <TableCell className="text-sm tabular-nums">
+                  ${outcome.initial_price.toFixed(2)}
+                </TableCell>
+                <TableCell className="text-sm tabular-nums">
+                  {outcome.current_price != null
+                    ? `$${outcome.current_price.toFixed(2)}`
+                    : '---'}
+                </TableCell>
+                <TableCell>
+                  <span
+                    className={cn(
+                      'text-sm font-semibold tabular-nums',
+                      isAligned ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                    )}
+                  >
+                    {unrealized >= 0 ? '+' : ''}
+                    {unrealized.toFixed(2)}%
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                    <Clock className="h-3 w-3" />
+                    <span>{outcome.days_remaining ?? 0}d</span>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <Progress value={progressPct} className="h-2 flex-1" />
+                    <span className="text-xs text-muted-foreground w-[32px] text-right">
+                      {Math.round(progressPct)}%
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Link
+                    href={`/insights/${outcome.insight_id}`}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground hover:text-primary" />
+                  </Link>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+interface ActivePredictionsSummaryProps {
+  outcomes: InsightOutcome[];
+}
+
+function ActivePredictionsSummary({ outcomes }: ActivePredictionsSummaryProps) {
+  const stats = React.useMemo(() => {
+    const bullish = outcomes.filter((o) => o.predicted_direction === 'bullish');
+    const bearish = outcomes.filter((o) => o.predicted_direction === 'bearish');
+    const neutral = outcomes.filter((o) => o.predicted_direction === 'neutral');
+
+    const aligned = outcomes.filter((o) => {
+      const ret = o.unrealized_return_pct ?? 0;
+      if (o.predicted_direction === 'bullish') return ret > 0;
+      if (o.predicted_direction === 'bearish') return ret < 0;
+      return Math.abs(ret) < 1;
+    });
+
+    const allReturns = outcomes
+      .map((o) => o.unrealized_return_pct ?? 0)
+      .filter((r) => r !== 0);
+    const avgReturn = allReturns.length > 0
+      ? allReturns.reduce((a, b) => a + b, 0) / allReturns.length
+      : 0;
+
+    return { bullish: bullish.length, bearish: bearish.length, neutral: neutral.length, aligned: aligned.length, total: outcomes.length, avgReturn };
+  }, [outcomes]);
+
+  const directionData = [
+    { name: 'Bullish', value: stats.bullish, color: '#22c55e' },
+    { name: 'Bearish', value: stats.bearish, color: '#ef4444' },
+    { name: 'Neutral', value: stats.neutral, color: '#3b82f6' },
+  ].filter((d) => d.value > 0);
+
+  return (
+    <div className="grid gap-4 md:grid-cols-3">
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Direction Breakdown</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {directionData.length === 0 ? (
+            <div className="flex items-center justify-center h-[120px] text-muted-foreground text-sm">
+              No data
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={120}>
+              <PieChart>
+                <Pie
+                  data={directionData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={30}
+                  outerRadius={50}
+                  paddingAngle={2}
+                  dataKey="value"
+                  label={({ name, value }) => `${name} (${value})`}
+                  labelLine={false}
+                >
+                  {directionData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <RechartsTooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const item = payload[0].payload;
+                    return (
+                      <div className="bg-popover border border-border rounded-lg shadow-lg p-2 text-sm">
+                        <p className="font-semibold">{item.name}: {item.value}</p>
+                      </div>
+                    );
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Tracking Alignment</CardTitle>
+          <CardDescription className="text-xs">Predictions moving in predicted direction</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center h-[120px] gap-2">
+            <div className="text-3xl font-bold">
+              {stats.total > 0 ? `${((stats.aligned / stats.total) * 100).toFixed(0)}%` : 'N/A'}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {stats.aligned} of {stats.total} predictions on track
+            </p>
+            <Progress
+              value={stats.total > 0 ? (stats.aligned / stats.total) * 100 : 0}
+              className="h-2 w-full max-w-[200px]"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Avg Unrealized Return</CardTitle>
+          <CardDescription className="text-xs">Across all active predictions</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center h-[120px] gap-2">
+            <div
+              className={cn(
+                'text-3xl font-bold',
+                stats.avgReturn >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+              )}
+            >
+              {stats.avgReturn >= 0 ? '+' : ''}
+              {stats.avgReturn.toFixed(2)}%
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Unrealized P&L across {stats.total} predictions
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ============================================
 // Main Component
 // ============================================
 
@@ -727,14 +1059,24 @@ export function TrackRecordDashboard({
   });
 
   const {
-    data: outcomes,
-    isLoading: isLoadingOutcomes,
+    data: completedOutcomes,
+    isLoading: isLoadingCompleted,
   } = useOutcomes({
     status: 'COMPLETED',
     limit: 10,
   });
 
+  const {
+    data: trackingOutcomes,
+    isLoading: isLoadingTracking,
+  } = useOutcomes({
+    status: 'TRACKING',
+    limit: 100,
+  });
+
   const isLoading = isLoadingTrackRecord || isLoadingSummary;
+  const hasCompleted = (outcomeSummary?.completed ?? 0) > 0;
+  const activeItems = trackingOutcomes?.items ?? [];
 
   // Export handler
   const handleExport = React.useCallback(() => {
@@ -810,133 +1152,179 @@ export function TrackRecordDashboard({
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <StatCard
             title="Overall Success Rate"
-            value={formatSuccessRate(outcomeSummary?.success_rate ?? trackRecord?.success_rate)}
-            description={`${trackRecord?.successful ?? 0} of ${trackRecord?.total_insights ?? 0} successful`}
+            value={hasCompleted ? formatSuccessRate(outcomeSummary?.success_rate ?? trackRecord?.success_rate) : 'Pending'}
+            description={
+              hasCompleted
+                ? `${trackRecord?.successful ?? 0} of ${trackRecord?.total_insights ?? 0} successful`
+                : 'Evaluations start when tracking periods end'
+            }
             icon={<Target className="h-4 w-4" />}
           />
           <StatCard
-            title="Total Insights Tracked"
+            title="Total Predictions"
             value={outcomeSummary?.total_tracked ?? trackRecord?.total_insights ?? 0}
-            description="Historical predictions"
+            description={hasCompleted ? 'Historical predictions' : 'Predictions being tracked'}
             icon={<Activity className="h-4 w-4" />}
           />
           <StatCard
             title="Currently Tracking"
             value={outcomeSummary?.currently_tracking ?? 0}
             description="Active predictions"
-            icon={<Clock className="h-4 w-4" />}
+            icon={<Eye className="h-4 w-4" />}
           />
           <StatCard
-            title="Avg Return (Correct)"
-            value={formatPercent(
-              outcomeSummary?.avg_return_when_correct ?? trackRecord?.avg_return_successful
-            )}
-            description={`vs ${formatPercent(
-              outcomeSummary?.avg_return_when_wrong ?? trackRecord?.avg_return_failed
-            )} when wrong`}
+            title={hasCompleted ? 'Avg Return (Correct)' : 'Completed'}
+            value={
+              hasCompleted
+                ? formatPercent(outcomeSummary?.avg_return_when_correct ?? trackRecord?.avg_return_successful)
+                : outcomeSummary?.completed ?? 0
+            }
+            description={
+              hasCompleted
+                ? `vs ${formatPercent(outcomeSummary?.avg_return_when_wrong ?? trackRecord?.avg_return_failed)} when wrong`
+                : 'Outcomes evaluated so far'
+            }
             icon={
-              (outcomeSummary?.avg_return_when_correct ?? 0) >= 0 ? (
-                <TrendingUp className="h-4 w-4" />
+              hasCompleted ? (
+                (outcomeSummary?.avg_return_when_correct ?? 0) >= 0 ? (
+                  <TrendingUp className="h-4 w-4" />
+                ) : (
+                  <TrendingDown className="h-4 w-4" />
+                )
               ) : (
-                <TrendingDown className="h-4 w-4" />
+                <Clock className="h-4 w-4" />
               )
             }
           />
         </div>
       )}
 
-      {/* Breakdown Charts */}
-      <div className="grid gap-6 md:grid-cols-2">
+      {/* Active Predictions Summary (shown when we have active tracking) */}
+      {activeItems.length > 0 && !isLoadingTracking && (
+        <ActivePredictionsSummary outcomes={activeItems} />
+      )}
+
+      {/* Active Predictions Table */}
+      {(activeItems.length > 0 || isLoadingTracking) && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">By Insight Type</CardTitle>
-            <CardDescription>Success rate breakdown by insight type</CardDescription>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Eye className="h-4 w-4" />
+              Active Predictions
+            </CardTitle>
+            <CardDescription>
+              {activeItems.length > 0
+                ? `${activeItems.length} predictions being tracked -- outcomes evaluated when tracking periods end`
+                : 'Loading active predictions...'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ActivePredictionsList
+              outcomes={activeItems}
+              isLoading={isLoadingTracking}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Breakdown Charts -- only show if there are completed outcomes */}
+      {hasCompleted && (
+        <div className="grid gap-6 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">By Insight Type</CardTitle>
+              <CardDescription>Success rate breakdown by insight type</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <ChartSkeleton />
+              ) : (
+                <TypeBreakdownChart data={trackRecord?.by_type ?? {}} />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">By Action</CardTitle>
+              <CardDescription>Distribution of BUY/SELL/HOLD actions</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoadingSummary ? (
+                <ChartSkeleton />
+              ) : (
+                <ActionPieChart data={outcomeSummary?.by_direction ?? {}} />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">By Outcome Category</CardTitle>
+              <CardDescription>Distribution from strong success to strong failure</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoadingSummary ? (
+                <ChartSkeleton />
+              ) : (
+                <OutcomeCategoryChart
+                  data={outcomeSummary?.by_category ?? ({} as OutcomeSummary['by_category'])}
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Monthly Trend</CardTitle>
+              <CardDescription>Success rate over time</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <MonthlyTrendChart isLoading={isLoading} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Stats Table -- only show if there are completed outcomes */}
+      {hasCompleted && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Detailed Statistics</CardTitle>
+            <CardDescription>Click column headers to sort</CardDescription>
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <ChartSkeleton />
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
             ) : (
-              <TypeBreakdownChart data={trackRecord?.by_type ?? {}} />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">By Action</CardTitle>
-            <CardDescription>Distribution of BUY/SELL/HOLD actions</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoadingSummary ? (
-              <ChartSkeleton />
-            ) : (
-              <ActionPieChart data={outcomeSummary?.by_direction ?? {}} />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">By Outcome Category</CardTitle>
-            <CardDescription>Distribution from strong success to strong failure</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoadingSummary ? (
-              <ChartSkeleton />
-            ) : (
-              <OutcomeCategoryChart
-                data={outcomeSummary?.by_category ?? ({} as OutcomeSummary['by_category'])}
+              <StatsTable
+                byType={trackRecord?.by_type ?? {}}
+                byAction={trackRecord?.by_action ?? {}}
               />
             )}
           </CardContent>
         </Card>
+      )}
 
+      {/* Recent Completed Outcomes -- only show if there are completed outcomes */}
+      {hasCompleted && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Monthly Trend</CardTitle>
-            <CardDescription>Success rate over time</CardDescription>
+            <CardTitle className="text-base">Recent Completed Outcomes</CardTitle>
+            <CardDescription>Last 10 validated predictions</CardDescription>
           </CardHeader>
           <CardContent>
-            <MonthlyTrendChart isLoading={isLoading} />
+            <RecentOutcomesList
+              outcomes={completedOutcomes?.items ?? []}
+              isLoading={isLoadingCompleted}
+            />
           </CardContent>
         </Card>
-      </div>
-
-      {/* Stats Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Detailed Statistics</CardTitle>
-          <CardDescription>Click column headers to sort</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : (
-            <StatsTable
-              byType={trackRecord?.by_type ?? {}}
-              byAction={trackRecord?.by_action ?? {}}
-            />
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Recent Outcomes */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recent Completed Outcomes</CardTitle>
-          <CardDescription>Last 10 validated predictions</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <RecentOutcomesList
-            outcomes={outcomes?.items ?? []}
-            isLoading={isLoadingOutcomes}
-          />
-        </CardContent>
-      </Card>
+      )}
     </div>
   );
 }

@@ -36,6 +36,10 @@ export interface InsightOutcome {
   outcome_category?: OutcomeCategory;
   validation_notes?: string;
   days_remaining?: number;
+  symbol?: string;
+  insight_title?: string;
+  insight_action?: string;
+  unrealized_return_pct?: number;
 }
 
 // Track record statistics from knowledge API
