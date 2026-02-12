@@ -49,7 +49,7 @@ _FINANCE_TAG_ID = 120
 _ECONOMY_TAG_SLUG = "economy"
 
 _MIN_VOLUME_USD = 10_000  # Filter: minimum $10K volume
-_MAX_RESOLVE_DAYS = 90  # Filter: resolves within 90 days
+_MAX_RESOLVE_DAYS = 365  # Filter: resolves within 365 days
 
 _REQUEST_TIMEOUT = 30.0
 _MAX_RETRIES = 3
@@ -275,7 +275,7 @@ class PolymarketAdapter:
         """
         data = await self._gamma_request(
             "/events",
-            params={"tag_id": _FINANCE_TAG_ID, "closed": "false"},
+            params={"tag_id": _FINANCE_TAG_ID, "closed": "false", "limit": 100},
         )
         if not data or not isinstance(data, list):
             return []
@@ -301,7 +301,7 @@ class PolymarketAdapter:
         """
         data = await self._gamma_request(
             "/events",
-            params={"closed": "false", "tag": _ECONOMY_TAG_SLUG},
+            params={"closed": "false", "tag": _ECONOMY_TAG_SLUG, "limit": 100},
         )
         if not data or not isinstance(data, list):
             return []
@@ -349,7 +349,7 @@ class PolymarketAdapter:
         """
         data = await self._gamma_request(
             "/markets",
-            params={"closed": "false"},
+            params={"closed": "false", "limit": 100},
         )
         if not data or not isinstance(data, list):
             return []

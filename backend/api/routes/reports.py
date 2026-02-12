@@ -1032,26 +1032,26 @@ async def publish_report(
 # ---------------------------------------------------------------------------
 
 _ACTION_COLORS = {
-    "STRONG_BUY": "#22c55e",
-    "BUY": "#10B981",
-    "HOLD": "#F59E0B",
+    "STRONG_BUY": "#22C55E",
+    "BUY": "#22C55E",
+    "HOLD": "#EAB308",
     "SELL": "#EF4444",
-    "STRONG_SELL": "#DC2626",
-    "WATCH": "#6366F1",
+    "STRONG_SELL": "#EF4444",
+    "WATCH": "#3B82F6",
 }
 
 _ACTION_BG = {
     "STRONG_BUY": "rgba(34,197,94,0.12)",
-    "BUY": "rgba(16,185,129,0.10)",
-    "HOLD": "rgba(245,158,11,0.10)",
+    "BUY": "rgba(34,197,94,0.10)",
+    "HOLD": "rgba(234,179,8,0.10)",
     "SELL": "rgba(239,68,68,0.10)",
-    "STRONG_SELL": "rgba(220,38,38,0.12)",
-    "WATCH": "rgba(99,102,241,0.10)",
+    "STRONG_SELL": "rgba(239,68,68,0.12)",
+    "WATCH": "rgba(59,130,246,0.10)",
 }
 
 _ACTION_GLOW = {
     "STRONG_BUY": "0 0 12px rgba(34,197,94,0.4)",
-    "STRONG_SELL": "0 0 12px rgba(220,38,38,0.4)",
+    "STRONG_SELL": "0 0 12px rgba(239,68,68,0.4)",
 }
 
 _ACTION_LABELS = {
@@ -1064,13 +1064,333 @@ _ACTION_LABELS = {
 }
 
 _ACTION_BORDER_COLORS = {
-    "STRONG_BUY": "#22c55e",
-    "BUY": "#10B981",
-    "HOLD": "#F59E0B",
+    "STRONG_BUY": "#22C55E",
+    "BUY": "#22C55E",
+    "HOLD": "#EAB308",
     "SELL": "#EF4444",
-    "STRONG_SELL": "#DC2626",
-    "WATCH": "#6366F1",
+    "STRONG_SELL": "#EF4444",
+    "WATCH": "#3B82F6",
 }
+
+# ---------------------------------------------------------------------------
+# Analyst type color system (matches frontend design system)
+# ---------------------------------------------------------------------------
+
+_ANALYST_COLORS: dict[str, str] = {
+    "technical": "#3B82F6",        # blue
+    "technical_focus": "#3B82F6",
+    "macro": "#A855F7",            # purple
+    "macro_impact": "#A855F7",
+    "sector_rotator": "#10B981",   # emerald
+    "sector_deep_dive": "#10B981",
+    "risk": "#F43F5E",             # rose
+    "risk_scenario": "#F43F5E",
+    "correlation": "#F59E0B",      # amber
+    "correlation_analysis": "#F59E0B",
+    "sentiment": "#06B6D4",        # cyan
+    "prediction_markets": "#8B5CF6",  # violet
+    "synthesis": "#6366F1",        # indigo
+}
+
+_ANALYST_ICONS: dict[str, str] = {
+    "technical": "&#128200;",        # chart increasing
+    "technical_focus": "&#128200;",
+    "macro": "&#127758;",            # globe
+    "macro_impact": "&#127758;",
+    "sector_rotator": "&#128202;",   # bar chart
+    "sector_deep_dive": "&#128202;",
+    "risk": "&#128737;",             # shield
+    "risk_scenario": "&#128737;",
+    "correlation": "&#128279;",      # link
+    "correlation_analysis": "&#128279;",
+    "sentiment": "&#128172;",        # speech bubble
+    "prediction_markets": "&#127922;",  # game die
+    "synthesis": "&#129520;",        # puzzle piece
+}
+
+_ANALYST_DISPLAY_NAMES: dict[str, str] = {
+    "technical": "Technical Analysis",
+    "technical_focus": "Technical Analysis",
+    "macro": "Macro Analysis",
+    "macro_impact": "Macro Analysis",
+    "sector_rotator": "Sector Analysis",
+    "sector_deep_dive": "Sector Analysis",
+    "risk": "Risk Assessment",
+    "risk_scenario": "Risk Assessment",
+    "correlation": "Correlation Analysis",
+    "correlation_analysis": "Correlation Analysis",
+    "sentiment": "Sentiment Analysis",
+    "prediction_markets": "Prediction Markets",
+    "synthesis": "Synthesis",
+}
+
+
+# ---------------------------------------------------------------------------
+# Layman language helper
+# ---------------------------------------------------------------------------
+
+def _extract_symbols(text: str) -> list[str]:
+    """Extract stock ticker symbols from text."""
+    import re as _re
+    matches = _re.findall(r"\b[A-Z]{2,5}\b", text)
+    stop_words = {
+        "VaR", "RSI", "MACD", "SMA", "EMA", "GDP", "CPI",
+        "THE", "AND", "FOR", "NOT", "BUT", "ALL", "WITH", "THIS", "THAT",
+    }
+    seen: set[str] = set()
+    result: list[str] = []
+    for m in matches:
+        if m not in stop_words and m not in seen:
+            seen.add(m)
+            result.append(m)
+    return result
+
+
+def _extract_percentages(text: str) -> list[str]:
+    """Extract percentage values from text."""
+    import re as _re
+    return _re.findall(r"[\d.]+%", text)
+
+
+# Sentence-level pattern rewrites: (compiled_regex, rewrite_function)
+_SENTENCE_PATTERNS: list[tuple[re.Pattern[str], object]] = []
+
+
+def _init_sentence_patterns() -> list[tuple[re.Pattern[str], object]]:
+    """Build and cache the list of sentence-level pattern rewrites."""
+    if _SENTENCE_PATTERNS:
+        return _SENTENCE_PATTERNS
+
+    patterns: list[tuple[str, object]] = [
+        # Late/mid/early cycle with recession + stagflation
+        (
+            r"(late|mid|early)[- ]cycle.*?(\d+)%\s*(?:confidence|prob).*?(\d+)%\s*recession.*?(\d+)%\s*stagflation",
+            lambda m, _t: (
+                f"The economy looks like it's "
+                f"{'running out of steam' if m.group(1).lower() == 'late' else 'in the middle of its growth phase' if m.group(1).lower() == 'mid' else 'in the early stages of recovery'}. "
+                f"There's {'a coin-flip chance' if int(m.group(3)) == 50 else f'about a {m.group(3)}% chance'} we enter a recession, "
+                f"and about 1-in-{round(100 / int(m.group(4)))} odds of stagflation "
+                f"(prices rising while the economy stalls). Both scenarios would hit growth-oriented investments hardest."
+            ),
+        ),
+        # Late/mid/early cycle with recession only
+        (
+            r"(late|mid|early)[- ]cycle.*?(\d+)%\s*recession",
+            lambda m, _t: (
+                f"The economy looks like it's "
+                f"{'running out of steam' if m.group(1).lower() == 'late' else 'in the middle of its growth phase' if m.group(1).lower() == 'mid' else 'in the early stages of recovery'}, "
+                f"with {'a coin-flip chance' if int(m.group(2)) == 50 else f'about a {m.group(2)}% chance'} of a recession."
+            ),
+        ),
+        # VaR with range
+        (
+            r"VaR\s*([\d.]+)[-\u2013]([\d.]+)%",
+            lambda m, t: (
+                f"On a bad day, your portfolio could drop {m.group(1)}-{m.group(2)}%."
+                + (" This is higher than normal because your investments are bunched together in similar stocks."
+                   if re.search(r"concentrat|cluster|correlat", t, re.IGNORECASE) else
+                   " This kind of loss happens roughly 1 in 20 trading days.")
+            ),
+        ),
+        # VaR single value
+        (
+            r"VaR\s*([\d.]+)%",
+            lambda m, _t: f"On a bad day, your portfolio could drop about {m.group(1)}%. This kind of loss happens roughly 1 in 20 trading days.",
+        ),
+        # Squeeze + parabolic = synchronized risk
+        (
+            r"squeeze.*?\(([^)]+)\).*?parabolic.*?\(([^)]+)\)",
+            lambda m, _t: (
+                f"{m.group(1).strip()} are coiling up for a big move — like a compressed spring. "
+                f"Meanwhile, {m.group(2).strip()} have been rising at an unsustainable pace. "
+                f"The risk is these all unwind at the same time."
+            ),
+        ),
+        # Distribution + squeeze uncertainty
+        (
+            r"distribution\s+signals?\s*\(([^)]+)\).*?squeeze\s+(?:uncertainty|signals?)\s*\(([^)]+)\)",
+            lambda m, _t: (
+                f"It looks like big investors may be quietly selling {m.group(1).strip()} while prices are still high. "
+                f"{m.group(2).strip()} are in a holding pattern where a big price swing is brewing, but the direction isn't clear yet."
+            ),
+        ),
+        # Distribution signals with symbols
+        (
+            r"distribution\s+signals?\s*\(([^)]+)\)",
+            lambda m, _t: f"It looks like big investors may be quietly selling {m.group(1).strip()} while prices are still high.",
+        ),
+        # RSI divergence + MACD crossover + support
+        (
+            r"RSI\s+divergence.*MACD\s+(?:bearish\s+)?crossover.*support\s+(?:at\s+)?\$?([\d,.]+)",
+            lambda m, _t: (
+                f"The stock's momentum is fading even as the price holds steady — a warning sign. "
+                f"The trend indicators just flipped negative, and the price is at a critical floor of ${m.group(1)}. "
+                f"If it drops below, expect a bigger decline."
+            ),
+        ),
+        # RSI divergence + MACD (no support)
+        (
+            r"RSI\s+divergence.*MACD",
+            lambda _m, _t: "The stock's momentum is fading while the price holds steady — a warning sign. The trend indicators are confirming the current move may be losing steam.",
+        ),
+        # RSI with value
+        (
+            r"RSI\s*(?:at|above|below|near|of|is)?\s*(\d+)",
+            lambda m, _t: (
+                f"The stock's momentum gauge reads {m.group(1)}/100 — it's been running hot and may be due for a pullback."
+                if int(m.group(1)) >= 70
+                else f"The stock's momentum gauge reads just {m.group(1)}/100 — it's been beaten down and may be due for a bounce."
+                if int(m.group(1)) <= 30
+                else f"The stock's momentum is in a neutral zone at {m.group(1)}/100, with no strong push in either direction."
+            ),
+        ),
+        # MACD bearish
+        (r"MACD\s+bearish", lambda _m, _t: "A key trend indicator just flipped negative — the upward momentum is fading and caution is warranted."),
+        # MACD bullish/crossover
+        (r"MACD\s+(?:bullish|cross)", lambda _m, _t: "A key trend indicator just flipped positive, suggesting the downward pressure is easing."),
+        # MACD divergence
+        (r"MACD\s+divergence", lambda _m, _t: "Price and a key trend indicator are telling different stories — this often signals a reversal is coming."),
+        # Support level
+        (
+            r"support\s+(?:at|near|around|level|of)?\s*\$?([\d,.]+)",
+            lambda m, _t: f"There's a price floor around ${m.group(1)} where buyers have historically stepped in. If it breaks, expect a sharper drop.",
+        ),
+        # Resistance level
+        (
+            r"resistance\s+(?:at|near|around|level|of)?\s*\$?([\d,.]+)",
+            lambda m, _t: f"There's a price ceiling around ${m.group(1)} where sellers have historically cashed out. Breaking through would be bullish.",
+        ),
+        # Breakout
+        (r"break(?:out|ing\s+out)\s+(?:above|from|through)", lambda _m, _t: "The price just broke through a key ceiling, which often attracts new buyers and leads to further gains."),
+        # Breakdown
+        (r"break(?:down|ing\s+down)\s+(?:below|from|through)", lambda _m, _t: "The price just fell through a key floor, which often triggers more selling."),
+        # Squeeze with symbols
+        (
+            r"squeeze\s*\(([^)]+)\)",
+            lambda m, _t: f"{m.group(1).strip()} are coiling up for a big move — like a compressed spring that could snap either way.",
+        ),
+        # Squeeze generic
+        (r"squeeze", lambda _m, _t: "Price swings have gotten unusually small — like the calm before a storm. A big move is likely coming soon."),
+        # Accumulation
+        (r"accumulation", lambda _m, _t: "Large investors appear to be quietly buying, building positions while the price is still low."),
+        # Distribution generic
+        (r"distribution", lambda _m, _t: "Large investors appear to be quietly selling while prices are still high."),
+        # Parabolic
+        (r"parabolic", lambda _m, _t: "The price has been rising at an unsustainable pace. Like a ball thrown in the air, it will eventually come back down."),
+        # Stagflation
+        (r"stagflation", lambda _m, _t: "There's a risk of stagflation — prices keep rising while the economy stalls. It's tough for most investments."),
+        # Late-cycle alone
+        (r"late[- ]cycle", lambda _m, _t: "The economy appears to be in the later stages of its growth cycle. Historically, this is when markets become more volatile."),
+        # Breadth narrowing
+        (r"breadth\s+(?:narrowing|declining|weakening)", lambda _m, _t: "Fewer stocks are participating in the rally, which is a warning sign for the broader market."),
+        # Breadth improving
+        (r"breadth\s+(?:improving|expanding|strengthening)", lambda _m, _t: "More stocks are joining the rally — a healthy sign that the uptrend has staying power."),
+        # Volatility expansion
+        (r"volatility\s+(?:expansion|spike|surge)", lambda _m, _t: "Market swings are getting bigger — expect larger daily price moves in both directions."),
+        # Volatility contraction
+        (r"volatility\s+(?:contraction|compression|low)", lambda _m, _t: "The market has been unusually calm. This quiet often comes before a sharp move."),
+        # Momentum fading
+        (r"momentum\s+(?:divergence|weakening|fading|stalling)", lambda _m, _t: "The speed of price moves is slowing down — the stock is coasting and may be losing direction."),
+        # Yield curve inverted
+        (r"(?:yield\s+curve\s+)?invert(?:ed|ion)", lambda _m, _t: "Short-term bonds are paying more than long-term ones (unusual) — historically one of the most reliable recession warning signs."),
+        # Yield curve steepening
+        (r"yield\s+curve\s+steepening", lambda _m, _t: "The gap between short and long-term rates is widening, which typically signals expectations of stronger economic growth."),
+        # Recession probability
+        (
+            r"(\d+)%\s*(?:recession|chance of recession)",
+            lambda m, _t: (
+                f"There's a {m.group(1)}% chance of a recession — the economy may shrink, which would be bad for most investments."
+                if int(m.group(1)) >= 70
+                else f"There's a meaningful {m.group(1)}% chance of recession — not certain, but high enough to warrant caution."
+                if int(m.group(1)) >= 40
+                else f"Recession risk is relatively low at {m.group(1)}%."
+            ),
+        ),
+        # Mean reversion
+        (r"mean\s+reversion", lambda _m, _t: "Prices have stretched far from their average and may snap back, like a rubber band being pulled."),
+        # Head and shoulders
+        (r"head\s+and\s+shoulders", lambda _m, _t: "The price chart has formed a pattern that often appears before a significant downturn."),
+        # Golden cross
+        (r"golden\s+cross", lambda _m, _t: "A rare bullish signal: the short-term trend crossed above the long-term trend, suggesting upward momentum."),
+        # Death cross
+        (r"death\s+cross", lambda _m, _t: "A bearish signal: the short-term trend crossed below the long-term trend, suggesting downward momentum."),
+        # Double top
+        (r"double\s+top", lambda _m, _t: "The price tried to break higher twice and failed both times — this often signals the stock has hit its ceiling."),
+        # Double bottom
+        (r"double\s+bottom", lambda _m, _t: "The price bounced off the same floor twice — this often signals the worst is over."),
+        # Regime shift
+        (r"regime\s+(?:change|shift|transition)", lambda _m, _t: "The overall market environment is fundamentally changing. Strategies that worked recently may stop working."),
+        # Overbought
+        (r"overbought", lambda _m, _t: "The stock has risen fast and may be stretched too high — it could be due for a pullback."),
+        # Oversold
+        (r"oversold", lambda _m, _t: "The stock has fallen fast and may have been pushed too low — it could be due for a bounce."),
+        # Hawkish
+        (r"hawkish", lambda _m, _t: "The central bank is leaning toward raising interest rates to fight inflation, which can slow down the economy and weigh on stocks."),
+        # Dovish
+        (r"dovish", lambda _m, _t: "The central bank is leaning toward keeping rates low to support growth, which is generally good for stocks."),
+    ]
+
+    for pattern_str, rewrite_fn in patterns:
+        _SENTENCE_PATTERNS.append((re.compile(pattern_str, re.IGNORECASE), rewrite_fn))
+
+    return _SENTENCE_PATTERNS
+
+
+def generate_layman_explanation(analyst_type: str, technical_text: str) -> str:
+    """Generate a complete plain-English rewrite of a technical finding.
+
+    Instead of inserting ``term = definition`` glossary entries, this function
+    detects the overall meaning of the sentence and produces a fully rewritten
+    explanation in conversational English.
+
+    The *analyst_type* is used for Tier 2 contextual framing when no specific
+    sentence pattern matches.
+
+    Returns a string suitable for display under each analyst finding, or an
+    empty string when no meaningful simplification is possible.
+    """
+    if not technical_text:
+        return ""
+
+    patterns = _init_sentence_patterns()
+
+    # Tier 1: Full-sentence pattern rewrites
+    for compiled, rewrite_fn in patterns:
+        m = compiled.search(technical_text)
+        if m:
+            return rewrite_fn(m, technical_text)
+
+    # Tier 2: Analyst-type contextual rewrite with extracted data
+    symbols = _extract_symbols(technical_text)
+    percentages = _extract_percentages(technical_text)
+
+    symbol_phrase = f" for {', '.join(symbols[:3])}" if symbols else ""
+    pct_phrase = f" Key numbers: {', '.join(percentages[:3])}." if percentages else ""
+
+    at = analyst_type.lower()
+    if "technical" in at:
+        return f"The chart patterns and price trends{symbol_phrase} are showing a notable signal.{pct_phrase} This is worth watching as it may indicate where the price is headed next."
+    elif "macro" in at:
+        return f"Looking at the broader economy, conditions are shifting in a way that could affect your investments{symbol_phrase}.{pct_phrase}"
+    elif "risk" in at:
+        return f"From a risk perspective, there are signals{symbol_phrase} that warrant attention.{pct_phrase} This doesn't mean something bad will happen, but it's worth being prepared."
+    elif "sector" in at:
+        return f"Industry-level trends are signaling a shift{symbol_phrase}.{pct_phrase} Some sectors are gaining favor while others are falling out."
+    elif "correlation" in at:
+        return f"Looking at how these investments move together{symbol_phrase}, an unusual pattern has emerged.{pct_phrase}"
+    elif "sentiment" in at:
+        return f"Market sentiment{symbol_phrase} is sending a signal worth noting.{pct_phrase} What other investors think can influence where prices head next."
+
+    # Tier 3: Generic fallback
+    if symbols or percentages:
+        data_parts: list[str] = []
+        if symbols:
+            data_parts.append(f"involving {', '.join(symbols[:3])}")
+        if percentages:
+            data_parts.append(f"with key figures of {' and '.join(percentages[:2])}")
+        return f"This analyst spotted something noteworthy {', '.join(data_parts)}."
+
+    return ""
 
 
 def _esc(text: str | None) -> str:
@@ -2283,33 +2603,93 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
         levels_html += '</div>'
         details_parts.append(levels_html)
 
-    # Full thesis (rendered with markdown)
+    # Full thesis (rendered with markdown) + layman explanation
     if ins.thesis:
+        thesis_layman = generate_layman_explanation("synthesis", ins.thesis)
+        layman_div = ""
+        if thesis_layman:
+            layman_div = (
+                f'<div class="layman-explanation">{_esc(thesis_layman)}</div>'
+            )
         details_parts.append(
             f'<div class="detail-section">'
             f'<div class="detail-label">Analysis</div>'
             f'<div class="detail-content">{_markdown_to_html(ins.thesis)}</div>'
+            f'{layman_div}'
             f'</div>'
         )
 
-    # Key factors from supporting evidence
+    # Dedicated analyst sections from supporting evidence
     if ins.supporting_evidence:
-        evidence_items = ""
-        for ev in ins.supporting_evidence[:6]:
+        # Group evidence by analyst type
+        analyst_groups: dict[str, list[dict]] = {}
+        ungrouped: list[str] = []
+        for ev in ins.supporting_evidence[:10]:
             if isinstance(ev, dict):
-                analyst = ev.get("analyst", "")
-                finding = ev.get("finding", ev.get("summary", str(ev)))
-                evidence_items += (
-                    f'<li><strong style="color:#A5B4FC;">{_esc(str(analyst))}</strong>: '
-                    f'{_esc(str(finding))}</li>'
-                )
+                analyst = ev.get("analyst", "unknown")
+                if analyst not in analyst_groups:
+                    analyst_groups[analyst] = []
+                analyst_groups[analyst].append(ev)
             elif isinstance(ev, str):
-                evidence_items += f"<li>{_esc(ev)}</li>"
-        if evidence_items:
+                ungrouped.append(ev)
+
+        # Render each analyst group as a color-coded card
+        for analyst_key, findings in analyst_groups.items():
+            a_color = _ANALYST_COLORS.get(analyst_key, "#6366F1")
+            a_icon = _ANALYST_ICONS.get(analyst_key, "&#9679;")
+            a_name = _ANALYST_DISPLAY_NAMES.get(analyst_key, analyst_key.replace("_", " ").title())
+
+            findings_html = ""
+            for ev in findings:
+                finding_text = ev.get("finding", ev.get("summary", str(ev)))
+                conf = ev.get("confidence")
+                conf_html = ""
+                if conf is not None:
+                    conf_pct = int(float(conf) * 100)
+                    conf_bar_color = _confidence_color(float(conf))
+                    conf_html = (
+                        f'<div class="analyst-conf-bar">'
+                        f'<div class="analyst-conf-track">'
+                        f'<div class="analyst-conf-fill" style="width:{conf_pct}%;background:{conf_bar_color};"></div>'
+                        f'</div>'
+                        f'<span class="analyst-conf-val" style="color:{conf_bar_color};">{conf_pct}%</span>'
+                        f'</div>'
+                    )
+                # Generate layman explanation for this finding
+                finding_layman = generate_layman_explanation(analyst_key, str(finding_text))
+                layman_html = ""
+                if finding_layman:
+                    layman_html = (
+                        f'<div class="layman-explanation">{_esc(finding_layman)}</div>'
+                    )
+                findings_html += (
+                    f'<div class="analyst-finding">'
+                    f'<div class="analyst-finding-text">{_esc(str(finding_text))}</div>'
+                    f'{layman_html}'
+                    f'{conf_html}'
+                    f'</div>'
+                )
+
+            details_parts.append(
+                f'<div class="analyst-section" style="border-left:3px solid {a_color};">'
+                f'<div class="analyst-section-header">'
+                f'<span class="analyst-badge" style="background:{a_color}18;color:{a_color};border:1px solid {a_color}33;">'
+                f'{a_icon} {_esc(a_name)}'
+                f'</span>'
+                f'</div>'
+                f'{findings_html}'
+                f'</div>'
+            )
+
+        # Render any ungrouped string evidence
+        if ungrouped:
+            ungrouped_items = "".join(
+                f'<li>{_esc(ev)}</li>' for ev in ungrouped
+            )
             details_parts.append(
                 f'<div class="detail-section">'
-                f'<div class="detail-label">Key Factors</div>'
-                f'<ul class="detail-list">{evidence_items}</ul>'
+                f'<div class="detail-label">Additional Factors</div>'
+                f'<ul class="detail-list">{ungrouped_items}</ul>'
                 f'</div>'
             )
 
@@ -2359,8 +2739,12 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
             {symbols_html}
             {timeframe_html}
           </div>
-          <div class="mini-radial-gauge" id="mini-gauge-{index}"
-               data-value="{confidence_pct}" data-color="{conf_color}"></div>
+          <div class="confidence-bar-inline">
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill" style="width:{confidence_pct}%;background:{conf_color};"></div>
+            </div>
+            <span class="confidence-bar-label" style="color:{conf_color};">{confidence_pct}%</span>
+          </div>
         </div>
         <h3 class="insight-title">{_esc(ins.title)}</h3>
         <p class="insight-thesis-preview">{_esc((ins.thesis or '')[:180])}{'...' if ins.thesis and len(ins.thesis) > 180 else ''}</p>
@@ -3097,11 +3481,107 @@ body {{
   font-weight: 500;
 }}
 
-/* Mini radial gauge (ApexCharts) */
-.mini-radial-gauge {{
-  width: 60px;
-  height: 60px;
-  flex-shrink: 0;
+/* Confidence progress bar (inline in insight cards) */
+.confidence-bar-inline {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 100px;
+}}
+.confidence-bar-track {{
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 60px;
+}}
+.confidence-bar-fill {{
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}}
+.confidence-bar-label {{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+}}
+
+/* Layman explanation text */
+.layman-explanation {{
+  font-style: italic;
+  color: #94A3B8;
+  font-size: 13px;
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(255,255,255,0.1);
+  line-height: 1.6;
+}}
+
+/* Analyst section cards (per-analyst evidence) */
+.analyst-section {{
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}}
+.analyst-section:last-child {{
+  margin-bottom: 0;
+}}
+.analyst-section-header {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}}
+.analyst-badge {{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}}
+.analyst-finding {{
+  margin-bottom: 10px;
+}}
+.analyst-finding:last-child {{
+  margin-bottom: 0;
+}}
+.analyst-finding-text {{
+  font-size: 14px;
+  line-height: 1.7;
+  color: #CBD5E1;
+}}
+.analyst-conf-bar {{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}}
+.analyst-conf-track {{
+  flex: 1;
+  max-width: 120px;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}}
+.analyst-conf-fill {{
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}}
+.analyst-conf-val {{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
 }}
 
 /* Charts row */
@@ -3951,36 +4431,6 @@ body {{
     document.querySelector('#chart-actions').innerHTML =
       '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No action data</div>';
   }}
-
-  // Mini radial gauges for insight cards
-  document.querySelectorAll('.mini-radial-gauge').forEach(function(el) {{
-    var val = parseInt(el.getAttribute('data-value'));
-    var color = el.getAttribute('data-color');
-    new ApexCharts(el, {{
-      chart: {{ type: 'radialBar', height: 60, width: 60, sparkline: {{ enabled: true }} }},
-      series: [val],
-      colors: [color],
-      plotOptions: {{
-        radialBar: {{
-          hollow: {{ size: '40%' }},
-          track: {{ background: 'rgba(255,255,255,0.06)' }},
-          dataLabels: {{
-            name: {{ show: false }},
-            value: {{
-              show: true,
-              fontSize: '11px',
-              fontFamily: 'JetBrains Mono, monospace',
-              fontWeight: 700,
-              color: color,
-              offsetY: 4,
-              formatter: function(v) {{ return v + '%'; }}
-            }}
-          }}
-        }}
-      }},
-      stroke: {{ lineCap: 'round' }}
-    }}).render();
-  }});
 
 }})();
 </script>

@@ -11,12 +11,7 @@ interface PatternStatsBarProps {
 function computeStats(patterns: KnowledgePattern[]) {
   const total = patterns.length;
 
-  const active = patterns.filter(
-    (p) =>
-      p.lifecycle_status === 'active' ||
-      p.lifecycle_status === 'confirmed' ||
-      (!p.lifecycle_status && p.is_active)
-  ).length;
+  const active = patterns.filter((p) => p.is_active).length;
 
   const avgSuccessRate =
     total > 0

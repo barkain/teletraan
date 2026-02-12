@@ -44,11 +44,27 @@ def _set_agg_cache(key: str, data: Any) -> None:
 # ---------------------------------------------------------------------------
 
 _CATEGORY_KEYWORDS: dict[str, list[str]] = {
-    "fed": ["fed", "fomc", "rate decision", "rate cut", "rate hike", "basis point", "federal reserve", "interest rate"],
-    "recession": ["recession", "economic downturn", "contraction"],
-    "inflation": ["inflation", "cpi", "consumer price", "price index"],
-    "sp500": ["s&p 500", "s&p500", "sp500", "spy", "spx"],
-    "gdp": ["gdp", "gross domestic product", "economic growth"],
+    "fed": [
+        "fed", "fomc", "rate decision", "rate cut", "rate hike",
+        "basis point", "federal reserve", "interest rate",
+        "fed rate cuts", "fed funds rate", "rate cuts in 202",
+    ],
+    "recession": [
+        "recession", "economic downturn", "contraction",
+        "us recession", "recession in 202",
+    ],
+    "inflation": [
+        "inflation", "cpi", "consumer price", "price index",
+        "cpi year", "cpi above", "inflation above", "inflation rate",
+    ],
+    "sp500": [
+        "s&p 500", "s&p500", "sp500", "spy", "spx",
+        "sp500 above", "sp500 below", "s&p above",
+    ],
+    "gdp": [
+        "gdp", "gross domestic product", "economic growth",
+        "gdp growth", "gdp above", "gdp below",
+    ],
 }
 
 

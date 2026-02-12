@@ -218,7 +218,7 @@ function TypeBreakdownChart({ data }: TypeBreakdownChartProps) {
   const chartData = React.useMemo(() => {
     return Object.entries(data).map(([type, stats]) => ({
       name: type.charAt(0).toUpperCase() + type.slice(1).toLowerCase(),
-      rate: stats.rate * 100,
+      rate: stats.success_rate * 100,
       total: stats.total,
       successful: stats.successful,
     }));
@@ -503,7 +503,7 @@ function StatsTable({ byType, byAction, onRowClick }: StatsTableProps) {
         rawName: name,
         total: stats.total,
         successful: stats.successful,
-        rate: stats.rate,
+        rate: stats.success_rate,
         avgReturn: 0, // Would come from extended API
       })),
       ...Object.entries(byAction).map(([name, stats]) => ({
@@ -512,7 +512,7 @@ function StatsTable({ byType, byAction, onRowClick }: StatsTableProps) {
         rawName: name,
         total: stats.total,
         successful: stats.successful,
-        rate: stats.rate,
+        rate: stats.success_rate,
         avgReturn: 0,
       })),
     ];
@@ -747,14 +747,14 @@ export function TrackRecordDashboard({
         name,
         stats.total,
         stats.successful,
-        `${(stats.rate * 100).toFixed(1)}%`,
+        `${(stats.success_rate * 100).toFixed(1)}%`,
       ]),
       ...Object.entries(trackRecord.by_action).map(([name, stats]) => [
         'Action',
         name,
         stats.total,
         stats.successful,
-        `${(stats.rate * 100).toFixed(1)}%`,
+        `${(stats.success_rate * 100).toFixed(1)}%`,
       ]),
     ];
 

@@ -165,6 +165,7 @@ class MarketContextBuilder:
         include_rich_technical: bool = False,
         include_predictions: bool = False,
         include_sentiment: bool = False,
+        include_fundamentals: bool = False,
         price_history_days: int = 60,
     ) -> dict[str, Any]:
         """Build full market context for analysis.
@@ -184,6 +185,9 @@ class MarketContextBuilder:
                 silently degrades otherwise.
             include_sentiment: Whether to include Reddit sentiment data.
                 Requires reddit_sentiment adapter; silently degrades otherwise.
+            include_fundamentals: Whether to include fundamental/valuation data
+                from yfinance (P/E, margins, growth, analyst targets, etc.).
+                Gracefully degrades if data is unavailable.
             price_history_days: Number of days of price history to include.
 
         Returns:
@@ -195,6 +199,7 @@ class MarketContextBuilder:
             - rich_technical: (optional) Dict mapping symbols to rich TA data
             - predictions: (optional) Dict with prediction market data
             - sentiment: (optional) Dict with Reddit sentiment data
+            - fundamentals: (optional) Dict mapping symbols to fundamental data
             - economic_indicators: List of economic indicator readings
             - sector_performance: Dict of sector ETF performance metrics
             - market_summary: Overall market status summary
@@ -211,6 +216,7 @@ class MarketContextBuilder:
             include_rich_technical,
             include_predictions,
             include_sentiment,
+            include_fundamentals,
             price_history_days,
         )
 
@@ -282,6 +288,10 @@ class MarketContextBuilder:
         if include_sentiment and _HAS_SENTIMENT:
             context["sentiment"] = await self._get_sentiment_data(symbols)
 
+        # Fundamental/valuation data from yfinance
+        if include_fundamentals:
+            context["fundamentals"] = await self._get_fundamental_data(symbols, context)
+
         self._last_context = context
         self._last_build_time = datetime.utcnow()
 
@@ -305,6 +315,10 @@ class MarketContextBuilder:
         if context.get("sentiment"):
             logger.info(
                 f"Context built: sentiment data with mood={context['sentiment'].get('overall_mood', 'unknown')}"
+            )
+        if context.get("fundamentals"):
+            logger.info(
+                f"Context built: {len(context['fundamentals'])} symbols with fundamental data"
             )
 
         return context
@@ -484,6 +498,43 @@ class MarketContextBuilder:
             logger.warning("Rich TA pipeline failed", exc_info=True)
 
         return results
+
+    async def _get_fundamental_data(
+        self,
+        symbols: list[str] | None,
+        context: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch fundamental/valuation data for symbols via yfinance.
+
+        Uses the cached ``get_fundamental_data`` helper from the yahoo adapter
+        which wraps blocking yfinance calls with ``run_in_executor`` and applies
+        a 5-minute TTL cache.
+
+        Args:
+            symbols: Optional list of symbols to fetch fundamentals for.
+                If None, derives symbols from the stocks already in context.
+            context: The context dict built so far (used to derive symbols
+                when *symbols* is None).
+
+        Returns:
+            Dict mapping symbol -> fundamental data dict.  Empty dict on
+            failure (graceful degradation).
+        """
+        try:
+            from data.adapters.yahoo import get_fundamental_data
+
+            target_symbols = (
+                [s.upper() for s in symbols] if symbols
+                else [s["symbol"] for s in context.get("stocks", [])]
+            )
+
+            if not target_symbols:
+                return {}
+
+            return await get_fundamental_data(target_symbols)
+        except Exception:
+            logger.warning("Failed to fetch fundamental data", exc_info=True)
+            return {}
 
     async def _get_stocks_data(
         self,
@@ -850,6 +901,7 @@ class MarketContextBuilder:
                 include_economic=False,
                 include_sectors=False,
                 include_rich_technical=True,
+                include_fundamentals=True,
                 price_history_days=60,
             )
         elif agent_type == "macro":
@@ -859,6 +911,7 @@ class MarketContextBuilder:
                 include_technical=False,
                 include_economic=True,
                 include_sectors=True,
+                include_fundamentals=True,
                 price_history_days=30,
             )
         elif agent_type == "sector":
@@ -872,6 +925,7 @@ class MarketContextBuilder:
                 include_technical=True,
                 include_economic=True,
                 include_sectors=True,
+                include_fundamentals=True,
                 price_history_days=90,
             )
         elif agent_type == "risk":
@@ -882,6 +936,7 @@ class MarketContextBuilder:
                 include_economic=True,
                 include_sectors=True,
                 include_rich_technical=True,
+                include_fundamentals=True,
                 price_history_days=90,
             )
         elif agent_type == "correlation":
@@ -895,7 +950,7 @@ class MarketContextBuilder:
             )
         else:
             # Default: full context
-            return await self.build_context(symbols=symbols)
+            return await self.build_context(symbols=symbols, include_fundamentals=True)
 
     async def build_statistical_context(
         self,
@@ -1604,6 +1659,129 @@ class MarketContextBuilder:
             if datetime.utcnow() - self._last_build_time < self._cache_ttl:
                 return self._last_context
         return None
+
+
+def _fmt_pct(value: float | None) -> str:
+    """Format a decimal ratio (e.g. 0.45) as a percentage string like '45.0%'."""
+    if value is None:
+        return "N/A"
+    return f"{value * 100:.1f}%"
+
+
+def _fmt_num(value: float | int | None, prefix: str = "", suffix: str = "") -> str:
+    """Format a number with optional prefix/suffix, or 'N/A' if None."""
+    if value is None:
+        return "N/A"
+    if isinstance(value, float):
+        if abs(value) >= 1e12:
+            return f"{prefix}{value / 1e12:.1f}T{suffix}"
+        if abs(value) >= 1e9:
+            return f"{prefix}{value / 1e9:.1f}B{suffix}"
+        if abs(value) >= 1e6:
+            return f"{prefix}{value / 1e6:.1f}M{suffix}"
+        return f"{prefix}{value:.2f}{suffix}"
+    return f"{prefix}{value:,}{suffix}"
+
+
+def format_fundamental_context(fundamentals: dict[str, dict[str, Any]]) -> str:
+    """Format fundamental/valuation data as readable text for LLM agents.
+
+    Converts the per-symbol dict returned by ``_get_fundamental_data`` into a
+    human-readable markdown block suitable for analyst prompts.
+
+    Each symbol section includes valuation ratios, profitability margins,
+    growth metrics, analyst targets, and balance sheet highlights.
+
+    Args:
+        fundamentals: Dict mapping symbol -> fundamental data dict (as produced
+            by ``get_fundamental_data`` in the yahoo adapter).
+
+    Returns:
+        Markdown-formatted string.  Empty string when *fundamentals* is empty.
+    """
+    if not fundamentals:
+        return ""
+
+    lines: list[str] = ["## Fundamental Data", ""]
+
+    for symbol in sorted(fundamentals.keys()):
+        data = fundamentals[symbol]
+
+        # Skip symbols with no meaningful data
+        if not any(v is not None for v in data.values()):
+            continue
+
+        lines.append(f"=== FUNDAMENTAL DATA: {symbol} ===")
+
+        # Valuation
+        val_parts: list[str] = []
+        if data.get("trailing_pe") is not None:
+            fwd_pe = data.get("forward_pe")
+            pe_str = f"P/E {data['trailing_pe']:.1f}"
+            if fwd_pe is not None:
+                pe_str += f" (fwd {fwd_pe:.1f})"
+            val_parts.append(pe_str)
+        if data.get("peg_ratio") is not None:
+            val_parts.append(f"PEG {data['peg_ratio']:.1f}")
+        if data.get("price_to_book") is not None:
+            val_parts.append(f"P/B {data['price_to_book']:.1f}")
+        if data.get("price_to_sales") is not None:
+            val_parts.append(f"P/S {data['price_to_sales']:.1f}")
+        if val_parts:
+            lines.append(f"Valuation: {', '.join(val_parts)}")
+
+        # Profitability
+        prof_parts: list[str] = []
+        if data.get("gross_margins") is not None:
+            prof_parts.append(f"Gross Margin {_fmt_pct(data['gross_margins'])}")
+        if data.get("operating_margins") is not None:
+            prof_parts.append(f"Operating Margin {_fmt_pct(data['operating_margins'])}")
+        if data.get("profit_margins") is not None:
+            prof_parts.append(f"Profit Margin {_fmt_pct(data['profit_margins'])}")
+        if prof_parts:
+            lines.append(f"Profitability: {', '.join(prof_parts)}")
+
+        # Growth
+        growth_parts: list[str] = []
+        if data.get("revenue_growth") is not None:
+            lines_val = data["revenue_growth"]
+            growth_parts.append(f"Revenue {lines_val:+.1%}")
+        if data.get("earnings_growth") is not None:
+            growth_parts.append(f"Earnings {data['earnings_growth']:+.1%}")
+        if data.get("earnings_quarterly_growth") is not None:
+            growth_parts.append(f"Quarterly EPS {data['earnings_quarterly_growth']:+.1%}")
+        if growth_parts:
+            lines.append(f"Growth: {', '.join(growth_parts)}")
+
+        # Analyst targets
+        analyst_parts: list[str] = []
+        if data.get("target_mean_price") is not None:
+            target_str = f"Mean Target ${data['target_mean_price']:.2f}"
+            if data.get("target_high_price") is not None:
+                target_str += f" (High ${data['target_high_price']:.2f}"
+                if data.get("target_low_price") is not None:
+                    target_str += f", Low ${data['target_low_price']:.2f}"
+                target_str += ")"
+            analyst_parts.append(target_str)
+        if data.get("recommendation_key") is not None:
+            analyst_parts.append(f"Rating: {data['recommendation_key'].title()}")
+        if analyst_parts:
+            lines.append(f"Analyst: {', '.join(analyst_parts)}")
+
+        # Balance sheet
+        bs_parts: list[str] = []
+        if data.get("debt_to_equity") is not None:
+            bs_parts.append(f"Debt/Equity {data['debt_to_equity']:.1f}")
+        if data.get("current_ratio") is not None:
+            bs_parts.append(f"Current Ratio {data['current_ratio']:.1f}")
+        if data.get("free_cashflow") is not None:
+            bs_parts.append(f"FCF {_fmt_num(data['free_cashflow'], prefix='$')}")
+        if bs_parts:
+            lines.append(f"Balance Sheet: {', '.join(bs_parts)}")
+
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def format_rich_technical_context(ta_data: dict[str, dict[str, Any]]) -> str:

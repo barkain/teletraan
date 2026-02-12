@@ -43,8 +43,8 @@ export interface TrackRecordStats {
   total_insights: number;
   successful: number;
   success_rate: number;
-  by_type: Record<string, { total: number; successful: number; rate: number }>;
-  by_action: Record<string, { total: number; successful: number; rate: number }>;
+  by_type: Record<string, { total: number; successful: number; success_rate: number; avg_return?: number | null }>;
+  by_action: Record<string, { total: number; successful: number; success_rate: number; avg_return?: number | null }>;
   avg_return_successful: number;
   avg_return_failed: number;
 }

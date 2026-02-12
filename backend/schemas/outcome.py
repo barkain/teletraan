@@ -28,6 +28,13 @@ class InsightOutcomeResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class OutcomeListResponse(BaseModel):
+    """Response schema for a paginated list of insight outcomes."""
+
+    items: list[InsightOutcomeResponse] = Field(description="List of outcome responses")
+    total: int = Field(description="Total number of matching outcomes")
+
+
 class OutcomeSummaryResponse(BaseModel):
     """Response schema for aggregate outcome statistics."""
 

@@ -14,9 +14,6 @@ export const deepInsightKeys = {
   recent: (limit: number) => [...deepInsightKeys.all, 'recent', limit] as const,
 };
 
-// Empty response for placeholder data
-const EMPTY_RESPONSE: DeepInsightListResponse = { items: [], total: 0 };
-
 // Parameters for listing deep insights
 export interface DeepInsightParams {
   limit?: number;
@@ -62,7 +59,6 @@ export function useRecentDeepInsights(limit: number = 9) {
     queryFn: () => api.deepInsights.list({ limit }),
     staleTime: 30 * 1000, // 30 seconds - refresh more frequently on dashboard
     gcTime: 10 * 60 * 1000, // 10 minutes cache for stale-while-revalidate
-    placeholderData: EMPTY_RESPONSE, // Show empty state immediately, then populate
     refetchOnMount: 'always', // Always check for fresh data when visiting dashboard
   });
 }

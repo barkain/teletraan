@@ -12,9 +12,15 @@ import {
   BarChart3,
   Zap,
   Settings,
+  Play,
+  Target,
+  BookOpen,
+  Briefcase,
+  FileText,
   Database,
   ChevronDown,
 } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -25,7 +31,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  DropdownMenuGroup,
 } from '@/components/ui/dropdown-menu';
 import {
   Sheet,
@@ -34,20 +39,28 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { cn } from '@/lib/utils';
 import { useDeepInsights } from '@/lib/hooks/use-deep-insights';
 
-// Primary navigation items - Insight-focused
+// Mirror sidebar navigation for mobile menu
 const primaryNavItems = [
   { href: '/', label: 'Home', icon: Home },
   { href: '/insights', label: 'Insights', icon: Lightbulb },
+  { href: '/patterns', label: 'Patterns', icon: BookOpen },
+  { href: '/track-record', label: 'Track Record', icon: Target },
+  { href: '/reports', label: 'Reports', icon: FileText },
+  { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
   { href: '/conversations', label: 'Conversations', icon: MessageSquare },
   { href: '/research', label: 'Research', icon: FlaskConical },
 ];
 
-// Secondary navigation items - Data views
 const secondaryNavItems = [
   { href: '/stocks', label: 'Market Data', icon: BarChart3 },
   { href: '/signals', label: 'Signals', icon: Zap },
@@ -55,11 +68,11 @@ const secondaryNavItems = [
 
 export function Header() {
   const pathname = usePathname();
+  const [dataExpanded, setDataExpanded] = useState(false);
 
-  // Fetch insights to show counts
+  // Fetch insights for mobile menu badges
   const { data: insightsData } = useDeepInsights({ limit: 100 });
 
-  // Calculate badge counts
   const pendingModifications = insightsData?.items?.filter(
     (i) => ['STRONG_BUY', 'BUY', 'SELL', 'STRONG_SELL'].includes(i.action)
   ).length || 0;
@@ -69,12 +82,12 @@ export function Header() {
   ).length || 0;
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-14 items-center w-full px-4 md:px-6">
+    <header className="sticky top-0 z-50 w-full bg-gradient-to-r from-slate-50 via-indigo-50 to-slate-50 dark:from-slate-950 dark:via-purple-950 dark:to-slate-950 border-b border-slate-200 dark:border-transparent">
+      <div className="flex h-12 items-center w-full px-4 md:px-6">
         {/* Mobile menu */}
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="md:hidden mr-2">
+            <Button variant="ghost" size="icon" className="md:hidden mr-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-white/80 dark:hover:text-white dark:hover:bg-white/10">
               <Menu className="h-5 w-5" />
               <span className="sr-only">Toggle menu</span>
             </Button>
@@ -82,7 +95,7 @@ export function Header() {
           <SheetContent side="left" className="w-72">
             <SheetHeader>
               <SheetTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-primary" />
+                <TrendingUp className="h-5 w-5 text-purple-500" />
                 Teletraan
               </SheetTitle>
             </SheetHeader>
@@ -97,14 +110,11 @@ export function Header() {
                   const Icon = item.icon;
                   const isActive = pathname === item.href ||
                     (item.href !== '/' && pathname.startsWith(item.href));
-
-                  // Add badges
                   const badge = item.label === 'Insights' && pendingModifications > 0
                     ? pendingModifications
                     : item.label === 'Research' && activeResearch > 0
                     ? activeResearch
                     : null;
-
                   return (
                     <Link
                       key={item.href}
@@ -134,39 +144,60 @@ export function Header() {
 
             <Separator className="my-4" />
 
-            {/* Secondary Navigation */}
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 px-3 flex items-center gap-2">
-                <Database className="h-3.5 w-3.5" />
-                Data
-              </h3>
-              <nav className="flex flex-col gap-1">
-                {secondaryNavItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = pathname.startsWith(item.href);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={cn(
-                        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-muted-foreground',
-                        isActive
-                          ? 'bg-secondary text-foreground'
-                          : 'hover:bg-muted hover:text-foreground'
-                      )}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </nav>
-            </div>
+            {/* Secondary Navigation - Collapsible */}
+            <Collapsible open={dataExpanded} onOpenChange={setDataExpanded}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="w-full justify-between px-3 py-1.5 h-auto text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                >
+                  <span className="flex items-center gap-2">
+                    <Database className="h-3.5 w-3.5" />
+                    Data
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      'h-3.5 w-3.5 transition-transform duration-200',
+                      dataExpanded && 'rotate-180'
+                    )}
+                  />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <nav className="flex flex-col gap-1 mt-2">
+                  {secondaryNavItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = pathname.startsWith(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={cn(
+                          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-muted-foreground',
+                          isActive
+                            ? 'bg-secondary text-foreground'
+                            : 'hover:bg-muted hover:text-foreground'
+                        )}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </CollapsibleContent>
+            </Collapsible>
 
             <Separator className="my-4" />
 
-            {/* Quick Actions */}
+            {/* Bottom actions */}
             <div className="flex flex-col gap-2">
+              <Button variant="default" className="w-full justify-center gap-2" asChild>
+                <Link href="/analysis/run">
+                  <Play className="h-4 w-4" />
+                  Run Analysis
+                </Link>
+              </Button>
               <Link
                 href="/settings"
                 className={cn(
@@ -184,107 +215,44 @@ export function Header() {
         </Sheet>
 
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 font-semibold">
-          <TrendingUp className="h-5 w-5 text-primary" />
-          <span className="hidden sm:inline">Teletraan</span>
+        <Link href="/" className="flex items-center gap-2 font-semibold group">
+          <TrendingUp className="h-5 w-5 text-indigo-500 dark:text-cyan-400 dark:drop-shadow-[0_0_6px_rgba(34,211,238,0.4)] dark:group-hover:drop-shadow-[0_0_10px_rgba(34,211,238,0.6)] transition-all" />
+          <span className="hidden sm:inline bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-cyan-300 dark:to-purple-300 bg-clip-text text-transparent font-bold tracking-tight text-base dark:drop-shadow-[0_0_8px_rgba(168,85,247,0.3)]">
+            Teletraan
+          </span>
         </Link>
 
-        {/* Desktop nav - Primary items */}
-        <nav className="hidden md:flex items-center gap-1 ml-6">
-          {primaryNavItems.map((item) => {
-            const isActive = pathname === item.href ||
-              (item.href !== '/' && pathname.startsWith(item.href));
-
-            // Add badges for desktop
-            const badge = item.label === 'Insights' && pendingModifications > 0
-              ? pendingModifications
-              : item.label === 'Research' && activeResearch > 0
-              ? activeResearch
-              : null;
-
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-secondary text-foreground'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                )}
-              >
-                {item.label}
-                {badge !== null && (
-                  <Badge
-                    variant={item.label === 'Insights' ? 'destructive' : 'secondary'}
-                    className="h-4 min-w-4 px-1 text-[10px]"
-                  >
-                    {badge}
-                  </Badge>
-                )}
-              </Link>
-            );
-          })}
-
-          {/* Data dropdown for desktop */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                className={cn(
-                  'text-sm font-medium gap-1',
-                  secondaryNavItems.some((item) => pathname.startsWith(item.href))
-                    ? 'text-foreground'
-                    : 'text-muted-foreground'
-                )}
-              >
-                Data
-                <ChevronDown className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              {secondaryNavItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <DropdownMenuItem key={item.href} asChild>
-                    <Link href={item.href} className="flex items-center gap-2">
-                      <Icon className="h-4 w-4" />
-                      {item.label}
-                    </Link>
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </nav>
-
-        {/* Spacer to push right-side items to the far right */}
+        {/* Spacer */}
         <div className="flex-1" />
 
         {/* Right-side controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {/* Theme toggle */}
-          <ThemeToggle />
+          <ThemeToggle variant="header" />
 
           {/* User menu */}
           <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="rounded-full">
-              <Avatar className="h-8 w-8">
-                <AvatarFallback>U</AvatarFallback>
-              </Avatar>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>My Account</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link href="/settings">Settings</Link>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="rounded-full hover:bg-slate-100 dark:hover:bg-white/10">
+                <Avatar className="h-7 w-7 ring-1 ring-slate-200 dark:ring-white/20">
+                  <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 dark:from-cyan-500 dark:to-purple-500 text-white text-xs font-medium">
+                    U
+                  </AvatarFallback>
+                </Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>My Account</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/settings">Settings</Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
+      {/* Bottom accent line */}
+      <div className="h-[2px] bg-gradient-to-r from-indigo-200 via-purple-200 to-pink-200 opacity-60 dark:from-cyan-500 dark:via-purple-500 dark:to-pink-500 dark:opacity-80" />
     </header>
   );
 }

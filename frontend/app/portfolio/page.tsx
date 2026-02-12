@@ -14,9 +14,11 @@ import {
   useAddHolding,
   useUpdateHolding,
   useDeleteHolding,
+  portfolioKeys,
 } from '@/lib/hooks/use-portfolio';
+import { useQueryClient } from '@tanstack/react-query';
 import type { PortfolioHolding, HoldingCreate, HoldingUpdate } from '@/types';
-import { Briefcase, Plus } from 'lucide-react';
+import { Briefcase, Plus, RefreshCw } from 'lucide-react';
 
 function PortfolioSkeleton() {
   return (
@@ -73,6 +75,9 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 export default function PortfolioPage() {
   const [holdingDialogOpen, setHoldingDialogOpen] = useState(false);
   const [editingHolding, setEditingHolding] = useState<PortfolioHolding | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const queryClient = useQueryClient();
 
   // Data hooks
   const { data: portfolio, isLoading, error } = usePortfolio();
@@ -85,6 +90,12 @@ export default function PortfolioPage() {
   const deleteHolding = useDeleteHolding();
 
   const isMutating = addHolding.isPending || updateHolding.isPending;
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
+    setTimeout(() => setIsRefreshing(false), 1000);
+  };
 
   const handleOpenAddDialog = () => {
     setEditingHolding(null);
@@ -141,10 +152,16 @@ export default function PortfolioPage() {
           </p>
         </div>
         {hasHoldings && (
-          <Button onClick={handleOpenAddDialog} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Add Holding
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+              Update Prices
+            </Button>
+            <Button onClick={handleOpenAddDialog} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Add Holding
+            </Button>
+          </div>
         )}
       </div>
 

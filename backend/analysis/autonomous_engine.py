@@ -613,9 +613,10 @@ class AutonomousDeepEngine:
             symbols=symbols_to_analyze,
             include_price_history=True,
             include_technical=True,
-            include_economic=False,
-            include_sectors=False,
+            include_economic=True,
+            include_sectors=True,
             include_rich_technical=True,
+            include_fundamentals=True,
         )
 
         async def _analyze_symbol(sym: str) -> tuple[str, dict[str, Any]]:
@@ -1295,6 +1296,19 @@ class AutonomousDeepEngine:
             except Exception as e:
                 logger.warning(f"[AUTO] Outcome tracking phase failed: {e}")
 
+            # Compute statistical features for discovered symbols
+            try:
+                from analysis.statistical_calculator import StatisticalFeatureCalculator  # type: ignore[import-not-found]
+
+                symbols = list({ins.primary_symbol for ins in stored if ins.primary_symbol})
+                if symbols:
+                    calculator = StatisticalFeatureCalculator(session)
+                    await calculator.compute_all_features(symbols)
+                    await session.commit()
+                    logger.info(f"[AUTO] Statistical features computed for {len(symbols)} heatmap symbols")
+            except Exception as e:
+                logger.warning(f"[AUTO] Statistical feature computation failed: {e}")
+
         return stored
 
     def _build_heatmap_discovery_summary(
@@ -1839,9 +1853,10 @@ class AutonomousDeepEngine:
                 symbols=[symbol],
                 include_price_history=True,
                 include_technical=True,
-                include_economic=False,
-                include_sectors=False,
+                include_economic=True,
+                include_sectors=True,
                 include_rich_technical=True,
+                include_fundamentals=True,
             )
 
         reports: dict[str, Any] = {}
@@ -2251,6 +2266,19 @@ class AutonomousDeepEngine:
                     logger.info(f"[AUTO] Started outcome tracking for {tracked_count}/{len(stored)} legacy insights")
             except Exception as e:
                 logger.warning(f"[AUTO] Outcome tracking phase failed: {e}")
+
+            # Compute statistical features for discovered symbols
+            try:
+                from analysis.statistical_calculator import StatisticalFeatureCalculator  # type: ignore[import-not-found]
+
+                symbols = list({ins.primary_symbol for ins in stored if ins.primary_symbol})
+                if symbols:
+                    calculator = StatisticalFeatureCalculator(session)
+                    await calculator.compute_all_features(symbols)
+                    await session.commit()
+                    logger.info(f"[AUTO] Statistical features computed for {len(symbols)} legacy symbols")
+            except Exception as e:
+                logger.warning(f"[AUTO] Statistical feature computation failed: {e}")
 
         return stored
 

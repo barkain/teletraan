@@ -14,6 +14,7 @@ from models.insight_outcome import InsightOutcome, TrackingStatus
 from schemas.outcome import (
     CheckOutcomesResponse,
     InsightOutcomeResponse,
+    OutcomeListResponse,
     OutcomeSummaryResponse,
     StartTrackingRequest,
 )
@@ -160,14 +161,14 @@ async def get_outcome_for_insight(
     return _outcome_to_response(outcome)
 
 
-@router.get("", response_model=list[InsightOutcomeResponse])
+@router.get("", response_model=OutcomeListResponse)
 async def list_outcomes(
     db: AsyncSession = Depends(get_db),
     status: Optional[str] = Query(default=None, description="Filter by status: 'tracking' or 'completed'"),
     validated: Optional[bool] = Query(default=None, description="Filter by validation result"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-) -> list[InsightOutcomeResponse]:
+) -> OutcomeListResponse:
     """List insight outcomes with optional filtering.
 
     Args:
@@ -178,29 +179,37 @@ async def list_outcomes(
         offset: Pagination offset
 
     Returns:
-        List of InsightOutcome responses
+        Paginated list of InsightOutcome responses with total count
     """
-    query = select(InsightOutcome).order_by(InsightOutcome.created_at.desc())
+    # Build base query with filters for both count and data
+    base_query = select(InsightOutcome)
 
     # Apply status filter
     if status:
         status_upper = status.upper()
         if status_upper == "TRACKING":
-            query = query.where(InsightOutcome.tracking_status == TrackingStatus.TRACKING.value)
+            base_query = base_query.where(InsightOutcome.tracking_status == TrackingStatus.TRACKING.value)
         elif status_upper == "COMPLETED":
-            query = query.where(InsightOutcome.tracking_status == TrackingStatus.COMPLETED.value)
+            base_query = base_query.where(InsightOutcome.tracking_status == TrackingStatus.COMPLETED.value)
 
     # Apply validated filter
     if validated is not None:
-        query = query.where(InsightOutcome.thesis_validated == validated)
+        base_query = base_query.where(InsightOutcome.thesis_validated == validated)
 
-    # Apply pagination
-    query = query.offset(offset).limit(limit)
+    # Get total count
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = await db.scalar(count_query) or 0
 
-    result = await db.execute(query)
+    # Apply ordering and pagination
+    data_query = base_query.order_by(InsightOutcome.created_at.desc()).offset(offset).limit(limit)
+
+    result = await db.execute(data_query)
     outcomes = result.scalars().all()
 
-    return [_outcome_to_response(o) for o in outcomes]
+    return OutcomeListResponse(
+        items=[_outcome_to_response(o) for o in outcomes],
+        total=total,
+    )
 
 
 @router.post("/start", response_model=InsightOutcomeResponse)

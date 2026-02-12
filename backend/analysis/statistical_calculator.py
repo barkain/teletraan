@@ -752,6 +752,9 @@ class StatisticalFeatureCalculator:
     ) -> None:
         """Bulk save features to the database.
 
+        Deletes existing features for the same symbol + calculation_date
+        combinations before inserting, preventing duplicates on re-runs.
+
         Args:
             features: List of StatisticalFeature objects to save.
         """
@@ -759,6 +762,18 @@ class StatisticalFeatureCalculator:
             return
 
         try:
+            from sqlalchemy import delete
+
+            # Delete existing features for same symbol+date combos
+            symbol_dates = {(f.symbol, f.calculation_date) for f in features}
+            for symbol, calc_date in symbol_dates:
+                await self.db.execute(
+                    delete(StatisticalFeature)
+                    .where(StatisticalFeature.symbol == symbol)
+                    .where(StatisticalFeature.calculation_date == calc_date)
+                )
+
+            # Insert new features
             for feature in features:
                 self.db.add(feature)
             await self.db.flush()

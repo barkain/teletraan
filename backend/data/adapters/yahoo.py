@@ -378,6 +378,121 @@ class YahooFinanceAdapter:
             logger.error(f"Error searching for symbols: {e}")
             return []
 
+    async def get_fundamental_data(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        """Fetch fundamental/valuation data for multiple symbols.
+
+        Retrieves valuation ratios, profitability margins, growth metrics,
+        analyst targets, and balance sheet data from yfinance's Ticker.info dict.
+
+        Args:
+            symbols: List of stock ticker symbols.
+
+        Returns:
+            Dict mapping symbols to fundamental data dicts. Symbols that fail
+            are silently skipped (not included in result).
+        """
+        logger.debug(f"Fetching fundamental data for {len(symbols)} symbols")
+
+        async def _fetch_one(symbol: str) -> tuple[str, dict[str, Any]] | None:
+            try:
+                ticker = await self._run_blocking(yf.Ticker, symbol)
+                info = await self._run_blocking(lambda: ticker.info)
+
+                if not info:
+                    return None
+
+                return symbol.upper(), {
+                    # Valuation
+                    "trailing_pe": info.get("trailingPE"),
+                    "forward_pe": info.get("forwardPE"),
+                    "peg_ratio": info.get("pegRatio"),
+                    "price_to_book": info.get("priceToBook"),
+                    "price_to_sales": info.get("priceToSalesTrailing12Months"),
+                    # Profitability
+                    "profit_margins": info.get("profitMargins"),
+                    "operating_margins": info.get("operatingMargins"),
+                    "gross_margins": info.get("grossMargins"),
+                    # Growth
+                    "revenue_growth": info.get("revenueGrowth"),
+                    "earnings_growth": info.get("earningsGrowth"),
+                    "earnings_quarterly_growth": info.get("earningsQuarterlyGrowth"),
+                    # EPS
+                    "trailing_eps": info.get("trailingEps"),
+                    "forward_eps": info.get("forwardEps"),
+                    # Analyst targets
+                    "target_mean_price": info.get("targetMeanPrice"),
+                    "target_high_price": info.get("targetHighPrice"),
+                    "target_low_price": info.get("targetLowPrice"),
+                    "recommendation_mean": info.get("recommendationMean"),
+                    "recommendation_key": info.get("recommendationKey"),
+                    # Balance sheet
+                    "total_debt": info.get("totalDebt"),
+                    "total_cash": info.get("totalCash"),
+                    "debt_to_equity": info.get("debtToEquity"),
+                    "current_ratio": info.get("currentRatio"),
+                    "free_cashflow": info.get("freeCashflow"),
+                    # General
+                    "market_cap": info.get("marketCap"),
+                    "enterprise_value": info.get("enterpriseValue"),
+                    "sector": info.get("sector"),
+                    "industry": info.get("industry"),
+                }
+            except Exception as e:
+                logger.warning(f"Failed to fetch fundamentals for {symbol}: {e}")
+                return None
+
+        results = await asyncio.gather(
+            *[_fetch_one(sym) for sym in symbols],
+            return_exceptions=True,
+        )
+
+        fundamentals: dict[str, dict[str, Any]] = {}
+        for r in results:
+            if isinstance(r, BaseException):
+                logger.warning(f"Fundamental data fetch failed: {r}")
+                continue
+            if r is not None:
+                sym, data = r
+                fundamentals[sym] = data
+
+        logger.info(f"Fetched fundamental data for {len(fundamentals)}/{len(symbols)} symbols")
+        return fundamentals
+
+
+# TTL cache for fundamental data (5-minute cache, same pattern as heatmap_fetcher)
+_fundamental_cache: dict[str, tuple[float, dict[str, dict[str, Any]]]] = {}
+_FUNDAMENTAL_CACHE_TTL = 300  # 5 minutes
+
+
+async def get_fundamental_data(symbols: list[str]) -> dict[str, dict[str, Any]]:
+    """Fetch fundamental data with TTL caching.
+
+    Uses a module-level cache with 5-minute TTL to avoid redundant yfinance
+    calls during the same analysis pipeline.
+
+    Args:
+        symbols: List of stock ticker symbols.
+
+    Returns:
+        Dict mapping symbols to fundamental data dicts.
+    """
+    import time
+
+    cache_key = ",".join(sorted(s.upper() for s in symbols))
+    now = time.monotonic()
+
+    if cache_key in _fundamental_cache:
+        cached_time, cached_data = _fundamental_cache[cache_key]
+        if now - cached_time < _FUNDAMENTAL_CACHE_TTL:
+            logger.debug("Returning cached fundamental data")
+            return cached_data
+
+    adapter = YahooFinanceAdapter()
+    data = await adapter.get_fundamental_data(symbols)
+
+    _fundamental_cache[cache_key] = (now, data)
+    return data
+
 
 # Export singleton instance for convenience
 yahoo_adapter = YahooFinanceAdapter()

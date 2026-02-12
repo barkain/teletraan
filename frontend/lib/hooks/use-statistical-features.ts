@@ -42,18 +42,28 @@ export function useStatisticalFeatures(symbol: string) {
     enabled: !!symbol,
     refetchInterval: FEATURES_REFRESH_INTERVAL,
     staleTime: FEATURES_REFRESH_INTERVAL / 2,
-    retry: 2,
+    retry: (failureCount, error) => {
+      // Don't retry 404s - they mean no features computed yet
+      if (error instanceof ApiError && error.status === 404) {
+        return false;
+      }
+      return failureCount < 2;
+    },
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
   });
 
-  // Show error toast on fetch error
+  // Show error toast on fetch error (but not for 404s - that just means no features computed yet)
   useEffect(() => {
     if (query.error) {
-      toast.error(`Failed to fetch features for ${symbol}`, {
-        description: query.error instanceof ApiError
-          ? `Server error: ${query.error.status}`
-          : 'Please check your connection and try again.',
-      });
+      const is404 = query.error instanceof ApiError && query.error.status === 404;
+
+      if (!is404) {
+        toast.error(`Failed to fetch features for ${symbol}`, {
+          description: query.error instanceof ApiError
+            ? `Server error: ${query.error.status}`
+            : 'Please check your connection and try again.',
+        });
+      }
     }
   }, [query.error, symbol]);
 
@@ -61,13 +71,17 @@ export function useStatisticalFeatures(symbol: string) {
     queryClient.invalidateQueries({ queryKey: statisticalFeaturesKeys.features(symbol) });
   };
 
+  // Treat 404 as empty data, not an error
+  const is404 = query.error instanceof ApiError && query.error.status === 404;
+  const hasError = query.isError && !is404;
+
   return {
     features: query.data?.features ?? [],
     calculationDate: query.data?.calculation_date,
     isLoading: query.isLoading,
-    isError: query.isError,
-    error: query.error,
-    isEmpty: !query.isLoading && !query.isError && (!query.data?.features || query.data.features.length === 0),
+    isError: hasError,
+    error: is404 ? null : query.error,
+    isEmpty: !query.isLoading && (!query.data?.features || query.data.features.length === 0),
     refetch,
   };
 }
@@ -95,18 +109,28 @@ export function useActiveSignals(options?: {
     }),
     refetchInterval: SIGNALS_REFRESH_INTERVAL,
     staleTime: SIGNALS_REFRESH_INTERVAL / 2,
-    retry: 2,
+    retry: (failureCount, error) => {
+      // Don't retry 404s - they mean no signals available yet
+      if (error instanceof ApiError && error.status === 404) {
+        return false;
+      }
+      return failureCount < 2;
+    },
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
   });
 
-  // Show error toast on fetch error
+  // Show error toast on fetch error (but not for 404s - that just means no signals yet)
   useEffect(() => {
     if (query.error) {
-      toast.error('Failed to fetch active signals', {
-        description: query.error instanceof ApiError
-          ? `Server error: ${(query.error as ApiError).status}`
-          : 'Unable to load active signals.',
-      });
+      const is404 = query.error instanceof ApiError && query.error.status === 404;
+
+      if (!is404) {
+        toast.error('Failed to fetch active signals', {
+          description: query.error instanceof ApiError
+            ? `Server error: ${(query.error as ApiError).status}`
+            : 'Unable to load active signals.',
+        });
+      }
     }
   }, [query.error]);
 
@@ -114,14 +138,18 @@ export function useActiveSignals(options?: {
     queryClient.invalidateQueries({ queryKey: statisticalFeaturesKeys.signals(params) });
   };
 
+  // Treat 404 as empty data, not an error
+  const is404 = query.error instanceof ApiError && query.error.status === 404;
+  const hasError = query.isError && !is404;
+
   return {
     signals: query.data?.signals ?? [],
     count: query.data?.count ?? 0,
     asOf: query.data?.as_of,
     isLoading: query.isLoading,
-    isError: query.isError,
-    error: query.error,
-    isEmpty: !query.isLoading && !query.isError && (!query.data?.signals || query.data.signals.length === 0),
+    isError: hasError,
+    error: is404 ? null : query.error,
+    isEmpty: !query.isLoading && (!query.data?.signals || query.data.signals.length === 0),
     refetch,
   };
 }

@@ -118,7 +118,7 @@ class KalshiAdapter:
         if self._client is None:
             self._client = httpx.AsyncClient(
                 base_url=self.BASE_URL,
-                timeout=30.0,
+                timeout=5.0,
                 headers={
                     "Accept": "application/json",
                     "User-Agent": "market-analyzer/1.0",

@@ -425,6 +425,16 @@ def format_macro_context(market_data: dict) -> str:
             context_parts.append("")
             context_parts.append(prediction_text)
 
+    # Fundamental data (optional)
+    fundamentals = market_data.get("fundamentals")
+    if fundamentals:
+        from analysis.context_builder import format_fundamental_context  # type: ignore[import-not-found]
+
+        fundamental_text = format_fundamental_context(fundamentals)
+        if fundamental_text:
+            context_parts.append("")
+            context_parts.append(fundamental_text)
+
     return "\n".join(context_parts)
 
 
