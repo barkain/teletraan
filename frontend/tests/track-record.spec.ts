@@ -22,8 +22,8 @@ test.describe('Track Record Dashboard', () => {
     // Look for stats cards
     const successRateCard = page.locator('text=Overall Success Rate');
     const totalInsightsCard = page.locator('text=Total Insights Tracked');
-    const trackingCard = page.locator('text=Currently Tracking');
-    const avgReturnCard = page.locator('text=Avg Return');
+    page.locator('text=Currently Tracking');
+    page.locator('text=Avg Return');
 
     // Check at least some cards are visible
     const hasSuccessRate = await successRateCard.count() > 0;

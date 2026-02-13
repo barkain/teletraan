@@ -18,9 +18,6 @@ export const researchKeys = {
   detail: (id: number) => [...researchKeys.details(), id] as const,
 };
 
-// Empty response for placeholder data
-const EMPTY_RESPONSE: ResearchListResponse = { items: [], total: 0 };
-
 /**
  * Custom hook for fetching research list with optional filtering
  */

@@ -554,7 +554,7 @@ export function useInsightChat(conversationId: number | undefined) {
               message: content.trim(),
             })
           );
-        } catch (err) {
+        } catch (_err) {
           setIsLoading(false);
           setError('Failed to connect to chat server');
           currentMessageRef.current = null;

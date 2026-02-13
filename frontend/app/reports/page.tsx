@@ -805,7 +805,7 @@ export default function ReportsPage() {
   const [dateRange, setDateRange] = useState<DateRange>('all');
 
   // All reports
-  const allReports = data?.items ?? [];
+  const allReports = useMemo(() => data?.items ?? [], [data?.items]);
 
   // Extract unique regimes
   const regimeOptions = useMemo(() => {

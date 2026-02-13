@@ -23,7 +23,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChatInput } from '@/components/chat/chat-input';
 import { renderMarkdown } from '@/components/chat/message-bubble';
-import { postApi, putApi } from '@/lib/api';
+import { postApi } from '@/lib/api';
 import {
   useInsightChat,
   useInsightConversation,
@@ -140,7 +140,7 @@ function StreamingIndicator() {
 
 function ModificationProposalCard({
   proposal,
-  insightId,
+  insightId: _insightId,
   onApprove,
   onReject,
   isProcessing,
@@ -235,7 +235,7 @@ function ModificationProposalCard({
 
 function ResearchRequestCard({
   research,
-  insightId,
+  insightId: _insightId,
   onLaunch,
   isProcessing,
 }: {

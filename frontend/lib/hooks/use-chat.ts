@@ -288,7 +288,7 @@ export function useChat() {
           id: userMessage.id,
           message: content.trim(),
         }));
-      } catch (error) {
+      } catch (_error) {
         setState(prev => ({
           ...prev,
           isLoading: false,

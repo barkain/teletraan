@@ -29,14 +29,14 @@ test.describe('Statistical Signals Card', () => {
 
     // The loading skeleton should have skeleton elements
     // Check for skeleton loader elements (they appear during loading)
-    const skeletons = page.locator('.animate-pulse, [class*="skeleton"]');
+    page.locator('.animate-pulse, [class*="skeleton"]');
 
     // Wait for content to load
     await page.waitForLoadState('domcontentloaded');
 
     // After loading, signals card should be visible
-    const signalsCard = page.locator('text=Statistical Signals');
-    await expect(signalsCard).toBeVisible({ timeout: 10000 });
+    const signalsCardEl = page.locator('text=Statistical Signals');
+    await expect(signalsCardEl).toBeVisible({ timeout: 10000 });
   });
 
   test('signals are color-coded by type', async ({ page }) => {
@@ -121,7 +121,7 @@ test.describe('Statistical Signals Card', () => {
     await page.waitForLoadState('domcontentloaded');
 
     // On mobile, the signals sidebar may be hidden or in a different layout
-    const signalsCard = page.locator('text=Statistical Signals');
+    page.locator('text=Statistical Signals');
 
     await page.screenshot({ path: 'test-results/signals-mobile.png', fullPage: true });
 

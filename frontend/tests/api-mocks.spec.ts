@@ -384,7 +384,7 @@ test.describe('API Mock Tests', () => {
 
   test('network timeout handling', async ({ page }) => {
     // Mock API to timeout
-    await page.route('**/api/v1/deep-insights**', async (route) => {
+    await page.route('**/api/v1/deep-insights**', async (_route) => {
       await new Promise((resolve) => setTimeout(resolve, 60000)); // Long delay
     });
 

@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test } from './fixtures';
 
 test.describe('Outcome Badge', () => {
   test.beforeEach(async ({ page }) => {

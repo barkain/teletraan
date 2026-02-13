@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 
 test.describe('Teletraan UI Debug', () => {
   test.beforeEach(async ({ page }) => {
@@ -27,7 +27,7 @@ test.describe('Teletraan UI Debug', () => {
     console.log('Error elements found:', errorElements);
 
     // Get page content for debugging
-    const content = await page.content();
+    await page.content();
     console.log('Page title:', await page.title());
   });
 

@@ -17,9 +17,6 @@ export const reportKeys = {
   detail: (id: string) => [...reportKeys.details(), id] as const,
 };
 
-// Empty response for placeholder data
-const EMPTY_RESPONSE: ReportListResponse = { items: [], total: 0 };
-
 /**
  * Custom hook for fetching the list of analysis reports
  */

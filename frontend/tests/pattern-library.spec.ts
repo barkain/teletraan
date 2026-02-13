@@ -192,7 +192,6 @@ test.describe('Pattern Library Panel', () => {
     await page.waitForTimeout(1000);
 
     // Find view toggle buttons
-    const gridButton = page.locator('button').filter({ has: page.locator('svg[class*="Grid"]') });
     const listButton = page.locator('button').filter({ has: page.locator('svg[class*="List"]') });
 
     // Take screenshot in grid view

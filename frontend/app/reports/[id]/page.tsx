@@ -2,7 +2,6 @@
 
 import { use, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -291,8 +290,6 @@ interface ReportDetailPageProps {
 export default function ReportDetailPage({ params }: ReportDetailPageProps) {
   const resolvedParams = use(params);
   const reportId = resolvedParams.id;
-  const router = useRouter();
-
   const { data: report, isLoading, error } = useReportDetail(reportId);
   const publishMutation = usePublishReport();
 

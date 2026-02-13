@@ -58,7 +58,7 @@ export const SECTOR_LIST: Array<{ symbol: string; name: string; color: string }>
 
 const REFRESH_INTERVAL = 60 * 1000; // 60 seconds
 
-function determineSectorRotationPhase(sectors: SectorData[]): SectorRotationPhase {
+function _determineSectorRotationPhase(sectors: SectorData[]): SectorRotationPhase {
   // Simple heuristic based on sector leadership
   const sortedByPerformance = [...sectors].sort((a, b) => b.performance - a.performance);
   const topSectors = sortedByPerformance.slice(0, 3).map(s => s.symbol);

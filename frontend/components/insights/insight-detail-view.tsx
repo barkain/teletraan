@@ -25,7 +25,6 @@ import {
   Database,
   Briefcase,
   BarChart3,
-  Activity,
   Globe,
   MessageCircle,
   GitBranch,
@@ -33,10 +32,9 @@ import {
   Layers,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -169,7 +167,7 @@ const actionConfig: Record<InsightAction, { color: string; icon: typeof Trending
  * the overall meaning of the sentence and produces a fully rewritten explanation
  * in conversational English. Returns null when no meaningful simplification is possible.
  */
-function laymanExplain(text: string, analystHint?: string): string | null {
+function laymanExplain(text: string, _analystHint?: string): string | null {
   if (!text || text.trim().length === 0) return null;
 
   // --- Tier 1: Full-sentence pattern rewrites ---

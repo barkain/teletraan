@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { toast } from 'sonner';
 import { useEffect } from 'react';
-import type { Stock, PriceHistory, Insight, PaginatedResponse } from '@/types';
+import type { Stock, PriceHistory, Insight } from '@/types';
 
 /**
  * Custom hook for fetching stock details

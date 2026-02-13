@@ -30,7 +30,7 @@ export async function fetchApi<T>(
     }
   }
 
-  const { params: _, ...fetchOptions } = options || {};
+  const { params: _params, ...fetchOptions } = options || {};
 
   const res = await fetch(url, {
     ...fetchOptions,

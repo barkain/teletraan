@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
   Sparkles,
@@ -495,10 +496,13 @@ export default function InsightHubPage() {
     <div className="space-y-6">
       {/* Hero Banner */}
       <div className="relative w-full max-h-96 rounded-xl overflow-hidden">
-        <img
+        <Image
           src="/teletraan-hero.png"
           alt="Teletraan Command Center — AI-powered market intelligence"
           className="w-full h-64 md:h-96 object-cover"
+          width={1200}
+          height={400}
+          priority
         />
         {/* Gradient overlay for smooth transition to content below */}
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
