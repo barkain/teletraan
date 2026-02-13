@@ -12,13 +12,41 @@ interface ThemeToggleProps {
 }
 
 export function ThemeToggle({ variant = 'default' }: ThemeToggleProps) {
+  const [mounted, setMounted] = React.useState(false);
   const { theme, setTheme } = useTheme();
+
+  // Ensure hydration matches by only rendering theme-dependent UI after mount
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const toggleTheme = () => {
     setTheme(theme === 'dark' ? 'light' : 'dark');
   };
 
   const isHeader = variant === 'header';
+
+  // Render a placeholder during SSR to match client initial render
+  if (!mounted) {
+    return (
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn(
+          isHeader && 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-white/80 dark:hover:text-white dark:hover:bg-white/10'
+        )}
+        disabled
+      >
+        <Sun
+          className={cn(
+            'h-5 w-5',
+            isHeader && 'h-4 w-4'
+          )}
+        />
+        <span className="sr-only">Toggle theme</span>
+      </Button>
+    );
+  }
 
   return (
     <Button

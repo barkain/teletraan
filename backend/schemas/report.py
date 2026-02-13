@@ -17,6 +17,10 @@ class ReportSummary(BaseModel):
     discovery_summary: str | None = None
     insights_count: int = 0
     published_url: str | None = None
+    symbols: list[str] = []
+    action_summary: dict[str, int] = {}
+    avg_confidence: float = 0.0
+    insight_types: list[str] = []
 
 
 class ReportListResponse(BaseModel):

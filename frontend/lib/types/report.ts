@@ -13,6 +13,10 @@ export interface ReportSummary {
   discovery_summary: string | null;
   insights_count: number;
   published_url: string | null;
+  symbols: string[];
+  action_summary: Record<string, number>;
+  avg_confidence: number;
+  insight_types: string[];
 }
 
 export interface ReportInsight {

@@ -246,87 +246,279 @@ def _parse_github_org_repo(remote_url: str) -> tuple[str, str]:
     return "barkain", "teletraan"
 
 
-def _generate_index_html(report_files: list[str], org: str, repo: str) -> str:
-    """Generate a dark-themed index page with enriched report cards.
+def _build_report_metadata(
+    task: AnalysisTask,
+    insights: list[DeepInsight],
+    filename: str,
+) -> dict:
+    """Build an enriched metadata dict for a report to be stored as a JSON sidecar.
 
-    Parses filenames in ``{date}-{HHMM}-{regime}.html`` format to extract
-    metadata and renders a responsive card grid with date+time, regime badge,
-    and a "Latest" indicator on the most recent report.
+    This metadata powers the rich index page with symbol pills, action
+    distributions, confidence bars, and summaries.
     """
-    cards = ""
-    for idx, fname in enumerate(report_files):
-        is_latest = idx == 0
-        stem = fname.replace(".html", "")
-        # Parse date-time-regime format: YYYY-MM-DD-HHMM-regime
-        parts = stem.split("-")
+    symbols: list[str] = sorted(set(
+        ins.primary_symbol for ins in insights if ins.primary_symbol
+    ))
+    action_counts: dict[str, int] = {}
+    confidences: list[float] = []
+    insight_types: list[str] = []
+    for ins in insights:
+        if ins.action:
+            action_counts[ins.action] = action_counts.get(ins.action, 0) + 1
+        if ins.confidence is not None:
+            confidences.append(ins.confidence)
+        if ins.insight_type:
+            insight_types.append(ins.insight_type)
+
+    avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
+
+    return {
+        "filename": filename,
+        "task_id": task.id,
+        "market_regime": task.market_regime or "",
+        "discovery_summary": task.discovery_summary or "",
+        "top_sectors": task.top_sectors or [],
+        "insights_count": len(insights),
+        "symbols": symbols,
+        "action_counts": action_counts,
+        "avg_confidence": round(avg_conf, 1),
+        "insight_types": sorted(set(insight_types)),
+        "created_at": task.created_at.isoformat() if task.created_at else "",
+        "started_at": task.started_at.isoformat() if task.started_at else "",
+        "completed_at": task.completed_at.isoformat() if task.completed_at else "",
+        "elapsed_seconds": task.elapsed_seconds,
+    }
+
+
+def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
+    """Generate a rich, dark-themed index page with enriched report cards.
+
+    Accepts a list of metadata dicts (one per report) sorted newest-first.
+    Each dict is produced by ``_build_report_metadata`` or parsed from a
+    JSON sidecar file written alongside the HTML report on gh-pages.
+    Falls back to filename-only rendering for legacy reports without metadata.
+    """
+    from datetime import datetime, timezone
+
+    # --- Aggregate stats for the stats bar ---
+    total_reports = len(report_metas)
+    total_insights = sum(m.get("insights_count", 0) for m in report_metas)
+    all_confidences = [m.get("avg_confidence", 0) for m in report_metas if m.get("avg_confidence")]
+    overall_avg_conf = round(sum(all_confidences) / len(all_confidences), 0) if all_confidences else 0
+
+    # "Latest" time-ago
+    latest_ago = ""
+    if report_metas:
+        latest_ts = report_metas[0].get("completed_at") or report_metas[0].get("created_at") or ""
+        if latest_ts:
+            try:
+                lt = datetime.fromisoformat(latest_ts.replace("Z", "+00:00"))
+                if lt.tzinfo is None:
+                    lt = lt.replace(tzinfo=timezone.utc)
+                delta = datetime.now(timezone.utc) - lt
+                hours = int(delta.total_seconds() // 3600)
+                if hours < 1:
+                    latest_ago = f"{max(1, int(delta.total_seconds() // 60))}m ago"
+                elif hours < 24:
+                    latest_ago = f"{hours}h ago"
+                else:
+                    latest_ago = f"{hours // 24}d ago"
+            except (ValueError, TypeError):
+                pass
+    if not latest_ago:
+        latest_ago = "N/A"
+
+    # Collect all unique regimes for the filter dropdown
+    all_regimes: list[str] = []
+    seen_regimes: set[str] = set()
+    for m in report_metas:
+        r = m.get("market_regime", "")
+        if r and r not in seen_regimes:
+            all_regimes.append(r)
+            seen_regimes.add(r)
+    all_regimes.sort()
+
+    regime_options = ""
+    for r in all_regimes:
+        regime_options += f'    <option value="{_esc(r)}">{_esc(r.replace("-", " ").title())}</option>\n'
+
+    # --- Group reports by month ---
+    month_groups: dict[str, list[dict]] = {}  # "2026-02" -> [meta, ...]
+    for m in report_metas:
+        fname = m.get("filename", "")
+        # Extract date from filename or metadata
         date_str = ""
-        time_str = ""
-        regime_raw = ""
+        ts = m.get("created_at") or m.get("started_at") or ""
+        if ts:
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                date_str = dt.strftime("%Y-%m-%d")
+            except (ValueError, TypeError):
+                pass
+        if not date_str:
+            # Fallback: parse from filename
+            stem = fname.replace(".html", "")
+            parts = stem.split("-")
+            if len(parts) >= 3:
+                date_str = f"{parts[0]}-{parts[1]}-{parts[2]}"
+        m["_date_str"] = date_str
+        month_key = date_str[:7] if len(date_str) >= 7 else "unknown"
+        month_groups.setdefault(month_key, []).append(m)
 
-        if len(parts) >= 5:
-            # New format: YYYY-MM-DD-HHMM-regime...
-            date_str = f"{parts[0]}-{parts[1]}-{parts[2]}"
-            time_str = parts[3]
-            regime_raw = "-".join(parts[4:])
-        elif len(parts) >= 4:
-            # Old format: YYYY-MM-DD-regime (no time)
-            date_str = f"{parts[0]}-{parts[1]}-{parts[2]}"
-            # Check if 4th part is a 4-digit time
-            if re.match(r"^\d{4}$", parts[3]):
-                time_str = parts[3]
-                regime_raw = "-".join(parts[4:]) if len(parts) > 4 else ""
-            else:
-                regime_raw = "-".join(parts[3:])
-        elif len(parts) == 3:
-            date_str = stem
-        else:
-            date_str = stem
+    # Sort month keys descending
+    sorted_months = sorted(month_groups.keys(), reverse=True)
 
-        # Format date + time nicely
-        display_date = date_str
-        display_time = ""
-        try:
-            from datetime import datetime
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            display_date = dt.strftime("%B %d, %Y")
-        except (ValueError, ImportError):
-            pass
-
-        if time_str and len(time_str) == 4:
-            hh = time_str[:2]
-            mm = time_str[2:]
-            display_time = f"at {hh}:{mm} UTC"
-
-        # Format regime
-        regime_display = regime_raw.replace("-", " ").title() if regime_raw else "Analysis"
-
-        # Regime badge color
-        regime_color = "#6366F1"
+    # Regime color helper (inline)
+    def _regime_color(regime_raw: str) -> str:
         rl = regime_raw.lower()
         if "bull" in rl or "expansion" in rl or "risk-on" in rl:
-            regime_color = "#10B981"
-        elif "bear" in rl or "contraction" in rl or "risk-off" in rl:
-            regime_color = "#EF4444"
-        elif "neutral" in rl or "mixed" in rl or "transitional" in rl:
-            regime_color = "#F59E0B"
+            return "#10B981"
+        if "bear" in rl or "contraction" in rl or "risk-off" in rl:
+            return "#EF4444"
+        if "neutral" in rl or "mixed" in rl or "transitional" in rl:
+            return "#F59E0B"
+        if "risk" in rl and "off" in rl:
+            return "#A855F7"
+        return "#6366F1"
 
-        latest_badge = ""
-        if is_latest:
-            latest_badge = '<span class="latest-badge">Latest</span>'
+    # Action color helper
+    _act_colors = {
+        "STRONG_BUY": "#22C55E", "BUY": "#22C55E",
+        "HOLD": "#F59E0B", "WATCH": "#6366F1",
+        "SELL": "#EF4444", "STRONG_SELL": "#EF4444",
+    }
+    _act_labels = {
+        "STRONG_BUY": "Strong Buy", "BUY": "Buy",
+        "HOLD": "Hold", "WATCH": "Watch",
+        "SELL": "Sell", "STRONG_SELL": "Strong Sell",
+    }
 
-        cards += f"""
-        <a href="reports/{fname}" class="report-card" data-date="{_esc(date_str)}">
+    # Build month sections
+    month_sections = ""
+    global_card_idx = 0
+    for month_key in sorted_months:
+        metas = month_groups[month_key]
+        # Format month header
+        month_display = month_key
+        try:
+            md = datetime.strptime(month_key, "%Y-%m")
+            month_display = md.strftime("%B %Y")
+        except (ValueError, TypeError):
+            pass
+
+        cards_html = ""
+        for m in metas:
+            is_latest = global_card_idx == 0
+            fname = m.get("filename", "")
+            regime_raw = m.get("market_regime", "")
+            regime_display = regime_raw.replace("-", " ").title() if regime_raw else "Analysis"
+            rc = _regime_color(regime_raw)
+
+            # Date/time display
+            date_str = m.get("_date_str", "")
+            display_date = date_str
+            display_time = ""
+            ts = m.get("created_at") or m.get("started_at") or ""
+            if ts:
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    display_date = dt.strftime("%B %d, %Y")
+                    display_time = dt.strftime("%H:%M UTC")
+                except (ValueError, TypeError):
+                    pass
+            elif date_str:
+                try:
+                    dt = datetime.strptime(date_str, "%Y-%m-%d")
+                    display_date = dt.strftime("%B %d, %Y")
+                except (ValueError, TypeError):
+                    pass
+
+            # Latest badge
+            latest_badge = ""
+            if is_latest:
+                latest_badge = '<span class="latest-badge">LATEST</span>'
+
+            # Symbol pills (max 6 shown)
+            symbols = m.get("symbols", [])
+            symbol_pills = ""
+            for sym in symbols[:6]:
+                symbol_pills += f'<span class="symbol-pill">{_esc(sym)}</span>'
+            if len(symbols) > 6:
+                symbol_pills += f'<span class="symbol-pill more">+{len(symbols) - 6}</span>'
+
+            # Action distribution mini-badges
+            action_counts = m.get("action_counts", {})
+            action_badges = ""
+            for act, cnt in sorted(action_counts.items(), key=lambda x: -x[1]):
+                act_color = _act_colors.get(act, "#6366F1")
+                act_label = _act_labels.get(act, act.title())
+                action_badges += (
+                    f'<span class="action-mini" style="--act-color:{act_color};">'
+                    f'{cnt} {_esc(act_label)}</span>'
+                )
+
+            # Insight count
+            ins_count = m.get("insights_count", 0)
+
+            # Confidence bar
+            avg_conf = m.get("avg_confidence", 0)
+            conf_pct = min(100, max(0, round(avg_conf)))
+            conf_color = "#EF4444" if conf_pct < 50 else "#F59E0B" if conf_pct < 70 else "#10B981"
+
+            # Summary (2-line truncated)
+            summary = m.get("discovery_summary", "")
+            if len(summary) > 160:
+                summary = summary[:157] + "..."
+
+            # Data attributes for JS filtering
+            data_attrs = (
+                f'data-date="{_esc(date_str)}" '
+                f'data-regime="{_esc(regime_raw)}" '
+                f'data-symbols="{_esc(" ".join(symbols))}"'
+            )
+
+            cards_html += f"""
+        <a href="reports/{_esc(fname)}" class="report-card" {data_attrs}
+           style="border-left: 3px solid {rc};">
           <div class="card-top-row">
             <div class="card-date">{_esc(display_date)}</div>
-            {latest_badge}
+            <div class="card-badges">
+              {latest_badge}
+              <span class="regime-badge" style="background:{rc}18;color:{rc};border-color:{rc}33;">
+                {_esc(regime_display)}
+              </span>
+            </div>
           </div>
           <div class="card-time">{_esc(display_time)}</div>
-          <span class="regime-badge" style="background:{regime_color}18;color:{regime_color};border-color:{regime_color}33;">
-            {_esc(regime_display)}
-          </span>
-          <div class="card-filename">{_esc(stem)}</div>
+          <div class="symbol-row">{symbol_pills}</div>
+          <div class="action-row">{action_badges}</div>
+          <div class="card-stats-row">
+            <span class="card-stat">{ins_count} insight{"s" if ins_count != 1 else ""}</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:{conf_pct}%;background:{conf_color};"></div>
+            </div>
+            <span class="card-stat conf-label">{conf_pct}%</span>
+          </div>
+          <div class="card-summary">{_esc(summary)}</div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 """
+            global_card_idx += 1
+
+        month_sections += f"""
+    <div class="month-group" data-month="{_esc(month_key)}">
+      <h2 class="month-header">{_esc(month_display)} &middot; {len(metas)} report{"s" if len(metas) != 1 else ""}</h2>
+      <div class="report-grid">
+        {cards_html}
+      </div>
+    </div>
+"""
+
+    empty_state = ""
+    if not report_metas:
+        empty_state = '<div class="empty-state">No reports published yet.</div>'
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -350,13 +542,15 @@ def _generate_index_html(report_files: list[str], org: str, repo: str) -> str:
     -webkit-font-smoothing: antialiased;
   }}
   .container {{
-    max-width: 1100px;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 48px 24px;
   }}
+
+  /* --- Header --- */
   .header {{
     text-align: center;
-    margin-bottom: 48px;
+    margin-bottom: 32px;
   }}
   .header h1 {{
     margin: 0 0 8px 0;
@@ -374,55 +568,164 @@ def _generate_index_html(report_files: list[str], org: str, repo: str) -> str:
     font-size: 15px;
     font-weight: 500;
   }}
-  .card-grid {{
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 20px;
-  }}
-  .report-card {{
+
+  /* --- Stats Bar --- */
+  .stats-bar {{
     display: flex;
-    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }}
+  .stat-card {{
+    display: flex;
+    align-items: center;
     gap: 8px;
-    padding: 24px;
-    background: rgba(255,255,255,0.03);
+    padding: 12px 20px;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    font-size: 14px;
+    color: #94A3B8;
+    white-space: nowrap;
+  }}
+  .stat-card strong {{
+    color: #F1F5F9;
+    font-size: 18px;
+    font-weight: 700;
+  }}
+
+  /* --- Filter Bar --- */
+  .filter-bar {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+    padding: 14px 20px;
+    background: rgba(15, 23, 42, 0.6);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 16px;
-    text-decoration: none;
-    color: inherit;
-    transition: all 0.25s ease;
-    position: relative;
+    border-radius: 12px;
   }}
-  .report-card:hover {{
-    background: rgba(255,255,255,0.06);
-    border-color: rgba(99,102,241,0.3);
-    transform: translateY(-3px);
-    box-shadow: 0 12px 40px rgba(99,102,241,0.12);
+  .filter-bar input[type="text"],
+  .filter-bar select {{
+    color-scheme: dark;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #E2E8F0;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s ease;
   }}
-  .card-top-row {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+  .filter-bar input[type="text"] {{
+    flex: 1;
+    min-width: 180px;
   }}
-  .card-date {{
-    font-size: 20px;
-    font-weight: 700;
-    color: #F1F5F9;
+  .filter-bar input[type="text"]:focus,
+  .filter-bar select:focus {{
+    border-color: rgba(99,102,241,0.5);
   }}
-  .card-time {{
-    font-family: 'JetBrains Mono', monospace;
+  .filter-bar select {{
+    min-width: 140px;
+    cursor: pointer;
+  }}
+  .result-count {{
+    margin-left: auto;
     font-size: 13px;
     color: #64748B;
     font-weight: 500;
-    margin-top: -2px;
+    white-space: nowrap;
+  }}
+
+  /* --- Month Groups --- */
+  .month-group {{
+    margin-bottom: 36px;
+  }}
+  .month-group.hidden-group {{
+    display: none;
+  }}
+  .month-header {{
+    font-size: 18px;
+    font-weight: 700;
+    color: #94A3B8;
+    margin: 0 0 16px 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    letter-spacing: -0.3px;
+  }}
+
+  /* --- Report Grid --- */
+  .report-grid {{
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }}
+
+  /* --- Report Card --- */
+  .report-card {{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+  }}
+  .report-card:hover {{
+    background: rgba(30, 41, 59, 0.9);
+    border-color: rgba(99,102,241,0.35);
+    transform: translateY(-3px) scale(1.005);
+    box-shadow: 0 16px 48px rgba(99,102,241,0.15), 0 4px 12px rgba(0,0,0,0.3);
+  }}
+  .report-card.hidden-by-filter {{
+    display: none;
+  }}
+
+  /* Card internals */
+  .card-top-row {{
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }}
+  .card-date {{
+    font-size: 17px;
+    font-weight: 700;
+    color: #F1F5F9;
+    line-height: 1.3;
+  }}
+  .card-badges {{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }}
+  .card-time {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #64748B;
+    font-weight: 500;
+    margin-top: -4px;
   }}
   .latest-badge {{
     display: inline-block;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -430,28 +733,132 @@ def _generate_index_html(report_files: list[str], org: str, repo: str) -> str:
     color: #A5B4FC;
     border: 1px solid rgba(99,102,241,0.3);
     box-shadow: 0 0 12px rgba(99,102,241,0.2);
+    animation: pulse 2s ease-in-out infinite;
+  }}
+  @keyframes pulse {{
+    0%, 100% {{ box-shadow: 0 0 12px rgba(99,102,241,0.2); }}
+    50% {{ box-shadow: 0 0 20px rgba(99,102,241,0.4); }}
   }}
   .regime-badge {{
     display: inline-block;
-    width: fit-content;
-    padding: 4px 14px;
-    border-radius: 20px;
-    font-size: 13px;
+    padding: 2px 10px;
+    border-radius: 16px;
+    font-size: 11px;
     font-weight: 600;
     border: 1px solid;
+    white-space: nowrap;
   }}
-  .card-filename {{
+
+  /* Symbol pills */
+  .symbol-row {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-height: 24px;
+  }}
+  .symbol-pill {{
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: #475569;
-    margin-top: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(99,102,241,0.1);
+    color: #A5B4FC;
+    border: 1px solid rgba(99,102,241,0.15);
   }}
+  .symbol-pill.more {{
+    background: rgba(255,255,255,0.05);
+    color: #64748B;
+    border-color: rgba(255,255,255,0.08);
+  }}
+
+  /* Action mini-badges */
+  .action-row {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }}
+  .action-mini {{
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--act-color) 12%, transparent);
+    color: var(--act-color);
+    border: 1px solid color-mix(in srgb, var(--act-color) 20%, transparent);
+  }}
+
+  /* Stats row with confidence bar */
+  .card-stats-row {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }}
+  .card-stat {{
+    font-size: 12px;
+    color: #64748B;
+    font-weight: 500;
+    white-space: nowrap;
+  }}
+  .conf-label {{
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+  }}
+  .conf-bar-wrap {{
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px;
+    overflow: hidden;
+  }}
+  .conf-bar {{
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.6s ease;
+  }}
+
+  /* Summary */
+  .card-summary {{
+    font-size: 13px;
+    color: #64748B;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 39px;
+  }}
+
+  /* Card footer */
+  .card-footer-row {{
+    display: flex;
+    justify-content: flex-end;
+    margin-top: auto;
+  }}
+  .card-link-indicator {{
+    font-size: 12px;
+    font-weight: 600;
+    color: #6366F1;
+    opacity: 0;
+    transform: translateX(-4px);
+    transition: all 0.2s ease;
+  }}
+  .report-card:hover .card-link-indicator {{
+    opacity: 1;
+    transform: translateX(0);
+  }}
+
+  /* Empty state */
   .empty-state {{
     text-align: center;
     padding: 80px 24px;
     color: #475569;
     font-size: 16px;
   }}
+
+  /* Footer */
   .footer {{
     margin-top: 64px;
     padding-top: 24px;
@@ -466,6 +873,8 @@ def _generate_index_html(report_files: list[str], org: str, repo: str) -> str:
   .footer strong {{
     color: #475569;
   }}
+
+  /* Animations */
   @keyframes fadeInUp {{
     from {{ opacity: 0; transform: translateY(16px); }}
     to {{ opacity: 1; transform: translateY(0); }}
@@ -473,93 +882,31 @@ def _generate_index_html(report_files: list[str], org: str, repo: str) -> str:
   .report-card {{
     animation: fadeInUp 0.4s ease both;
   }}
-  .report-card:nth-child(2) {{ animation-delay: 0.05s; }}
-  .report-card:nth-child(3) {{ animation-delay: 0.1s; }}
-  .report-card:nth-child(4) {{ animation-delay: 0.15s; }}
-  .report-card:nth-child(5) {{ animation-delay: 0.2s; }}
-  .report-card:nth-child(6) {{ animation-delay: 0.25s; }}
-  /* Date filter bar */
-  .filter-bar {{
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-bottom: 24px;
-    padding: 16px 20px;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px;
-  }}
-  .filter-bar label {{
-    font-size: 13px;
-    font-weight: 600;
-    color: #94A3B8;
-    white-space: nowrap;
-  }}
-  .filter-bar input[type="date"] {{
-    color-scheme: dark;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 8px;
-    padding: 6px 10px;
-    color: #E2E8F0;
-    font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    outline: none;
-    transition: border-color 0.2s ease;
-  }}
-  .filter-bar input[type="date"]:focus {{
-    border-color: rgba(99,102,241,0.5);
-  }}
-  .filter-bar input[type="date"]::-webkit-calendar-picker-indicator {{
-    filter: invert(0.7);
-    cursor: pointer;
-  }}
-  .filter-clear-btn {{
-    background: rgba(99,102,241,0.12);
-    color: #A5B4FC;
-    border: 1px solid rgba(99,102,241,0.25);
-    border-radius: 8px;
-    padding: 6px 14px;
-    font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-  }}
-  .filter-clear-btn:hover {{
-    background: rgba(99,102,241,0.2);
-    border-color: rgba(99,102,241,0.4);
-  }}
-  .filter-count {{
-    margin-left: auto;
-    font-size: 13px;
-    color: #64748B;
-    font-weight: 500;
-    white-space: nowrap;
-  }}
-  .report-card.hidden-by-filter {{
-    display: none;
+  .month-group:nth-child(1) .report-card:nth-child(1) {{ animation-delay: 0s; }}
+  .month-group:nth-child(1) .report-card:nth-child(2) {{ animation-delay: 0.04s; }}
+  .month-group:nth-child(1) .report-card:nth-child(3) {{ animation-delay: 0.08s; }}
+  .month-group:nth-child(1) .report-card:nth-child(4) {{ animation-delay: 0.12s; }}
+  .month-group:nth-child(1) .report-card:nth-child(5) {{ animation-delay: 0.16s; }}
+  .month-group:nth-child(1) .report-card:nth-child(6) {{ animation-delay: 0.20s; }}
+
+  /* Responsive */
+  @media (max-width: 1024px) {{
+    .report-grid {{ grid-template-columns: repeat(2, 1fr); }}
   }}
   @media (max-width: 640px) {{
     .container {{ padding: 24px 16px; }}
     .header h1 {{ font-size: 28px; }}
-    .card-grid {{ grid-template-columns: 1fr; }}
+    .report-grid {{ grid-template-columns: 1fr; }}
+    .stats-bar {{ gap: 8px; }}
+    .stat-card {{ padding: 10px 14px; font-size: 13px; }}
+    .stat-card strong {{ font-size: 16px; }}
     .filter-bar {{
       flex-direction: column;
       align-items: stretch;
       gap: 10px;
     }}
-    .filter-bar .filter-row {{
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }}
-    .filter-bar input[type="date"] {{
-      flex: 1;
-    }}
-    .filter-count {{
+    .filter-bar input[type="text"] {{ min-width: 0; }}
+    .result-count {{
       margin-left: 0;
       text-align: center;
     }}
@@ -573,37 +920,83 @@ def _generate_index_html(report_files: list[str], org: str, repo: str) -> str:
     <p>Published market analysis reports</p>
   </div>
 
-  <div class="filter-bar" id="filterBar">
-    <div class="filter-row">
-      <label for="dateFrom">From</label>
-      <input type="date" id="dateFrom" />
-    </div>
-    <div class="filter-row">
-      <label for="dateTo">To</label>
-      <input type="date" id="dateTo" />
-    </div>
-    <button class="filter-clear-btn" id="filterClear" type="button">Clear</button>
-    <span class="filter-count" id="filterCount"></span>
+  <div class="stats-bar">
+    <div class="stat-card"><span style="font-size:18px;">&#x1F4CA;</span> <strong>{total_reports}</strong> Reports</div>
+    <div class="stat-card"><span style="font-size:18px;">&#x1F4A1;</span> <strong>{total_insights}</strong> Insights</div>
+    <div class="stat-card"><span style="font-size:18px;">&#x1F3AF;</span> Avg <strong>{int(overall_avg_conf)}%</strong> Confidence</div>
+    <div class="stat-card"><span style="font-size:18px;">&#x1F552;</span> Latest: <strong>{_esc(latest_ago)}</strong></div>
   </div>
 
-  <div class="card-grid" id="cardGrid">
-    {cards if cards else '<div class="empty-state">No reports published yet.</div>'}
+  <div class="filter-bar">
+    <input type="text" id="searchInput" placeholder="Search reports by symbol, regime, summary...">
+    <select id="regimeFilter">
+      <option value="">All Regimes</option>
+{regime_options}    </select>
+    <span class="result-count" id="resultCount">{total_reports} report{"s" if total_reports != 1 else ""}</span>
+  </div>
+
+  <div id="reportContainer">
+    {month_sections if month_sections else empty_state}
   </div>
 
   <div class="footer">
-    <p>Generated by <strong>Teletraan</strong></p>
+    <p>Generated by <strong>Teletraan Intelligence</strong></p>
   </div>
 </div>
 <script>
 (function() {{
-  var fromEl = document.getElementById('dateFrom');
-  var toEl = document.getElementById('dateTo');
-  var clearBtn = document.getElementById('filterClear');
-  var countEl = document.getElementById('filterCount');
-  var cards = document.querySelectorAll('.report-card[data-date]');
+  var searchEl = document.getElementById('searchInput');
+  var regimeEl = document.getElementById('regimeFilter');
+  var countEl = document.getElementById('resultCount');
+  var cards = document.querySelectorAll('.report-card');
+  var monthGroups = document.querySelectorAll('.month-group');
   var total = cards.length;
 
-  function updateCount(visible) {{
+  function applyFilters() {{
+    var query = (searchEl.value || '').toLowerCase().trim();
+    var regime = regimeEl.value;
+    var visible = 0;
+
+    for (var i = 0; i < cards.length; i++) {{
+      var card = cards[i];
+      var cardRegime = card.getAttribute('data-regime') || '';
+      var cardText = card.textContent.toLowerCase();
+      var cardSymbols = (card.getAttribute('data-symbols') || '').toLowerCase();
+      var show = true;
+
+      if (regime && cardRegime !== regime) show = false;
+      if (query) {{
+        var searchable = cardText + ' ' + cardSymbols + ' ' + cardRegime.toLowerCase();
+        if (searchable.indexOf(query) === -1) show = false;
+      }}
+
+      if (show) {{
+        card.classList.remove('hidden-by-filter');
+        visible++;
+      }} else {{
+        card.classList.add('hidden-by-filter');
+      }}
+    }}
+
+    // Show/hide month groups with no visible cards
+    for (var g = 0; g < monthGroups.length; g++) {{
+      var group = monthGroups[g];
+      var groupCards = group.querySelectorAll('.report-card');
+      var anyVisible = false;
+      for (var c = 0; c < groupCards.length; c++) {{
+        if (!groupCards[c].classList.contains('hidden-by-filter')) {{
+          anyVisible = true;
+          break;
+        }}
+      }}
+      if (anyVisible) {{
+        group.classList.remove('hidden-group');
+      }} else {{
+        group.classList.add('hidden-group');
+      }}
+    }}
+
+    // Update count
     if (visible === total) {{
       countEl.textContent = total + ' report' + (total !== 1 ? 's' : '');
     }} else {{
@@ -611,47 +1004,30 @@ def _generate_index_html(report_files: list[str], org: str, repo: str) -> str:
     }}
   }}
 
-  function applyFilter() {{
-    var fromVal = fromEl.value;
-    var toVal = toEl.value;
-    var visible = 0;
-    for (var i = 0; i < cards.length; i++) {{
-      var d = cards[i].getAttribute('data-date');
-      var show = true;
-      if (fromVal && d < fromVal) show = false;
-      if (toVal && d > toVal) show = false;
-      if (show) {{
-        cards[i].classList.remove('hidden-by-filter');
-        visible++;
-      }} else {{
-        cards[i].classList.add('hidden-by-filter');
-      }}
-    }}
-    updateCount(visible);
-  }}
-
-  clearBtn.addEventListener('click', function() {{
-    fromEl.value = '';
-    toEl.value = '';
-    applyFilter();
-  }});
-
-  fromEl.addEventListener('change', applyFilter);
-  toEl.addEventListener('change', applyFilter);
-
-  updateCount(total);
+  searchEl.addEventListener('input', applyFilters);
+  regimeEl.addEventListener('change', applyFilters);
 }})();
 </script>
 </body>
 </html>"""
 
 
-def _do_publish(task: AnalysisTask, html_content: str, repo_dir: str) -> str:
+def _do_publish(
+    task: AnalysisTask,
+    html_content: str,
+    repo_dir: str,
+    insights: list[DeepInsight] | None = None,
+) -> str:
     """Synchronous helper that publishes an HTML report to the gh-pages branch.
 
     Uses human-readable filename ``{date}-{HHMM}-{regime}.html`` derived from
     the AnalysisTask metadata.  Runs inside ``run_in_executor`` so it does not
     block the event loop.
+
+    When *insights* are provided, a JSON metadata sidecar is written next to
+    the HTML report (``reports/meta/{stem}.json``).  All sidecar files are
+    read when regenerating the index page so that each card is enriched with
+    symbol pills, action distributions, confidence bars, and summaries.
 
     Returns the published GitHub Pages URL on success.
     Raises ``RuntimeError`` on failure.
@@ -734,12 +1110,35 @@ def _do_publish(task: AnalysisTask, html_content: str, repo_dir: str) -> str:
         with open(report_path, "w", encoding="utf-8") as fh:
             fh.write(html_content)
 
-        # Build / update the index page that lists all reports
+        # Write a JSON metadata sidecar for this report
+        meta_dir = os.path.join(reports_dir, "meta")
+        os.makedirs(meta_dir, exist_ok=True)
+        meta = _build_report_metadata(task, insights or [], filename)
+        meta_path = os.path.join(meta_dir, filename.replace(".html", ".json"))
+        with open(meta_path, "w", encoding="utf-8") as fh:
+            json.dump(meta, fh, ensure_ascii=False, indent=2)
+
+        # Collect enriched metadata for ALL reports on this branch.
+        # Read every sidecar JSON; for legacy HTMLs without a sidecar,
+        # synthesize minimal metadata from the filename.
         report_files = sorted(
             [f for f in os.listdir(reports_dir) if f.endswith(".html")],
             reverse=True,
         )
-        index_html = _generate_index_html(report_files, org, repo)
+        report_metas: list[dict] = []
+        for rf in report_files:
+            sidecar = os.path.join(meta_dir, rf.replace(".html", ".json"))
+            if os.path.isfile(sidecar):
+                try:
+                    with open(sidecar, encoding="utf-8") as sf:
+                        report_metas.append(json.load(sf))
+                    continue
+                except (json.JSONDecodeError, OSError):
+                    pass
+            # Fallback: synthesize minimal metadata from filename
+            report_metas.append(_meta_from_filename(rf))
+
+        index_html = _generate_index_html(report_metas, org, repo)
         with open(os.path.join(work_dir, "index.html"), "w", encoding="utf-8") as fh:
             fh.write(index_html)
 
@@ -800,10 +1199,74 @@ def _do_publish(task: AnalysisTask, html_content: str, repo_dir: str) -> str:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-async def _publish_to_ghpages(task: AnalysisTask, html_content: str, repo_dir: str) -> str:
+def _meta_from_filename(fname: str) -> dict:
+    """Synthesize minimal report metadata from a filename.
+
+    Used as a fallback for legacy reports that were published before the
+    JSON sidecar was introduced.
+    """
+    stem = fname.replace(".html", "")
+    parts = stem.split("-")
+    date_str = ""
+    time_str = ""
+    regime_raw = ""
+
+    if len(parts) >= 5:
+        date_str = f"{parts[0]}-{parts[1]}-{parts[2]}"
+        if re.match(r"^\d{4}$", parts[3]):
+            time_str = parts[3]
+            regime_raw = "-".join(parts[4:])
+        else:
+            regime_raw = "-".join(parts[3:])
+    elif len(parts) >= 4:
+        date_str = f"{parts[0]}-{parts[1]}-{parts[2]}"
+        if re.match(r"^\d{4}$", parts[3]):
+            time_str = parts[3]
+            regime_raw = "-".join(parts[4:]) if len(parts) > 4 else ""
+        else:
+            regime_raw = "-".join(parts[3:])
+    elif len(parts) == 3:
+        date_str = stem
+    else:
+        date_str = stem
+
+    created_at = ""
+    if date_str:
+        created_at = date_str
+        if time_str and len(time_str) == 4:
+            created_at += f"T{time_str[:2]}:{time_str[2:]}:00"
+        else:
+            created_at += "T00:00:00"
+
+    return {
+        "filename": fname,
+        "task_id": "",
+        "market_regime": regime_raw.replace("-", " ").title() if regime_raw else "",
+        "discovery_summary": "",
+        "top_sectors": [],
+        "insights_count": 0,
+        "symbols": [],
+        "action_counts": {},
+        "avg_confidence": 0,
+        "insight_types": [],
+        "created_at": created_at,
+        "started_at": "",
+        "completed_at": "",
+        "elapsed_seconds": None,
+    }
+
+
+async def _publish_to_ghpages(
+    task: AnalysisTask,
+    html_content: str,
+    repo_dir: str,
+    insights: list[DeepInsight] | None = None,
+) -> str:
     """Publish HTML report to gh-pages branch (async wrapper)."""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _do_publish, task, html_content, repo_dir)
+    return await loop.run_in_executor(
+        None, _do_publish, task, html_content, repo_dir, insights,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -840,9 +1303,38 @@ async def list_reports(
     result = await db.execute(query)
     tasks = result.scalars().all()
 
+    # Batch-query DeepInsight records for all tasks to compute aggregates
+    all_insight_ids: list[int] = []
+    for task in tasks:
+        if task.result_insight_ids:
+            all_insight_ids.extend(task.result_insight_ids)
+
+    insights_by_id: dict[int, DeepInsight] = {}
+    if all_insight_ids:
+        ins_result = await db.execute(
+            select(DeepInsight).where(DeepInsight.id.in_(all_insight_ids))
+        )
+        for ins in ins_result.scalars().all():
+            insights_by_id[ins.id] = ins
+
     items = []
     for task in tasks:
-        insight_count = len(task.result_insight_ids) if task.result_insight_ids else 0
+        task_ids = task.result_insight_ids or []
+        ins_list = [insights_by_id[iid] for iid in task_ids if iid in insights_by_id]
+
+        # Compute aggregate fields
+        symbols = sorted(set(ins.primary_symbol for ins in ins_list if ins.primary_symbol))
+        action_counts: dict[str, int] = {}
+        confidences: list[float] = []
+        types: set[str] = set()
+        for ins in ins_list:
+            if ins.action:
+                action_counts[ins.action] = action_counts.get(ins.action, 0) + 1
+            if ins.confidence is not None:
+                confidences.append(ins.confidence)
+            if ins.insight_type:
+                types.add(ins.insight_type)
+
         items.append(
             ReportSummary(
                 id=task.id,
@@ -852,8 +1344,12 @@ async def list_reports(
                 market_regime=task.market_regime,
                 top_sectors=task.top_sectors or [],
                 discovery_summary=task.discovery_summary,
-                insights_count=insight_count,
+                insights_count=len(task_ids),
                 published_url=task.published_url,
+                symbols=symbols,
+                action_summary=action_counts,
+                avg_confidence=sum(confidences) / len(confidences) if confidences else 0.0,
+                insight_types=sorted(types),
             )
         )
 
@@ -1011,7 +1507,9 @@ async def publish_report(
 
     # 3. Publish to gh-pages -------------------------------------------------
     try:
-        published_url = await _publish_to_ghpages(task, html_content, _REPO_DIR)
+        published_url = await _publish_to_ghpages(
+            task, html_content, _REPO_DIR, insights,
+        )
     except RuntimeError as exc:
         logger.exception("GitHub Pages publish failed for task %s", task_id)
         raise HTTPException(
