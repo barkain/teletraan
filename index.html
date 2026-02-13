@@ -20,13 +20,15 @@
     -webkit-font-smoothing: antialiased;
   }
   .container {
-    max-width: 1100px;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 48px 24px;
   }
+
+  /* --- Header --- */
   .header {
     text-align: center;
-    margin-bottom: 48px;
+    margin-bottom: 32px;
   }
   .header h1 {
     margin: 0 0 8px 0;
@@ -44,55 +46,164 @@
     font-size: 15px;
     font-weight: 500;
   }
-  .card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 20px;
-  }
-  .report-card {
+
+  /* --- Stats Bar --- */
+  .stats-bar {
     display: flex;
-    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .stat-card {
+    display: flex;
+    align-items: center;
     gap: 8px;
-    padding: 24px;
-    background: rgba(255,255,255,0.03);
+    padding: 12px 20px;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    font-size: 14px;
+    color: #94A3B8;
+    white-space: nowrap;
+  }
+  .stat-card strong {
+    color: #F1F5F9;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  /* --- Filter Bar --- */
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+    padding: 14px 20px;
+    background: rgba(15, 23, 42, 0.6);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 16px;
-    text-decoration: none;
-    color: inherit;
-    transition: all 0.25s ease;
-    position: relative;
+    border-radius: 12px;
   }
-  .report-card:hover {
-    background: rgba(255,255,255,0.06);
-    border-color: rgba(99,102,241,0.3);
-    transform: translateY(-3px);
-    box-shadow: 0 12px 40px rgba(99,102,241,0.12);
+  .filter-bar input[type="text"],
+  .filter-bar select {
+    color-scheme: dark;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #E2E8F0;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s ease;
   }
-  .card-top-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+  .filter-bar input[type="text"] {
+    flex: 1;
+    min-width: 180px;
   }
-  .card-date {
-    font-size: 20px;
-    font-weight: 700;
-    color: #F1F5F9;
+  .filter-bar input[type="text"]:focus,
+  .filter-bar select:focus {
+    border-color: rgba(99,102,241,0.5);
   }
-  .card-time {
-    font-family: 'JetBrains Mono', monospace;
+  .filter-bar select {
+    min-width: 140px;
+    cursor: pointer;
+  }
+  .result-count {
+    margin-left: auto;
     font-size: 13px;
     color: #64748B;
     font-weight: 500;
-    margin-top: -2px;
+    white-space: nowrap;
+  }
+
+  /* --- Month Groups --- */
+  .month-group {
+    margin-bottom: 36px;
+  }
+  .month-group.hidden-group {
+    display: none;
+  }
+  .month-header {
+    font-size: 18px;
+    font-weight: 700;
+    color: #94A3B8;
+    margin: 0 0 16px 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    letter-spacing: -0.3px;
+  }
+
+  /* --- Report Grid --- */
+  .report-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  /* --- Report Card --- */
+  .report-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+  }
+  .report-card:hover {
+    background: rgba(30, 41, 59, 0.9);
+    border-color: rgba(99,102,241,0.35);
+    transform: translateY(-3px) scale(1.005);
+    box-shadow: 0 16px 48px rgba(99,102,241,0.15), 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .report-card.hidden-by-filter {
+    display: none;
+  }
+
+  /* Card internals */
+  .card-top-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .card-date {
+    font-size: 17px;
+    font-weight: 700;
+    color: #F1F5F9;
+    line-height: 1.3;
+  }
+  .card-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .card-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #64748B;
+    font-weight: 500;
+    margin-top: -4px;
   }
   .latest-badge {
     display: inline-block;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -100,28 +211,132 @@
     color: #A5B4FC;
     border: 1px solid rgba(99,102,241,0.3);
     box-shadow: 0 0 12px rgba(99,102,241,0.2);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 12px rgba(99,102,241,0.2); }
+    50% { box-shadow: 0 0 20px rgba(99,102,241,0.4); }
   }
   .regime-badge {
     display: inline-block;
-    width: fit-content;
-    padding: 4px 14px;
-    border-radius: 20px;
-    font-size: 13px;
+    padding: 2px 10px;
+    border-radius: 16px;
+    font-size: 11px;
     font-weight: 600;
     border: 1px solid;
+    white-space: nowrap;
   }
-  .card-filename {
+
+  /* Symbol pills */
+  .symbol-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-height: 24px;
+  }
+  .symbol-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: #475569;
-    margin-top: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(99,102,241,0.1);
+    color: #A5B4FC;
+    border: 1px solid rgba(99,102,241,0.15);
   }
+  .symbol-pill.more {
+    background: rgba(255,255,255,0.05);
+    color: #64748B;
+    border-color: rgba(255,255,255,0.08);
+  }
+
+  /* Action mini-badges */
+  .action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .action-mini {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--act-color) 12%, transparent);
+    color: var(--act-color);
+    border: 1px solid color-mix(in srgb, var(--act-color) 20%, transparent);
+  }
+
+  /* Stats row with confidence bar */
+  .card-stats-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-stat {
+    font-size: 12px;
+    color: #64748B;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .conf-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+  }
+  .conf-bar-wrap {
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .conf-bar {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.6s ease;
+  }
+
+  /* Summary */
+  .card-summary {
+    font-size: 13px;
+    color: #64748B;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 39px;
+  }
+
+  /* Card footer */
+  .card-footer-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: auto;
+  }
+  .card-link-indicator {
+    font-size: 12px;
+    font-weight: 600;
+    color: #6366F1;
+    opacity: 0;
+    transform: translateX(-4px);
+    transition: all 0.2s ease;
+  }
+  .report-card:hover .card-link-indicator {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  /* Empty state */
   .empty-state {
     text-align: center;
     padding: 80px 24px;
     color: #475569;
     font-size: 16px;
   }
+
+  /* Footer */
   .footer {
     margin-top: 64px;
     padding-top: 24px;
@@ -136,6 +351,8 @@
   .footer strong {
     color: #475569;
   }
+
+  /* Animations */
   @keyframes fadeInUp {
     from { opacity: 0; transform: translateY(16px); }
     to { opacity: 1; transform: translateY(0); }
@@ -143,93 +360,31 @@
   .report-card {
     animation: fadeInUp 0.4s ease both;
   }
-  .report-card:nth-child(2) { animation-delay: 0.05s; }
-  .report-card:nth-child(3) { animation-delay: 0.1s; }
-  .report-card:nth-child(4) { animation-delay: 0.15s; }
-  .report-card:nth-child(5) { animation-delay: 0.2s; }
-  .report-card:nth-child(6) { animation-delay: 0.25s; }
-  /* Date filter bar */
-  .filter-bar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-bottom: 24px;
-    padding: 16px 20px;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px;
-  }
-  .filter-bar label {
-    font-size: 13px;
-    font-weight: 600;
-    color: #94A3B8;
-    white-space: nowrap;
-  }
-  .filter-bar input[type="date"] {
-    color-scheme: dark;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 8px;
-    padding: 6px 10px;
-    color: #E2E8F0;
-    font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    outline: none;
-    transition: border-color 0.2s ease;
-  }
-  .filter-bar input[type="date"]:focus {
-    border-color: rgba(99,102,241,0.5);
-  }
-  .filter-bar input[type="date"]::-webkit-calendar-picker-indicator {
-    filter: invert(0.7);
-    cursor: pointer;
-  }
-  .filter-clear-btn {
-    background: rgba(99,102,241,0.12);
-    color: #A5B4FC;
-    border: 1px solid rgba(99,102,241,0.25);
-    border-radius: 8px;
-    padding: 6px 14px;
-    font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-  }
-  .filter-clear-btn:hover {
-    background: rgba(99,102,241,0.2);
-    border-color: rgba(99,102,241,0.4);
-  }
-  .filter-count {
-    margin-left: auto;
-    font-size: 13px;
-    color: #64748B;
-    font-weight: 500;
-    white-space: nowrap;
-  }
-  .report-card.hidden-by-filter {
-    display: none;
+  .month-group:nth-child(1) .report-card:nth-child(1) { animation-delay: 0s; }
+  .month-group:nth-child(1) .report-card:nth-child(2) { animation-delay: 0.04s; }
+  .month-group:nth-child(1) .report-card:nth-child(3) { animation-delay: 0.08s; }
+  .month-group:nth-child(1) .report-card:nth-child(4) { animation-delay: 0.12s; }
+  .month-group:nth-child(1) .report-card:nth-child(5) { animation-delay: 0.16s; }
+  .month-group:nth-child(1) .report-card:nth-child(6) { animation-delay: 0.20s; }
+
+  /* Responsive */
+  @media (max-width: 1024px) {
+    .report-grid { grid-template-columns: repeat(2, 1fr); }
   }
   @media (max-width: 640px) {
     .container { padding: 24px 16px; }
     .header h1 { font-size: 28px; }
-    .card-grid { grid-template-columns: 1fr; }
+    .report-grid { grid-template-columns: 1fr; }
+    .stats-bar { gap: 8px; }
+    .stat-card { padding: 10px 14px; font-size: 13px; }
+    .stat-card strong { font-size: 16px; }
     .filter-bar {
       flex-direction: column;
       align-items: stretch;
       gap: 10px;
     }
-    .filter-bar .filter-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .filter-bar input[type="date"] {
-      flex: 1;
-    }
-    .filter-count {
+    .filter-bar input[type="text"] { min-width: 0; }
+    .result-count {
       margin-left: 0;
       text-align: center;
     }
@@ -243,241 +398,583 @@
     <p>Published market analysis reports</p>
   </div>
 
-  <div class="filter-bar" id="filterBar">
-    <div class="filter-row">
-      <label for="dateFrom">From</label>
-      <input type="date" id="dateFrom" />
-    </div>
-    <div class="filter-row">
-      <label for="dateTo">To</label>
-      <input type="date" id="dateTo" />
-    </div>
-    <button class="filter-clear-btn" id="filterClear" type="button">Clear</button>
-    <span class="filter-count" id="filterCount"></span>
+  <div class="stats-bar">
+    <div class="stat-card"><span style="font-size:18px;">&#x1F4CA;</span> <strong>18</strong> Reports</div>
+    <div class="stat-card"><span style="font-size:18px;">&#x1F4A1;</span> <strong>7</strong> Insights</div>
+    <div class="stat-card"><span style="font-size:18px;">&#x1F3AF;</span> Avg <strong>1%</strong> Confidence</div>
+    <div class="stat-card"><span style="font-size:18px;">&#x1F552;</span> Latest: <strong>1m ago</strong></div>
   </div>
 
-  <div class="card-grid" id="cardGrid">
+  <div class="filter-bar">
+    <input type="text" id="searchInput" placeholder="Search reports by symbol, regime, summary...">
+    <select id="regimeFilter">
+      <option value="">All Regimes</option>
+    <option value="Risk-Off">Risk Off</option>
+    <option value="Transitional">Transitional</option>
+    </select>
+    <span class="result-count" id="resultCount">18 reports</span>
+  </div>
+
+  <div id="reportContainer">
     
-        <a href="reports/2026-02-12-1234-transitional.html" class="report-card" data-date="2026-02-12">
+    <div class="month-group" data-month="2026-02">
+      <h2 class="month-header">February 2026 &middot; 18 reports</h2>
+      <div class="report-grid">
+        
+        <a href="reports/2026-02-13-0924-risk-off.html" class="report-card" data-date="2026-02-13" data-regime="Risk-Off" data-symbols="GC=F GOOGL MU NEE NVDA PG XOM"
+           style="border-left: 3px solid #EF4444;">
           <div class="card-top-row">
-            <div class="card-date">February 12, 2026</div>
-            <span class="latest-badge">Latest</span>
+            <div class="card-date">February 13, 2026</div>
+            <div class="card-badges">
+              <span class="latest-badge">LATEST</span>
+              <span class="regime-badge" style="background:#EF444418;color:#EF4444;border-color:#EF444433;">
+                Risk Off
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 12:34 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-12-1234-transitional</div>
+          <div class="card-time">09:24 UTC</div>
+          <div class="symbol-row"><span class="symbol-pill">GC=F</span><span class="symbol-pill">GOOGL</span><span class="symbol-pill">MU</span><span class="symbol-pill">NEE</span><span class="symbol-pill">NVDA</span><span class="symbol-pill">PG</span><span class="symbol-pill more">+1</span></div>
+          <div class="action-row"><span class="action-mini" style="--act-color:#22C55E;">4 Buy</span><span class="action-mini" style="--act-color:#F59E0B;">2 Hold</span><span class="action-mini" style="--act-color:#6366F1;">1 Watch</span></div>
+          <div class="card-stats-row">
+            <span class="card-stat">7 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:1%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">1%</span>
+          </div>
+          <div class="card-summary">## How These Opportunities Were Discovered
+
+**Market Regime:** Risk-Off
+
+**Key Macro Themes:**
+- Inflation Resurgence / Stagflation Concerns: Oil rallying +5...</div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-12-1014-transitional.html" class="report-card" data-date="2026-02-12">
+        <a href="reports/2026-02-12-1234-transitional.html" class="report-card" data-date="2026-02-12" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 12, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 10:14 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-12-1014-transitional</div>
+          <div class="card-time">12:34 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-12-0828-transitional.html" class="report-card" data-date="2026-02-12">
+        <a href="reports/2026-02-12-1014-transitional.html" class="report-card" data-date="2026-02-12" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 12, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 08:28 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-12-0828-transitional</div>
+          <div class="card-time">10:14 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-12-0818-transitional.html" class="report-card" data-date="2026-02-12">
+        <a href="reports/2026-02-12-0828-transitional.html" class="report-card" data-date="2026-02-12" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 12, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 08:18 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-12-0818-transitional</div>
+          <div class="card-time">08:28 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-12-0541-transitional.html" class="report-card" data-date="2026-02-12">
+        <a href="reports/2026-02-12-0818-transitional.html" class="report-card" data-date="2026-02-12" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 12, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 05:41 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-12-0541-transitional</div>
+          <div class="card-time">08:18 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-11-2302-transitional.html" class="report-card" data-date="2026-02-11">
+        <a href="reports/2026-02-12-0541-transitional.html" class="report-card" data-date="2026-02-12" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
+          <div class="card-top-row">
+            <div class="card-date">February 12, 2026</div>
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
+          </div>
+          <div class="card-time">05:41 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
+        </a>
+
+        <a href="reports/2026-02-11-2302-transitional.html" class="report-card" data-date="2026-02-11" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 11, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 23:02 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-11-2302-transitional</div>
+          <div class="card-time">23:02 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-10-2038-transitional.html" class="report-card" data-date="2026-02-10">
+        <a href="reports/2026-02-10-2038-transitional.html" class="report-card" data-date="2026-02-10" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 10, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 20:38 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-10-2038-transitional</div>
+          <div class="card-time">20:38 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-10-2030-transitional.html" class="report-card" data-date="2026-02-10">
+        <a href="reports/2026-02-10-2030-transitional.html" class="report-card" data-date="2026-02-10" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 10, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 20:30 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-10-2030-transitional</div>
+          <div class="card-time">20:30 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-10-0557-transitional.html" class="report-card" data-date="2026-02-10">
+        <a href="reports/2026-02-10-0557-transitional.html" class="report-card" data-date="2026-02-10" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 10, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 05:57 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-10-0557-transitional</div>
+          <div class="card-time">05:57 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-10-0541-transitional.html" class="report-card" data-date="2026-02-10">
+        <a href="reports/2026-02-10-0541-transitional.html" class="report-card" data-date="2026-02-10" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 10, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 05:41 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-10-0541-transitional</div>
+          <div class="card-time">05:41 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-09-2057-transitional.html" class="report-card" data-date="2026-02-09">
+        <a href="reports/2026-02-09-2057-transitional.html" class="report-card" data-date="2026-02-09" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 09, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 20:57 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-09-2057-transitional</div>
+          <div class="card-time">20:57 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-08-0517-transitional.html" class="report-card" data-date="2026-02-08">
+        <a href="reports/2026-02-08-0517-transitional.html" class="report-card" data-date="2026-02-08" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 08, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 05:17 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-08-0517-transitional</div>
+          <div class="card-time">05:17 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-08-0513-transitional.html" class="report-card" data-date="2026-02-08">
+        <a href="reports/2026-02-08-0513-transitional.html" class="report-card" data-date="2026-02-08" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 08, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 05:13 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-08-0513-transitional</div>
+          <div class="card-time">05:13 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-07-1439-transitional.html" class="report-card" data-date="2026-02-07">
+        <a href="reports/2026-02-07-1439-transitional.html" class="report-card" data-date="2026-02-07" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 07, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 14:39 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-07-1439-transitional</div>
+          <div class="card-time">14:39 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-07-1005-transitional.html" class="report-card" data-date="2026-02-07">
+        <a href="reports/2026-02-07-1005-transitional.html" class="report-card" data-date="2026-02-07" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 07, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 10:05 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-07-1005-transitional</div>
+          <div class="card-time">10:05 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-07-0906-transitional.html" class="report-card" data-date="2026-02-07">
+        <a href="reports/2026-02-07-0906-transitional.html" class="report-card" data-date="2026-02-07" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 07, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 09:06 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-07-0906-transitional</div>
+          <div class="card-time">09:06 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
 
-        <a href="reports/2026-02-01-1315-transitional.html" class="report-card" data-date="2026-02-01">
+        <a href="reports/2026-02-01-1315-transitional.html" class="report-card" data-date="2026-02-01" data-regime="Transitional" data-symbols=""
+           style="border-left: 3px solid #F59E0B;">
           <div class="card-top-row">
             <div class="card-date">February 01, 2026</div>
-            
+            <div class="card-badges">
+              
+              <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
+                Transitional
+              </span>
+            </div>
           </div>
-          <div class="card-time">at 13:15 UTC</div>
-          <span class="regime-badge" style="background:#F59E0B18;color:#F59E0B;border-color:#F59E0B33;">
-            Transitional
-          </span>
-          <div class="card-filename">2026-02-01-1315-transitional</div>
+          <div class="card-time">13:15 UTC</div>
+          <div class="symbol-row"></div>
+          <div class="action-row"></div>
+          <div class="card-stats-row">
+            <span class="card-stat">0 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:0%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">0%</span>
+          </div>
+          <div class="card-summary"></div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
         </a>
+
+      </div>
+    </div>
 
   </div>
 
   <div class="footer">
-    <p>Generated by <strong>Teletraan</strong></p>
+    <p>Generated by <strong>Teletraan Intelligence</strong></p>
   </div>
 </div>
 <script>
 (function() {
-  var fromEl = document.getElementById('dateFrom');
-  var toEl = document.getElementById('dateTo');
-  var clearBtn = document.getElementById('filterClear');
-  var countEl = document.getElementById('filterCount');
-  var cards = document.querySelectorAll('.report-card[data-date]');
+  var searchEl = document.getElementById('searchInput');
+  var regimeEl = document.getElementById('regimeFilter');
+  var countEl = document.getElementById('resultCount');
+  var cards = document.querySelectorAll('.report-card');
+  var monthGroups = document.querySelectorAll('.month-group');
   var total = cards.length;
 
-  function updateCount(visible) {
+  function applyFilters() {
+    var query = (searchEl.value || '').toLowerCase().trim();
+    var regime = regimeEl.value;
+    var visible = 0;
+
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      var cardRegime = card.getAttribute('data-regime') || '';
+      var cardText = card.textContent.toLowerCase();
+      var cardSymbols = (card.getAttribute('data-symbols') || '').toLowerCase();
+      var show = true;
+
+      if (regime && cardRegime !== regime) show = false;
+      if (query) {
+        var searchable = cardText + ' ' + cardSymbols + ' ' + cardRegime.toLowerCase();
+        if (searchable.indexOf(query) === -1) show = false;
+      }
+
+      if (show) {
+        card.classList.remove('hidden-by-filter');
+        visible++;
+      } else {
+        card.classList.add('hidden-by-filter');
+      }
+    }
+
+    // Show/hide month groups with no visible cards
+    for (var g = 0; g < monthGroups.length; g++) {
+      var group = monthGroups[g];
+      var groupCards = group.querySelectorAll('.report-card');
+      var anyVisible = false;
+      for (var c = 0; c < groupCards.length; c++) {
+        if (!groupCards[c].classList.contains('hidden-by-filter')) {
+          anyVisible = true;
+          break;
+        }
+      }
+      if (anyVisible) {
+        group.classList.remove('hidden-group');
+      } else {
+        group.classList.add('hidden-group');
+      }
+    }
+
+    // Update count
     if (visible === total) {
       countEl.textContent = total + ' report' + (total !== 1 ? 's' : '');
     } else {
@@ -485,35 +982,8 @@
     }
   }
 
-  function applyFilter() {
-    var fromVal = fromEl.value;
-    var toVal = toEl.value;
-    var visible = 0;
-    for (var i = 0; i < cards.length; i++) {
-      var d = cards[i].getAttribute('data-date');
-      var show = true;
-      if (fromVal && d < fromVal) show = false;
-      if (toVal && d > toVal) show = false;
-      if (show) {
-        cards[i].classList.remove('hidden-by-filter');
-        visible++;
-      } else {
-        cards[i].classList.add('hidden-by-filter');
-      }
-    }
-    updateCount(visible);
-  }
-
-  clearBtn.addEventListener('click', function() {
-    fromEl.value = '';
-    toEl.value = '';
-    applyFilter();
-  });
-
-  fromEl.addEventListener('change', applyFilter);
-  toEl.addEventListener('change', applyFilter);
-
-  updateCount(total);
+  searchEl.addEventListener('input', applyFilters);
+  regimeEl.addEventListener('change', applyFilters);
 })();
 </script>
 </body>

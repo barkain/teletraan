@@ -1,0 +1,39 @@
+{
+  "filename": "2026-02-13-0924-risk-off.html",
+  "task_id": "e04ea4fd-72d2-4619-bae4-d5756decb11b",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Risk-Off\n\n**Key Macro Themes:**\n- Inflation Resurgence / Stagflation Concerns: Oil rallying +5.82% alongside gold surge and defensive sector strength suggests inflation fears retu...\n- Tech Sector Correction / Growth De-Rating: Technology sector down -4.30% with NASDAQ underperforming broader market by 2.4%. Communication Serv...\n- Financial Sector Stress / Banking Concerns: Financials down -4.93%, worst performing sector alongside consumer discretionary. Falling yields typ...\n\n**Heatmap Analysis:** INCOMPLETE ANALYSIS: Individual stock-level heatmap data is missing. Based on sector ETF data alone, the market shows a clear risk-off rotation with defensive sectors (Utilities +1.48%, Consumer Staples +0.92%) leading while cyclical sectors (Technology -2.63%, Financials -1.99%, Energy -1.82%) lag. This aligns with the elevated VIX (21.16) and Risk-Off macro regime identified in Phase 1.\n\n**Sectors Scanned:**\n- Technology: -2.6% (1D), breadth 50%\n- Financials: -2.0% (1D), breadth 50%\n- Energy: -1.8% (1D), breadth 50%\n- Healthcare: -0.2% (1D), breadth 50%\n- Industrials: -1.2% (1D), breadth 50%\n- Consumer Staples: +0.9% (1D), breadth 50%\n- Consumer Discretionary: -1.4% (1D), breadth 50%\n- Utilities: +1.5% (1D), breadth 50%\n- Communication Services: -1.8% (1D), breadth 50%\n- Real Estate: +0.2% (1D), breadth 50%\n- Materials: -1.5% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 13\n\n**Key Patterns Identified:**\n- Defensive sector leadership: Utilities and Consumer Staples outperforming with positive 1-day returns while cyclicals sell off\n- Technology sector under pressure: XLK down -2.63% (1D) despite +2.64% (5D) recovery, showing recent reversal\n- Financials weakness deepening: XLF down -1.99% (1D), -3.00% (5D), -4.68% (20D) showing consistent selling pressure",
+  "top_sectors": [
+    "Energy +14.9%",
+    "Consumer Staples +10.0%",
+    "Materials +8.4%",
+    "Consumer Discretionary -6.5%",
+    "Utilities +5.6%",
+    "Industrials +5.3%"
+  ],
+  "insights_count": 7,
+  "symbols": [
+    "GC=F",
+    "GOOGL",
+    "MU",
+    "NEE",
+    "NVDA",
+    "PG",
+    "XOM"
+  ],
+  "action_counts": {
+    "HOLD": 2,
+    "BUY": 4,
+    "WATCH": 1
+  },
+  "avg_confidence": 0.7,
+  "insight_types": [
+    "macro",
+    "opportunity",
+    "risk"
+  ],
+  "created_at": "2026-02-13T09:24:45",
+  "started_at": "2026-02-13T09:24:45.538690",
+  "completed_at": "2026-02-13T10:05:52.053130",
+  "elapsed_seconds": 2466.507334
+}
