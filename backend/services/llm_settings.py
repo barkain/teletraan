@@ -106,15 +106,23 @@ class LLMSettingsService:
         """Build the full LLM provider status response.
 
         Resolves effective values (env > db > default) and masks secrets.
+        The active_provider and display name are derived from the effective
+        values (env > db > defaults) so they always reflect saved DB settings,
+        not just the Settings singleton which may be stale.
         """
         from config import get_settings
 
         settings = get_settings()
         db_values = await self.get_all()
 
-        # Determine if .env is overriding anything
-        env_keys_present = [k for k in LLM_SETTING_KEYS if _is_env_set(k)]
-        env_override = len(env_keys_present) > 0
+        # Determine if the *original* .env file set any LLM keys.
+        # Keys that were injected by save() or load_on_startup() into
+        # os.environ should NOT count as ".env overrides" -- only keys that
+        # also exist in the DB are save()-injected.
+        env_override = any(
+            _is_env_set(k) and k not in db_values
+            for k in LLM_SETTING_KEYS
+        )
 
         # Effective values: env takes priority, then db, then config defaults
         def effective(key: str, default: Any = None) -> Any:
@@ -127,9 +135,16 @@ class LLMSettingsService:
         configured_provider = effective("LLM_PROVIDER", settings.LLM_PROVIDER)
         model = effective("ANTHROPIC_MODEL", settings.ANTHROPIC_MODEL)
 
+        # Resolve the active provider using the same effective() resolution
+        # so DB-saved settings are always reflected (mirrors Settings.get_llm_provider logic)
+        active_provider = self._resolve_active_provider(configured_provider, effective)
+        active_display = self._resolve_display_name(
+            active_provider, effective("ANTHROPIC_BASE_URL", settings.ANTHROPIC_BASE_URL)
+        )
+
         return {
-            "active_provider": settings.get_llm_provider(),
-            "active_provider_display": settings.get_llm_display_name(),
+            "active_provider": active_provider,
+            "active_provider_display": active_display,
             "configured_provider": configured_provider,
             "model": model,
             "env_override": env_override,
@@ -147,6 +162,56 @@ class LLMSettingsService:
             "vertex_project": effective("VERTEX_PROJECT", settings.VERTEX_PROJECT),
             "vertex_region": effective("VERTEX_REGION", settings.VERTEX_REGION),
         }
+
+    @staticmethod
+    def _resolve_active_provider(configured_provider: str, effective) -> str:
+        """Determine the active provider from effective config values.
+
+        Mirrors the logic in ``Settings.get_llm_provider()`` but uses the
+        effective() resolution (env > db > defaults) instead of the Settings
+        singleton, ensuring DB-saved settings are always reflected.
+        """
+        if configured_provider and configured_provider != "auto":
+            return configured_provider
+
+        # Auto-detect from credentials (same priority order as Settings)
+        if effective("ANTHROPIC_AUTH_TOKEN"):
+            return "proxy"
+        if effective("ANTHROPIC_API_KEY"):
+            return "anthropic_api"
+        if effective("CLAUDE_CODE_USE_BEDROCK"):
+            val = str(effective("CLAUDE_CODE_USE_BEDROCK")).lower()
+            if val in ("1", "true", "yes"):
+                return "bedrock"
+        if effective("CLAUDE_CODE_USE_VERTEX"):
+            val = str(effective("CLAUDE_CODE_USE_VERTEX")).lower()
+            if val in ("1", "true", "yes"):
+                return "vertex"
+        if effective("CLAUDE_CODE_USE_FOUNDRY"):
+            val = str(effective("CLAUDE_CODE_USE_FOUNDRY")).lower()
+            if val in ("1", "true", "yes"):
+                return "azure"
+        return "subscription"
+
+    @staticmethod
+    def _resolve_display_name(active_provider: str, base_url: str | None) -> str:
+        """Human-readable display name for the active provider.
+
+        Mirrors ``Settings.get_llm_display_name()`` but works with resolved
+        effective values.
+        """
+        is_ollama = base_url and (
+            "localhost:11434" in base_url.lower() or "ollama" in base_url.lower()
+        )
+        names = {
+            "anthropic_api": "Anthropic API (direct)",
+            "bedrock": "Amazon Bedrock",
+            "vertex": "Google Vertex AI",
+            "azure": "Azure AI Foundry",
+            "proxy": "Ollama (local)" if is_ollama else f"API Proxy ({base_url})" if base_url else "API Proxy",
+            "subscription": "Claude Code subscription",
+        }
+        return names.get(active_provider, f"Unknown ({active_provider})")
 
     async def save(self, config: dict[str, Any]) -> None:
         """Save LLM settings to the database and update runtime config.

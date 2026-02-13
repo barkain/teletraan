@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Plus, X, Loader2, Settings2, Cpu, Zap, AlertTriangle, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,68 +40,133 @@ export default function SettingsPage() {
 
   // LLM settings state
   const { data: llmStatus, isLoading: llmLoading, error: llmError } = useLLMSettings();
-  const { mutate: updateLLM, isPending: llmSaving } = useUpdateLLMSettings();
+  const { mutate: updateLLM } = useUpdateLLMSettings();
   const { mutate: testConnection, isPending: llmTesting, data: testResult, reset: resetTest } = useTestLLMConnection();
 
-  // Form state for LLM settings
-  // We track user overrides separately; base values come from the server query
-  const [llmOverrides, setLLMOverrides] = useState<LLMProviderConfig>({});
+  // Form state for LLM settings -- populated from server data via useEffect
+  const [llmForm, setLLMForm] = useState<LLMProviderConfig>({ llm_provider: 'auto' });
 
-  // Merge server data with local overrides -- no effects, no refs
-  const serverBase: LLMProviderConfig = llmStatus
-    ? {
-        llm_provider: llmStatus.configured_provider || 'auto',
-        anthropic_base_url: llmStatus.anthropic_base_url || undefined,
-        api_timeout_ms: llmStatus.api_timeout_ms || undefined,
-        anthropic_model: llmStatus.model || undefined,
-        aws_region: llmStatus.aws_region || undefined,
-        vertex_project: llmStatus.vertex_project || undefined,
-        vertex_region: llmStatus.vertex_region || undefined,
-      }
-    : { llm_provider: 'auto' };
+  // Auto-save state
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const userHasEdited = useRef(false);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedFadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const llmForm: LLMProviderConfig = { ...serverBase, ...llmOverrides };
+  // When server data loads (or changes), populate the form with non-sensitive fields.
+  // Sensitive fields (api_key, auth_token) are left empty since the server returns masked values;
+  // the form shows placeholder text indicating a value is saved.
+  useEffect(() => {
+    if (!llmStatus) return;
+    setLLMForm(prev => ({
+      // Keep any user-edited values that have been explicitly typed into the form,
+      // but provide server values as the base for anything not yet overridden.
+      llm_provider: llmStatus.configured_provider ?? 'auto',
+      anthropic_base_url: llmStatus.anthropic_base_url ?? undefined,
+      api_timeout_ms: llmStatus.api_timeout_ms != null ? Number(llmStatus.api_timeout_ms) : undefined,
+      anthropic_model: llmStatus.model ?? undefined,
+      aws_region: llmStatus.aws_region ?? undefined,
+      vertex_project: llmStatus.vertex_project ?? undefined,
+      vertex_region: llmStatus.vertex_region ?? undefined,
+      // Sensitive fields: leave empty (don't populate with masked server values)
+      // They remain whatever the user has typed, or empty if untouched.
+      anthropic_api_key: prev.anthropic_api_key || undefined,
+      anthropic_auth_token: prev.anthropic_auth_token || undefined,
+    }));
+  }, [llmStatus]);
+
   const selectedProvider = llmForm.llm_provider || 'auto';
 
   const updateField = useCallback((field: keyof LLMProviderConfig, value: string | number | null) => {
     resetTest();
-    setLLMOverrides(prev => ({ ...prev, [field]: value || undefined }));
+    userHasEdited.current = true;
+    setLLMForm(prev => ({ ...prev, [field]: value || undefined }));
   }, [resetTest]);
 
-  const handleSaveLLM = () => {
-    // Build the config, only including fields relevant to the selected provider
+  // Build the config object from current form state
+  const buildConfig = useCallback((): LLMProviderConfig => {
+    const provider = llmForm.llm_provider || 'auto';
     const config: LLMProviderConfig = {
-      llm_provider: selectedProvider,
+      llm_provider: provider,
       anthropic_model: llmForm.anthropic_model || undefined,
     };
 
-    if (selectedProvider === 'anthropic_api' || selectedProvider === 'auto') {
+    if (provider === 'anthropic_api' || provider === 'auto') {
       if (llmForm.anthropic_api_key) config.anthropic_api_key = llmForm.anthropic_api_key;
     }
-    if (selectedProvider === 'proxy' || selectedProvider === 'ollama') {
+    if (provider === 'proxy' || provider === 'ollama') {
       if (llmForm.anthropic_auth_token) config.anthropic_auth_token = llmForm.anthropic_auth_token;
       config.anthropic_base_url = llmForm.anthropic_base_url || undefined;
       if (llmForm.api_timeout_ms) config.api_timeout_ms = llmForm.api_timeout_ms;
     }
-    if (selectedProvider === 'ollama') {
+    if (provider === 'ollama') {
       config.anthropic_base_url = llmForm.anthropic_base_url || 'http://localhost:11434';
     }
-    if (selectedProvider === 'bedrock') {
+    if (provider === 'bedrock') {
       config.aws_region = llmForm.aws_region || undefined;
     }
-    if (selectedProvider === 'vertex') {
+    if (provider === 'vertex') {
       config.vertex_project = llmForm.vertex_project || undefined;
       config.vertex_region = llmForm.vertex_region || undefined;
     }
 
-    updateLLM(config, {
-      onSuccess: () => {
-        toast.success('LLM settings saved');
-        setLLMOverrides({});
-      },
-      onError: (err) => toast.error(`Failed to save: ${err.message}`),
-    });
-  };
+    return config;
+  }, [llmForm]);
+
+  // Check if form has meaningful content worth saving (not just defaults with no credentials)
+  const hasSubstantiveContent = useCallback((): boolean => {
+    const provider = llmForm.llm_provider || 'auto';
+    // If provider is not auto, that's a deliberate choice worth saving
+    if (provider !== 'auto') return true;
+    // If any credentials are filled in, save
+    if (llmForm.anthropic_api_key || llmForm.anthropic_auth_token) return true;
+    // If model is overridden, save
+    if (llmForm.anthropic_model) return true;
+    // If any cloud/proxy settings are filled in, save
+    if (llmForm.anthropic_base_url || llmForm.aws_region || llmForm.vertex_project || llmForm.vertex_region) return true;
+    if (llmForm.api_timeout_ms) return true;
+    return false;
+  }, [llmForm]);
+
+  // Debounced auto-save: watches form state and saves after 1s of inactivity
+  useEffect(() => {
+    // Don't auto-save if user hasn't edited, or if still loading, or form is empty/default
+    if (!userHasEdited.current || llmLoading) return;
+    if (!hasSubstantiveContent()) return;
+
+    // Clear any existing debounce timer
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+
+    debounceTimer.current = setTimeout(() => {
+      const config = buildConfig();
+      setSaveStatus('saving');
+      setSaveError(null);
+      if (savedFadeTimer.current) clearTimeout(savedFadeTimer.current);
+
+      updateLLM(config, {
+        onSuccess: () => {
+          setSaveStatus('saved');
+          // Clear sensitive fields from local form state so the useEffect
+          // repopulates non-sensitive fields from the refreshed server data.
+          setLLMForm(prev => ({
+            ...prev,
+            anthropic_api_key: undefined,
+            anthropic_auth_token: undefined,
+          }));
+          // Fade back to idle after 3 seconds
+          savedFadeTimer.current = setTimeout(() => setSaveStatus('idle'), 3000);
+        },
+        onError: (err) => {
+          setSaveStatus('error');
+          setSaveError(err.message);
+        },
+      });
+    }, 1000);
+
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [llmForm, llmLoading, buildConfig, hasSubstantiveContent, updateLLM]);
 
   const handleTestConnection = () => {
     testConnection(
@@ -171,6 +236,25 @@ export default function SettingsPage() {
             <div className="flex items-center gap-2">
               <Cpu className="h-5 w-5 text-muted-foreground" />
               <CardTitle>LLM Provider</CardTitle>
+              {/* Auto-save status indicator */}
+              {saveStatus === 'saving' && (
+                <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Saving...
+                </span>
+              )}
+              {saveStatus === 'saved' && (
+                <span className="ml-auto flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 animate-in fade-in duration-300">
+                  <Check className="h-3 w-3" />
+                  Saved
+                </span>
+              )}
+              {saveStatus === 'error' && (
+                <span className="ml-auto flex items-center gap-1.5 text-xs text-red-500" title={saveError || undefined}>
+                  <AlertTriangle className="h-3 w-3" />
+                  Error saving
+                </span>
+              )}
             </div>
             <CardDescription>
               Configure the AI provider used for market analysis. For desktop installations,
@@ -178,231 +262,237 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Current Status */}
             {llmLoading ? (
-              <Skeleton className="h-12 w-full" />
+              /* Show skeletons for the entire form while loading so fields
+                 are never rendered empty before server data arrives. */
+              <div className="space-y-6">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-1/2" />
+              </div>
             ) : (
-              <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-muted/50 border border-border/50">
-                <div className={`h-2 w-2 rounded-full ${getProviderStatusColor()}`} />
-                <span className="text-sm font-medium">
-                  {llmStatus?.active_provider_display || 'Unknown'}
-                </span>
-                <Badge variant="outline" className="ml-auto text-xs">
-                  {llmStatus?.model || 'N/A'}
-                </Badge>
-              </div>
-            )}
-
-            {/* Env override warning */}
-            {llmStatus?.env_override && (
-              <div className="flex items-start gap-2 px-4 py-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-sm">
-                <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
-                <span className="text-muted-foreground">
-                  Some settings are configured via <code className="text-xs bg-muted px-1 py-0.5 rounded">.env</code> file
-                  and take priority over values set here.
-                </span>
-              </div>
-            )}
-
-            {/* Provider Selector */}
-            <div className="space-y-2">
-              <Label>Provider</Label>
-              <Select
-                value={selectedProvider}
-                onValueChange={(v) => updateField('llm_provider', v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROVIDER_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      <span>{opt.label}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">{opt.description}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Provider-specific fields */}
-            {(selectedProvider === 'anthropic_api' || selectedProvider === 'auto') && (
-              <div className="space-y-2">
-                <Label>API Key</Label>
-                <Input
-                  type="password"
-                  placeholder={llmStatus?.anthropic_api_key || 'sk-ant-...'}
-                  value={llmForm.anthropic_api_key || ''}
-                  onChange={(e) => updateField('anthropic_api_key', e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Your Anthropic API key (starts with sk-ant-).
-                </p>
-              </div>
-            )}
-
-            {(selectedProvider === 'proxy') && (
               <>
-                <div className="space-y-2">
-                  <Label>Auth Token</Label>
-                  <Input
-                    type="password"
-                    placeholder={llmStatus?.anthropic_auth_token || 'Token or API key'}
-                    value={llmForm.anthropic_auth_token || ''}
-                    onChange={(e) => updateField('anthropic_auth_token', e.target.value)}
-                  />
+                {/* Current Status */}
+                <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-muted/50 border border-border/50">
+                  <div className={`h-2 w-2 rounded-full ${getProviderStatusColor()}`} />
+                  <span className="text-sm font-medium">
+                    {llmStatus?.active_provider_display || 'Unknown'}
+                  </span>
+                  <Badge variant="outline" className="ml-auto text-xs">
+                    {llmStatus?.model || 'N/A'}
+                  </Badge>
                 </div>
-                <div className="space-y-2">
-                  <Label>Base URL</Label>
-                  <Input
-                    placeholder="https://api.z.ai/api/anthropic"
-                    value={llmForm.anthropic_base_url || ''}
-                    onChange={(e) => updateField('anthropic_base_url', e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Timeout (ms)</Label>
-                  <Input
-                    type="number"
-                    placeholder="30000"
-                    value={llmForm.api_timeout_ms || ''}
-                    onChange={(e) => updateField('api_timeout_ms', e.target.value ? parseInt(e.target.value) : null)}
-                  />
-                </div>
-              </>
-            )}
 
-            {selectedProvider === 'ollama' && (
-              <div className="space-y-2">
-                <Label>Base URL</Label>
-                <Input
-                  placeholder="http://localhost:11434"
-                  value={llmForm.anthropic_base_url || ''}
-                  onChange={(e) => updateField('anthropic_base_url', e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Default: http://localhost:11434
-                </p>
-              </div>
-            )}
-
-            {selectedProvider === 'bedrock' && (
-              <div className="space-y-2">
-                <Label>AWS Region</Label>
-                <Input
-                  placeholder="us-east-1"
-                  value={llmForm.aws_region || ''}
-                  onChange={(e) => updateField('aws_region', e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  AWS credentials must be configured separately (via AWS CLI or environment).
-                </p>
-              </div>
-            )}
-
-            {selectedProvider === 'vertex' && (
-              <>
-                <div className="space-y-2">
-                  <Label>Project ID</Label>
-                  <Input
-                    placeholder="my-gcp-project"
-                    value={llmForm.vertex_project || ''}
-                    onChange={(e) => updateField('vertex_project', e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Region</Label>
-                  <Input
-                    placeholder="us-central1"
-                    value={llmForm.vertex_region || ''}
-                    onChange={(e) => updateField('vertex_region', e.target.value)}
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  GCP credentials must be configured separately (via gcloud CLI or service account).
-                </p>
-              </>
-            )}
-
-            {selectedProvider === 'azure' && (
-              <p className="text-sm text-muted-foreground px-1">
-                Azure AI Foundry credentials are configured via environment variables.
-                Ensure your Azure credentials are available.
-              </p>
-            )}
-
-            {selectedProvider === 'subscription' && (
-              <div className="flex items-start gap-2 px-4 py-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-sm">
-                <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
-                <span className="text-muted-foreground">
-                  Claude Code subscription auth relies on a local Claude Code login and is
-                  <strong> not recommended</strong> for distributed or production deployments.
-                  See Anthropic TOS for usage limitations.
-                </span>
-              </div>
-            )}
-
-            {/* Model override */}
-            <div className="space-y-2">
-              <Label>Model</Label>
-              <Input
-                placeholder="claude-sonnet-4-20250514"
-                value={llmForm.anthropic_model || ''}
-                onChange={(e) => updateField('anthropic_model', e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Override the default model. Leave empty to use the default.
-              </p>
-            </div>
-
-            {/* Test result */}
-            {testResult && (
-              <div className={`flex items-start gap-2 px-4 py-3 rounded-lg text-sm ${
-                testResult.success
-                  ? 'bg-green-500/10 border border-green-500/30'
-                  : 'bg-red-500/10 border border-red-500/30'
-              }`}>
-                {testResult.success ? (
-                  <Check className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
-                ) : (
-                  <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                {/* Env override warning */}
+                {llmStatus?.env_override && (
+                  <div className="flex items-start gap-2 px-4 py-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-sm">
+                    <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
+                    <span className="text-muted-foreground">
+                      Some settings are configured via <code className="text-xs bg-muted px-1 py-0.5 rounded">.env</code> file
+                      and take priority over values set here.
+                    </span>
+                  </div>
                 )}
-                <div>
-                  <p className="font-medium">{testResult.success ? 'Connection successful' : 'Connection failed'}</p>
-                  <p className="text-muted-foreground mt-1">{testResult.message}</p>
-                  {testResult.response_preview && (
-                    <p className="text-xs text-muted-foreground mt-1 italic">
-                      &quot;{testResult.response_preview}&quot;
+
+                {/* Provider Selector */}
+                <div className="space-y-2">
+                  <Label>Provider</Label>
+                  <Select
+                    value={selectedProvider}
+                    onValueChange={(v) => updateField('llm_provider', v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PROVIDER_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          <span>{opt.label}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{opt.description}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Provider-specific fields */}
+                {(selectedProvider === 'anthropic_api' || selectedProvider === 'auto') && (
+                  <div className="space-y-2">
+                    <Label>API Key</Label>
+                    <Input
+                      type="password"
+                      placeholder={llmStatus?.anthropic_api_key ? `Saved (${llmStatus.anthropic_api_key})` : 'sk-ant-...'}
+                      value={llmForm.anthropic_api_key || ''}
+                      onChange={(e) => updateField('anthropic_api_key', e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Your Anthropic API key (starts with sk-ant-).
+                      {llmStatus?.anthropic_api_key && !llmForm.anthropic_api_key && (
+                        <span className="ml-1 text-green-600 dark:text-green-400">Key saved on server.</span>
+                      )}
                     </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Action buttons */}
-            <div className="flex gap-3 pt-2">
-              <Button
-                onClick={handleSaveLLM}
-                disabled={llmSaving}
-              >
-                {llmSaving ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : null}
-                Save Settings
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleTestConnection}
-                disabled={llmTesting}
-              >
-                {llmTesting ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Zap className="h-4 w-4 mr-2" />
+                  </div>
                 )}
-                Test Connection
-              </Button>
-            </div>
+
+                {(selectedProvider === 'proxy') && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Auth Token</Label>
+                      <Input
+                        type="password"
+                        placeholder={llmStatus?.anthropic_auth_token ? `Saved (${llmStatus.anthropic_auth_token})` : 'Token or API key'}
+                        value={llmForm.anthropic_auth_token || ''}
+                        onChange={(e) => updateField('anthropic_auth_token', e.target.value)}
+                      />
+                      {llmStatus?.anthropic_auth_token && !llmForm.anthropic_auth_token && (
+                        <p className="text-xs text-green-600 dark:text-green-400">Token saved on server.</p>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Base URL</Label>
+                      <Input
+                        placeholder="https://api.z.ai/api/anthropic"
+                        value={llmForm.anthropic_base_url || ''}
+                        onChange={(e) => updateField('anthropic_base_url', e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Timeout (ms)</Label>
+                      <Input
+                        type="number"
+                        placeholder="30000"
+                        value={llmForm.api_timeout_ms ?? ''}
+                        onChange={(e) => updateField('api_timeout_ms', e.target.value ? parseInt(e.target.value) : null)}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {selectedProvider === 'ollama' && (
+                  <div className="space-y-2">
+                    <Label>Base URL</Label>
+                    <Input
+                      placeholder="http://localhost:11434"
+                      value={llmForm.anthropic_base_url || ''}
+                      onChange={(e) => updateField('anthropic_base_url', e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Default: http://localhost:11434
+                    </p>
+                  </div>
+                )}
+
+                {selectedProvider === 'bedrock' && (
+                  <div className="space-y-2">
+                    <Label>AWS Region</Label>
+                    <Input
+                      placeholder="us-east-1"
+                      value={llmForm.aws_region || ''}
+                      onChange={(e) => updateField('aws_region', e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      AWS credentials must be configured separately (via AWS CLI or environment).
+                    </p>
+                  </div>
+                )}
+
+                {selectedProvider === 'vertex' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Project ID</Label>
+                      <Input
+                        placeholder="my-gcp-project"
+                        value={llmForm.vertex_project || ''}
+                        onChange={(e) => updateField('vertex_project', e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Region</Label>
+                      <Input
+                        placeholder="us-central1"
+                        value={llmForm.vertex_region || ''}
+                        onChange={(e) => updateField('vertex_region', e.target.value)}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      GCP credentials must be configured separately (via gcloud CLI or service account).
+                    </p>
+                  </>
+                )}
+
+                {selectedProvider === 'azure' && (
+                  <p className="text-sm text-muted-foreground px-1">
+                    Azure AI Foundry credentials are configured via environment variables.
+                    Ensure your Azure credentials are available.
+                  </p>
+                )}
+
+                {selectedProvider === 'subscription' && (
+                  <div className="flex items-start gap-2 px-4 py-3 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-sm">
+                    <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
+                    <span className="text-muted-foreground">
+                      Claude Code subscription auth relies on a local Claude Code login and is
+                      <strong> not recommended</strong> for distributed or production deployments.
+                      See Anthropic TOS for usage limitations.
+                    </span>
+                  </div>
+                )}
+
+                {/* Model override */}
+                <div className="space-y-2">
+                  <Label>Model</Label>
+                  <Input
+                    placeholder="claude-sonnet-4-20250514"
+                    value={llmForm.anthropic_model || ''}
+                    onChange={(e) => updateField('anthropic_model', e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Override the default model. Leave empty to use the default.
+                  </p>
+                </div>
+
+                {/* Test result */}
+                {testResult && (
+                  <div className={`flex items-start gap-2 px-4 py-3 rounded-lg text-sm ${
+                    testResult.success
+                      ? 'bg-green-500/10 border border-green-500/30'
+                      : 'bg-red-500/10 border border-red-500/30'
+                  }`}>
+                    {testResult.success ? (
+                      <Check className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                    )}
+                    <div>
+                      <p className="font-medium">{testResult.success ? 'Connection successful' : 'Connection failed'}</p>
+                      <p className="text-muted-foreground mt-1">{testResult.message}</p>
+                      {testResult.response_preview && (
+                        <p className="text-xs text-muted-foreground mt-1 italic">
+                          &quot;{testResult.response_preview}&quot;
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Test Connection button */}
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleTestConnection}
+                    disabled={llmTesting}
+                  >
+                    {llmTesting ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Zap className="h-4 w-4 mr-2" />
+                    )}
+                    Test Connection
+                  </Button>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 

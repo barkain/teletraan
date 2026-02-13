@@ -443,6 +443,7 @@ import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, A
 import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, PatternsSummary, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
 import type { FollowUpResearch, ResearchListResponse, ResearchListParams, ResearchCreateRequest } from '@/lib/types/research';
 import type { ReportListResponse, ReportDetail, PublishResponse } from '@/lib/types/report';
+import type { TrackRecordStats, MonthlyTrendResponse, OutcomeSummary } from '@/lib/types/track-record';
 
 // ============================================
 // Data Refresh API
@@ -490,6 +491,14 @@ export const knowledgeApi = {
     },
   },
 
+  // Track Record
+  trackRecord: () =>
+    fetchApi<TrackRecordStats>('/api/v1/knowledge/track-record'),
+
+  // Monthly Trend
+  monthlyTrend: () =>
+    fetchApi<MonthlyTrendResponse>('/api/v1/knowledge/track-record/monthly-trend'),
+
   // Themes
   themes: {
     list: async (params?: ConversationThemesParams): Promise<ConversationThemesResponse> => {
@@ -500,4 +509,13 @@ export const knowledgeApi = {
     get: (id: string) =>
       fetchApi<ConversationTheme>(`/api/v1/knowledge/themes/${id}`),
   },
+};
+
+// ============================================
+// Outcomes API
+// ============================================
+
+export const outcomesApi = {
+  summary: () =>
+    fetchApi<OutcomeSummary>('/api/v1/outcomes/summary'),
 };

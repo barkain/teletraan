@@ -41,33 +41,6 @@ async def get_all_settings(
     return AllSettingsResponse(settings=settings)
 
 
-@router.get("/{key}")
-async def get_setting(
-    key: str,
-    service: SettingsService = Depends(get_service),
-) -> dict[str, Any]:
-    """Get a specific setting by key."""
-    value = await service.get_setting(key)
-    if value is None:
-        raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
-    return {"key": key, "value": value}
-
-
-@router.put("/{key}")
-async def update_setting(
-    key: str,
-    update: SettingUpdate,
-    service: SettingsService = Depends(get_service),
-) -> dict[str, Any]:
-    """Update a specific setting."""
-    setting = await service.set_setting(key, update.value)
-    return {
-        "key": setting.key,
-        "value": json.loads(setting.value),
-        "updated_at": setting.updated_at.isoformat(),
-    }
-
-
 @router.post("/reset", response_model=SettingsResetResponse)
 async def reset_settings(
     service: SettingsService = Depends(get_service),
@@ -183,17 +156,65 @@ async def update_llm_settings(
 @router.post("/llm/test", response_model=LLMTestResult)
 async def test_llm_connection(
     body: LLMTestRequest,
+    llm_service: LLMSettingsService = Depends(get_llm_service),
 ) -> LLMTestResult:
     """Test the LLM provider connection using values from the request body.
 
     The frontend sends the current form values so the user can test
-    *before* saving. We never fall back to server config here.
+    *before* saving. When the form sends empty/null credentials (e.g. the
+    user didn't re-type a saved token), we fall back to the DB-saved values
+    so that "Test Connection" works for already-persisted credentials.
     """
+    # Fall back to DB-saved credentials when the form sends empty values
+    if not body.auth_token or not body.api_key or not body.base_url:
+        db_values = await llm_service.get_all()
+        if not body.auth_token and db_values.get("ANTHROPIC_AUTH_TOKEN"):
+            body.auth_token = db_values["ANTHROPIC_AUTH_TOKEN"]
+        if not body.api_key and db_values.get("ANTHROPIC_API_KEY"):
+            body.api_key = db_values["ANTHROPIC_API_KEY"]
+        if not body.base_url and db_values.get("ANTHROPIC_BASE_URL"):
+            body.base_url = db_values["ANTHROPIC_BASE_URL"]
+
     provider = body.provider
     model = body.model or "claude-sonnet-4-20250514"
 
     result = await _test_llm_connection_http(provider, model, body)
     return LLMTestResult(**result)
+
+
+@router.get("/{key}")
+async def get_setting(
+    key: str,
+    service: SettingsService = Depends(get_service),
+) -> dict[str, Any]:
+    """Get a specific setting by key.
+
+    NOTE: This catch-all route is declared last so that static routes
+    like /llm and /watchlist are matched first by FastAPI.
+    """
+    value = await service.get_setting(key)
+    if value is None:
+        raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
+    return {"key": key, "value": value}
+
+
+@router.put("/{key}")
+async def update_setting(
+    key: str,
+    update: SettingUpdate,
+    service: SettingsService = Depends(get_service),
+) -> dict[str, Any]:
+    """Update a specific setting.
+
+    NOTE: This catch-all route is declared last so that static routes
+    like /llm and /watchlist are matched first by FastAPI.
+    """
+    setting = await service.set_setting(key, update.value)
+    return {
+        "key": setting.key,
+        "value": json.loads(setting.value),
+        "updated_at": setting.updated_at.isoformat(),
+    }
 
 
 async def _test_llm_connection_http(
@@ -204,6 +225,27 @@ async def _test_llm_connection_http(
     Uses the values from the request body, NOT from server config.
     """
     import aiohttp
+
+    # Auto-detect: resolve to a concrete provider based on provided credentials
+    if provider == "auto":
+        if body.auth_token and body.base_url:
+            provider = "proxy"
+        elif body.auth_token:
+            provider = "proxy"
+        elif body.api_key:
+            provider = "anthropic_api"
+        else:
+            # No credentials provided -- cannot test anything
+            return {
+                "success": False,
+                "message": (
+                    "No credentials configured. Using Claude Code subscription "
+                    "(cannot be tested via API). Select a specific provider and "
+                    "enter credentials to test the connection."
+                ),
+                "provider": "auto",
+                "model": model,
+            }
 
     if provider in ("proxy", "anthropic_api"):
         # Determine base URL and API key based on provider

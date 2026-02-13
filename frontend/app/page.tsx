@@ -1,9 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import {
   Sparkles,
   ArrowRight,
@@ -13,25 +12,45 @@ import {
   TrendingDown,
   Target,
   Clock,
-  MessageSquare,
-  BarChart3,
   AlertCircle,
   CheckCircle2,
   Minus,
   XCircle,
   Timer,
+  Activity,
+  Eye,
+  BarChart3,
+  PieChart as PieChartIcon,
+  Hash,
+  Layers,
 } from 'lucide-react';
+import {
+  ComposedChart,
+  Area,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Legend,
+} from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DeepInsightCard } from '@/components/insights/deep-insight-card';
 import { AnalysisSummaryBanner } from '@/components/insights/analysis-summary-banner';
 import { GradientProgressBar } from '@/components/insights/gradient-progress-bar';
 import { useRecentDeepInsights } from '@/lib/hooks/use-deep-insights';
 import { useAnalysisTask } from '@/lib/hooks/use-analysis-task';
+import { knowledgeApi, outcomesApi } from '@/lib/api';
 import type { InsightAction, AutonomousAnalysisResponse } from '@/types';
+import type { TrackRecordStats, MonthlyTrendResponse, OutcomeSummary } from '@/lib/types/track-record';
+import type { PatternsSummary } from '@/lib/types/knowledge';
 
 // ============================================
 // Types
@@ -45,40 +64,47 @@ interface AnalysisStats {
   watchSignals: number;
 }
 
+interface ConfidenceBucket {
+  range: string;
+  count: number;
+  fill: string;
+}
+
+// ============================================
+// Constants
+// ============================================
+
+const ACTION_COLORS: Record<string, string> = {
+  BUY: '#22c55e',
+  STRONG_BUY: '#16a34a',
+  SELL: '#ef4444',
+  STRONG_SELL: '#dc2626',
+  HOLD: '#f59e0b',
+  WATCH: '#3b82f6',
+};
+
+const TYPE_COLORS: Record<string, string> = {
+  opportunity: '#22c55e',
+  risk: '#ef4444',
+  rotation: '#8b5cf6',
+  macro: '#3b82f6',
+  earnings: '#f59e0b',
+  technical: '#06b6d4',
+  sentiment: '#ec4899',
+  thematic: '#a855f7',
+};
+
+const CONFIDENCE_COLORS = [
+  '#ef4444', // 0-20 red
+  '#f97316', // 20-40 orange
+  '#f59e0b', // 40-60 amber
+  '#84cc16', // 60-80 lime
+  '#22c55e', // 80-100 green
+];
+
 // ============================================
 // Skeleton Components
 // ============================================
-
-function InsightGridSkeleton({ count = 6 }: { count?: number }) {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {Array.from({ length: count }).map((_, i) => (
-        <Card key={i}>
-          <CardHeader className="pb-3">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <Skeleton className="h-6 w-20 mb-2" />
-                <Skeleton className="h-5 w-3/4" />
-                <div className="flex gap-1 mt-2">
-                  <Skeleton className="h-5 w-12" />
-                  <Skeleton className="h-5 w-12" />
-                </div>
-              </div>
-              <div className="text-right">
-                <Skeleton className="h-8 w-12" />
-                <Skeleton className="h-3 w-16 mt-1" />
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-2/3 mt-1" />
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
-}
 
 function StatsSkeleton() {
   return (
@@ -91,6 +117,23 @@ function StatsSkeleton() {
           </CardContent>
         </Card>
       ))}
+    </div>
+  );
+}
+
+function ChartSkeleton({ height = 300 }: { height?: number }) {
+  return (
+    <div className="flex items-center justify-center" style={{ height }}>
+      <div className="space-y-3 w-full px-6">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-[200px] w-full rounded-lg" />
+        <div className="flex justify-between">
+          <Skeleton className="h-3 w-12" />
+          <Skeleton className="h-3 w-12" />
+          <Skeleton className="h-3 w-12" />
+          <Skeleton className="h-3 w-12" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -133,6 +176,17 @@ function computeStats(insights: { action: InsightAction }[]): AnalysisStats {
     holdSignals: insights.filter(i => holdActions.includes(i.action)).length,
     watchSignals: insights.filter(i => watchActions.includes(i.action)).length,
   };
+}
+
+function formatPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined) return 'N/A';
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatReturn(value: number | null | undefined): string {
+  if (value === null || value === undefined) return 'N/A';
+  const sign = value >= 0 ? '+' : '';
+  return `${sign}${(value * 100).toFixed(1)}%`;
 }
 
 // ============================================
@@ -180,7 +234,7 @@ function AnalysisStatsCards({ stats, isLoading }: { stats?: AnalysisStats; isLoa
       {statItems.map((item) => {
         const Icon = item.icon;
         return (
-          <Card key={item.label}>
+          <Card key={item.label} className="bg-card/80 backdrop-blur-sm border-border/50">
             <CardContent className="pt-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                 <Icon className={`h-4 w-4 ${item.color}`} />
@@ -192,53 +246,6 @@ function AnalysisStatsCards({ stats, isLoading }: { stats?: AnalysisStats; isLoa
         );
       })}
     </div>
-  );
-}
-
-// ============================================
-// Quick Filter Tabs
-// ============================================
-
-type FilterTab = 'all' | 'buy' | 'sell' | 'hold' | 'watch';
-
-const filterTabConfig: Record<FilterTab, { label: string; actions: InsightAction[] | null }> = {
-  all: { label: 'All Insights', actions: null },
-  buy: { label: 'Buy Signals', actions: ['STRONG_BUY', 'BUY'] },
-  sell: { label: 'Sell Signals', actions: ['STRONG_SELL', 'SELL'] },
-  hold: { label: 'Hold', actions: ['HOLD'] },
-  watch: { label: 'Watch', actions: ['WATCH'] },
-};
-
-// ============================================
-// Empty State
-// ============================================
-
-function EmptyInsightsState({ onRunAnalysis, isRunning }: { onRunAnalysis: () => void; isRunning: boolean }) {
-  return (
-    <Card className="py-12">
-      <CardContent className="flex flex-col items-center justify-center text-center">
-        <div className="rounded-full bg-muted p-4 mb-4">
-          <Sparkles className="h-8 w-8 text-muted-foreground" />
-        </div>
-        <CardTitle className="text-lg mb-2">No AI Insights Yet</CardTitle>
-        <CardDescription className="max-w-md mb-6">
-          Let our AI autonomously scan the market, analyze macro conditions, and discover trading opportunities across all sectors.
-        </CardDescription>
-        <Button onClick={onRunAnalysis} disabled={isRunning} size="lg">
-          {isRunning ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Discovering Opportunities...
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4" />
-              Discover Opportunities
-            </>
-          )}
-        </Button>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -340,7 +347,6 @@ function AnalysisStatusBanner({
   }
 
   if (isComplete && task) {
-    // Build a response-like object for the summary banner
     const analysisResult: AutonomousAnalysisResponse = {
       analysis_id: '',
       status: 'complete',
@@ -369,47 +375,6 @@ function AnalysisStatusBanner({
 }
 
 // ============================================
-// Recent Conversations (Placeholder)
-// ============================================
-
-function RecentConversationsSection() {
-  // In a real implementation, this would fetch recent conversations
-  // For now, we'll show a placeholder that encourages users to explore insights
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5 text-muted-foreground" />
-            <CardTitle className="text-lg">Continue Your Research</CardTitle>
-          </div>
-          <Link
-            href="/insights"
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            View All
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-        <CardDescription>
-          Click on any insight card to discuss it with our AI assistant
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center justify-center py-6 text-center text-muted-foreground">
-          <div className="space-y-2">
-            <MessageSquare className="h-8 w-8 mx-auto opacity-50" />
-            <p className="text-sm">No recent conversations</p>
-            <p className="text-xs">Start by clicking on an insight to discuss it</p>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ============================================
 // Market Status Badge
 // ============================================
 
@@ -418,11 +383,9 @@ function MarketStatusBadge() {
   const hour = now.getUTCHours();
   const day = now.getUTCDay();
 
-  // Simple market hours check (NYSE: 9:30 AM - 4:00 PM ET, Mon-Fri)
-  // ET is UTC-5 (or UTC-4 during DST)
   const isWeekday = day >= 1 && day <= 5;
-  const marketOpenHour = 14; // 9:30 AM ET in UTC (approximate)
-  const marketCloseHour = 21; // 4:00 PM ET in UTC
+  const marketOpenHour = 14;
+  const marketCloseHour = 21;
   const isMarketHours = hour >= marketOpenHour && hour < marketCloseHour;
   const isOpen = isWeekday && isMarketHours;
 
@@ -435,17 +398,654 @@ function MarketStatusBadge() {
 }
 
 // ============================================
+// Custom Tooltip for Charts
+// ============================================
+
+function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-lg border bg-popover/95 backdrop-blur-sm px-3 py-2 text-sm shadow-xl">
+      <p className="font-medium text-foreground mb-1">{label}</p>
+      {payload.map((entry, i) => (
+        <div key={i} className="flex items-center gap-2 text-muted-foreground">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
+          <span>{entry.name}:</span>
+          <span className="font-medium text-foreground">
+            {entry.name.toLowerCase().includes('rate') ? `${(entry.value * 100).toFixed(1)}%` : entry.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ============================================
+// Monthly Trend Chart
+// ============================================
+
+function MonthlyTrendChart({ data, isLoading }: { data?: MonthlyTrendResponse; isLoading: boolean }) {
+  const chartData = useMemo(() => {
+    if (!data?.data?.length) return [];
+    return data.data.map(d => ({
+      month: d.month,
+      rate: d.rate,
+      total: d.total ?? 0,
+      successful: d.successful ?? 0,
+    }));
+  }, [data]);
+
+  return (
+    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <Activity className="h-4 w-4 text-primary" />
+          <CardTitle className="text-base">Monthly Performance Trend</CardTitle>
+        </div>
+        <CardDescription>Success rate and insight volume over time</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <ChartSkeleton />
+        ) : chartData.length === 0 ? (
+          <EmptyChartState message="No monthly trend data yet" />
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <ComposedChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+              <defs>
+                <linearGradient id="successGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 12 }}
+                className="fill-muted-foreground"
+                tickFormatter={(v: string) => {
+                  const [, m] = v.split('-');
+                  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                  return months[parseInt(m, 10) - 1] || v;
+                }}
+              />
+              <YAxis
+                yAxisId="rate"
+                orientation="left"
+                tick={{ fontSize: 12 }}
+                className="fill-muted-foreground"
+                tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
+                domain={[0, 1]}
+              />
+              <YAxis
+                yAxisId="count"
+                orientation="right"
+                tick={{ fontSize: 12 }}
+                className="fill-muted-foreground"
+              />
+              <Tooltip content={<ChartTooltip />} />
+              <Legend
+                wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
+              />
+              <Bar
+                yAxisId="count"
+                dataKey="total"
+                name="Total Insights"
+                fill="#3b82f6"
+                opacity={0.3}
+                radius={[4, 4, 0, 0]}
+              />
+              <Area
+                yAxisId="rate"
+                type="monotone"
+                dataKey="rate"
+                name="Success Rate"
+                stroke="#22c55e"
+                strokeWidth={2.5}
+                fill="url(#successGradient)"
+                dot={{ fill: '#22c55e', r: 4, strokeWidth: 0 }}
+                activeDot={{ r: 6, fill: '#22c55e', stroke: '#fff', strokeWidth: 2 }}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================
+// Action Distribution Donut Chart
+// ============================================
+
+function ActionDistributionChart({ data, isLoading }: { data?: TrackRecordStats; isLoading: boolean }) {
+  const chartData = useMemo(() => {
+    if (!data?.by_action) return [];
+    return Object.entries(data.by_action)
+      .map(([action, stats]) => ({
+        name: action.replace('_', ' '),
+        value: stats.total,
+        fill: ACTION_COLORS[action] || '#6b7280',
+      }))
+      .filter(d => d.value > 0);
+  }, [data]);
+
+  const totalCount = useMemo(() => chartData.reduce((s, d) => s + d.value, 0), [chartData]);
+
+  return (
+    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <PieChartIcon className="h-4 w-4 text-primary" />
+          <CardTitle className="text-base">Action Distribution</CardTitle>
+        </div>
+        <CardDescription>Breakdown of insight recommendations</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <ChartSkeleton />
+        ) : chartData.length === 0 ? (
+          <EmptyChartState message="No action data yet" />
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie
+                data={chartData}
+                cx="50%"
+                cy="50%"
+                innerRadius={70}
+                outerRadius={110}
+                paddingAngle={3}
+                dataKey="value"
+                stroke="none"
+              >
+                {chartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.fill} />
+                ))}
+              </Pie>
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null;
+                  const d = payload[0].payload;
+                  return (
+                    <div className="rounded-lg border bg-popover/95 backdrop-blur-sm px-3 py-2 text-sm shadow-xl">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: d.fill }} />
+                        <span className="font-medium">{d.name}</span>
+                      </div>
+                      <p className="text-muted-foreground mt-1">
+                        {d.value} insights ({((d.value / totalCount) * 100).toFixed(1)}%)
+                      </p>
+                    </div>
+                  );
+                }}
+              />
+              {/* Center text */}
+              <text
+                x="50%"
+                y="46%"
+                textAnchor="middle"
+                dominantBaseline="central"
+                className="fill-foreground text-3xl font-bold"
+                style={{ fontSize: 28, fontWeight: 700 }}
+              >
+                {totalCount}
+              </text>
+              <text
+                x="50%"
+                y="57%"
+                textAnchor="middle"
+                dominantBaseline="central"
+                className="fill-muted-foreground"
+                style={{ fontSize: 12 }}
+              >
+                total
+              </text>
+            </PieChart>
+          </ResponsiveContainer>
+        )}
+        {/* Legend below chart */}
+        {chartData.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-2">
+            {chartData.map((d) => (
+              <div key={d.name} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: d.fill }} />
+                {d.name}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================
+// Confidence Distribution Histogram
+// ============================================
+
+function ConfidenceDistributionChart({ insights, isLoading }: { insights?: { confidence: number }[]; isLoading: boolean }) {
+  const buckets: ConfidenceBucket[] = useMemo(() => {
+    const ranges = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%'];
+    const counts = [0, 0, 0, 0, 0];
+
+    if (insights) {
+      for (const item of insights) {
+        const c = item.confidence * 100;
+        if (c < 20) counts[0]++;
+        else if (c < 40) counts[1]++;
+        else if (c < 60) counts[2]++;
+        else if (c < 80) counts[3]++;
+        else counts[4]++;
+      }
+    }
+
+    return ranges.map((range, i) => ({
+      range,
+      count: counts[i],
+      fill: CONFIDENCE_COLORS[i],
+    }));
+  }, [insights]);
+
+  const hasData = buckets.some(b => b.count > 0);
+
+  return (
+    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-primary" />
+          <CardTitle className="text-base">Confidence Distribution</CardTitle>
+        </div>
+        <CardDescription>How confident our insights are</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <ChartSkeleton />
+        ) : !hasData ? (
+          <EmptyChartState message="No confidence data yet" />
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={buckets} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
+              <XAxis
+                dataKey="range"
+                tick={{ fontSize: 12 }}
+                className="fill-muted-foreground"
+              />
+              <YAxis
+                tick={{ fontSize: 12 }}
+                className="fill-muted-foreground"
+                allowDecimals={false}
+              />
+              <Tooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  return (
+                    <div className="rounded-lg border bg-popover/95 backdrop-blur-sm px-3 py-2 text-sm shadow-xl">
+                      <p className="font-medium">{label}</p>
+                      <p className="text-muted-foreground">{payload[0].value} insights</p>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                {buckets.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================
+// Performance by Insight Type (Horizontal Bar)
+// ============================================
+
+function PerformanceByTypeChart({ data, isLoading }: { data?: TrackRecordStats; isLoading: boolean }) {
+  const chartData = useMemo(() => {
+    if (!data?.by_type) return [];
+    return Object.entries(data.by_type)
+      .map(([type, stats]) => ({
+        type: type.charAt(0).toUpperCase() + type.slice(1),
+        success_rate: stats.success_rate,
+        total: stats.total,
+        fill: TYPE_COLORS[type] || '#6b7280',
+      }))
+      .filter(d => d.total > 0)
+      .sort((a, b) => b.success_rate - a.success_rate);
+  }, [data]);
+
+  return (
+    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <CardHeader className="pb-2">
+        <div className="flex items-center gap-2">
+          <Layers className="h-4 w-4 text-primary" />
+          <CardTitle className="text-base">Performance by Insight Type</CardTitle>
+        </div>
+        <CardDescription>Success rate per category</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <ChartSkeleton />
+        ) : chartData.length === 0 ? (
+          <EmptyChartState message="No performance data yet" />
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              margin={{ top: 5, right: 40, left: 10, bottom: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" horizontal={false} />
+              <XAxis
+                type="number"
+                tick={{ fontSize: 12 }}
+                className="fill-muted-foreground"
+                tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
+                domain={[0, 1]}
+              />
+              <YAxis
+                type="category"
+                dataKey="type"
+                tick={{ fontSize: 12 }}
+                className="fill-muted-foreground"
+                width={90}
+              />
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null;
+                  const d = payload[0].payload;
+                  return (
+                    <div className="rounded-lg border bg-popover/95 backdrop-blur-sm px-3 py-2 text-sm shadow-xl">
+                      <p className="font-medium">{d.type}</p>
+                      <p className="text-muted-foreground">
+                        Success Rate: {(d.success_rate * 100).toFixed(1)}%
+                      </p>
+                      <p className="text-muted-foreground">{d.total} insights</p>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="success_rate" radius={[0, 6, 6, 0]}>
+                {chartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================
+// Outcome Tracking Stats
+// ============================================
+
+function OutcomeTrackingStats({ data, isLoading }: { data?: OutcomeSummary; isLoading: boolean }) {
+  const miniStats = [
+    {
+      label: 'Currently Tracking',
+      value: data?.currently_tracking ?? 0,
+      icon: Eye,
+      color: 'text-blue-500',
+    },
+    {
+      label: 'Completed',
+      value: data?.completed ?? 0,
+      icon: CheckCircle2,
+      color: 'text-green-500',
+    },
+    {
+      label: 'Success Rate',
+      value: formatPercent(data?.success_rate),
+      icon: Target,
+      color: 'text-emerald-500',
+      isText: true,
+    },
+    {
+      label: 'Avg Return',
+      value: formatReturn(data?.avg_return_when_correct),
+      icon: TrendingUp,
+      color: 'text-primary',
+      isText: true,
+    },
+  ];
+
+  return (
+    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-primary" />
+            <CardTitle className="text-base">Outcome Tracking</CardTitle>
+          </div>
+          <Link
+            href="/track-record"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Details
+            <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
+        <CardDescription>Real-time prediction validation</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="p-3 rounded-lg bg-muted/30">
+                <Skeleton className="h-3 w-20 mb-2" />
+                <Skeleton className="h-6 w-10" />
+              </div>
+            ))}
+          </div>
+        ) : !data ? (
+          <EmptyChartState message="No outcome data yet" height={180} />
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {miniStats.map((item) => {
+              const Icon = item.icon;
+              return (
+                <div
+                  key={item.label}
+                  className="p-3 rounded-lg bg-muted/20 border border-border/30"
+                >
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1.5">
+                    <Icon className={`h-3.5 w-3.5 ${item.color}`} />
+                    {item.label}
+                  </div>
+                  <div className="text-lg font-bold">{item.value}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Direction breakdown */}
+        {data?.by_direction && Object.keys(data.by_direction).length > 0 && (
+          <div className="mt-3 pt-3 border-t border-border/30">
+            <p className="text-xs text-muted-foreground mb-2">By Direction</p>
+            <div className="flex gap-3">
+              {Object.entries(data.by_direction).map(([dir, stats]) => (
+                <div key={dir} className="flex items-center gap-2 text-xs">
+                  <span className={dir.toLowerCase() === 'buy' ? 'text-green-500' : 'text-red-500'}>
+                    {dir}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {stats.correct}/{stats.total}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================
+// Top Symbols & Sectors
+// ============================================
+
+function TopSymbolsSectors({ data, isLoading }: { data?: PatternsSummary; isLoading: boolean }) {
+  return (
+    <Card className="bg-card/80 backdrop-blur-sm border-border/50">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Hash className="h-4 w-4 text-primary" />
+            <CardTitle className="text-base">Top Symbols & Sectors</CardTitle>
+          </div>
+          <Link
+            href="/patterns"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Patterns
+            <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
+        <CardDescription>
+          {data ? `${data.total} patterns (${data.active} active)` : 'Most referenced in patterns'}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-6 w-full" />
+            ))}
+          </div>
+        ) : !data || (data.top_symbols.length === 0 && data.top_sectors.length === 0) ? (
+          <EmptyChartState message="No pattern data yet" height={180} />
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            {/* Top Symbols */}
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Symbols</p>
+              <div className="space-y-1.5">
+                {data.top_symbols.slice(0, 5).map((symbol, i) => (
+                  <Link
+                    key={symbol}
+                    href={`/stocks/${symbol}`}
+                    className="flex items-center gap-2 group"
+                  >
+                    <span className="text-xs text-muted-foreground w-4">{i + 1}.</span>
+                    <Badge
+                      variant="outline"
+                      className="font-mono text-xs group-hover:bg-primary/10 transition-colors"
+                    >
+                      {symbol}
+                    </Badge>
+                  </Link>
+                ))}
+                {data.top_symbols.length === 0 && (
+                  <p className="text-xs text-muted-foreground">None yet</p>
+                )}
+              </div>
+            </div>
+
+            {/* Top Sectors */}
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Sectors</p>
+              <div className="space-y-1.5">
+                {data.top_sectors.slice(0, 5).map((sector, i) => (
+                  <div key={sector} className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground w-4">{i + 1}.</span>
+                    <Badge variant="secondary" className="text-xs">
+                      {sector}
+                    </Badge>
+                  </div>
+                ))}
+                {data.top_sectors.length === 0 && (
+                  <p className="text-xs text-muted-foreground">None yet</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Pattern type breakdown */}
+        {data?.by_type && Object.keys(data.by_type).length > 0 && (
+          <div className="mt-3 pt-3 border-t border-border/30">
+            <p className="text-xs text-muted-foreground mb-2">Pattern Types</p>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(data.by_type).map(([type, count]) => (
+                <Badge key={type} variant="outline" className="text-xs gap-1">
+                  {type.replace(/_/g, ' ').toLowerCase()}
+                  <span className="text-muted-foreground">{count}</span>
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================
+// Empty Chart State
+// ============================================
+
+function EmptyChartState({ message, height = 300 }: { message: string; height?: number }) {
+  return (
+    <div className="flex items-center justify-center text-muted-foreground" style={{ height }}>
+      <div className="text-center space-y-2">
+        <BarChart3 className="h-8 w-8 mx-auto opacity-30" />
+        <p className="text-sm">{message}</p>
+        <p className="text-xs opacity-60">Run an analysis to generate data</p>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
 // Main Page Component
 // ============================================
 
-export default function InsightHubPage() {
-  const router = useRouter();
-  const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
+export default function DashboardPage() {
+  // Fetch insights for stats & confidence distribution
+  const { data: allInsightsData, isLoading: isLoadingInsights } = useRecentDeepInsights(9);
 
-  // Fetch insights - only fetch what we display (9 max) for fast initial load
-  const { data: allInsightsData, isLoading: isLoadingAll, isFetching } = useRecentDeepInsights(9);
+  // Fetch track record stats
+  const { data: trackRecord, isLoading: isLoadingTrackRecord } = useQuery<TrackRecordStats>({
+    queryKey: ['track-record'],
+    queryFn: () => knowledgeApi.trackRecord(),
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
 
-  // Use background analysis task hook
+  // Fetch monthly trend
+  const { data: monthlyTrend, isLoading: isLoadingTrend } = useQuery<MonthlyTrendResponse>({
+    queryKey: ['track-record', 'monthly-trend'],
+    queryFn: () => knowledgeApi.monthlyTrend(),
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  // Fetch outcomes summary
+  const { data: outcomesSummary, isLoading: isLoadingOutcomes } = useQuery<OutcomeSummary>({
+    queryKey: ['outcomes', 'summary'],
+    queryFn: () => outcomesApi.summary(),
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  // Fetch patterns summary
+  const { data: patternsSummary, isLoading: isLoadingPatterns } = useQuery<PatternsSummary>({
+    queryKey: ['patterns', 'summary'],
+    queryFn: () => knowledgeApi.patterns.summary(),
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  // Analysis task hook
   const {
     task,
     isRunning: isAnalysisRunning,
@@ -460,33 +1060,13 @@ export default function InsightHubPage() {
     pollInterval: 2000,
   });
 
-  // Get filter configuration for current tab
-  const filterConfig = filterTabConfig[activeFilter];
-
-  // Compute stats from all insights
+  // Compute stats from insights
   const stats = allInsightsData?.items ? computeStats(allInsightsData.items) : undefined;
-
-  // Get last analysis time from most recent insight
-  const lastAnalysisTime = allInsightsData?.items?.[0]?.created_at;
-
-  // Get insights to display (filtered or all based on active tab)
-  // Filter client-side to properly handle multi-action filters (e.g., 'sell' includes both SELL and STRONG_SELL)
-  const displayInsights = activeFilter === 'all'
-    ? allInsightsData?.items?.slice(0, 9)
-    : allInsightsData?.items?.filter(i => filterConfig.actions?.includes(i.action)).slice(0, 9);
-
-  // Only show full skeleton on initial load (no cached data)
-  // If we have stale data, show it immediately while refreshing in background
   const hasData = allInsightsData?.items && allInsightsData.items.length > 0;
-  const isLoading = isLoadingAll && !hasData;
+  const isLoading = isLoadingInsights && !hasData;
 
-  const handleSymbolClick = (symbol: string) => {
-    router.push(`/stocks/${symbol}`);
-  };
-
-  const handleInsightClick = (insightId: number) => {
-    router.push(`/insights/${insightId}`);
-  };
+  // Last analysis time from most recent insight
+  const lastAnalysisTime = allInsightsData?.items?.[0]?.created_at;
 
   const handleRunAnalysis = () => {
     startAnalysis({ max_insights: 5, deep_dive_count: 7 });
@@ -494,23 +1074,8 @@ export default function InsightHubPage() {
 
   return (
     <div className="space-y-6">
-      {/* Hero Banner */}
-      <div className="relative w-full max-h-96 rounded-xl overflow-hidden">
-        <Image
-          src="/teletraan-hero.png"
-          alt="Teletraan Command Center — AI-powered market intelligence"
-          className="w-full h-64 md:h-96 object-cover"
-          width={1200}
-          height={400}
-          priority
-        />
-        {/* Gradient overlay for smooth transition to content below */}
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-b from-background/20 to-transparent" />
-      </div>
-
-      {/* Hero Section */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 -mt-4">
+      {/* Hero Section (slimmed down, no banner image) */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-bold tracking-tight">Teletraan</h1>
@@ -526,24 +1091,32 @@ export default function InsightHubPage() {
             </p>
           )}
         </div>
-        <Button
-          onClick={handleRunAnalysis}
-          disabled={isAnalysisRunning}
-          size="lg"
-          className="md:w-auto w-full"
-        >
-          {isAnalysisRunning ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Discovering...
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4" />
-              Discover Opportunities
-            </>
-          )}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Link href="/insights">
+            <Button variant="outline" size="lg">
+              <BarChart3 className="h-4 w-4" />
+              View Insights
+            </Button>
+          </Link>
+          <Button
+            onClick={handleRunAnalysis}
+            disabled={isAnalysisRunning}
+            size="lg"
+            className="md:w-auto w-full"
+          >
+            {isAnalysisRunning ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Discovering...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4" />
+                Discover Opportunities
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Analysis Status Banner with Progress */}
@@ -562,88 +1135,29 @@ export default function InsightHubPage() {
         />
       )}
 
-      {/* Quick Stats - only show skeleton if no cached data */}
+      {/* Row 1: Quick Stats */}
       <AnalysisStatsCards stats={stats} isLoading={isLoading} />
 
-      {/* Main Insights Section */}
-      <section>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="h-5 w-5 text-primary" />
-            <h2 className="text-xl font-semibold">Latest Insights</h2>
-            {/* Show subtle refresh indicator when fetching fresh data in background */}
-            {isFetching && hasData && (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            )}
-          </div>
-          <Link
-            href="/insights"
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            View All
-            <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
+      {/* Row 2: Monthly Trend + Action Distribution */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <MonthlyTrendChart data={monthlyTrend} isLoading={isLoadingTrend} />
+        <ActionDistributionChart data={trackRecord} isLoading={isLoadingTrackRecord} />
+      </div>
 
-        {/* Quick Filter Tabs */}
-        <Tabs value={activeFilter} onValueChange={(v) => setActiveFilter(v as FilterTab)} className="mb-4">
-          <TabsList>
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="buy" className="text-green-600 dark:text-green-400">
-              <TrendingUp className="h-4 w-4 mr-1" />
-              Buy
-            </TabsTrigger>
-            <TabsTrigger value="sell" className="text-red-600 dark:text-red-400">
-              <TrendingDown className="h-4 w-4 mr-1" />
-              Sell
-            </TabsTrigger>
-            <TabsTrigger value="hold" className="text-yellow-600 dark:text-yellow-400">
-              <Minus className="h-4 w-4 mr-1" />
-              Hold
-            </TabsTrigger>
-            <TabsTrigger value="watch" className="text-blue-600 dark:text-blue-400">
-              <Target className="h-4 w-4 mr-1" />
-              Watch
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+      {/* Row 3: Confidence Distribution + Performance by Type */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ConfidenceDistributionChart
+          insights={allInsightsData?.items}
+          isLoading={isLoadingInsights}
+        />
+        <PerformanceByTypeChart data={trackRecord} isLoading={isLoadingTrackRecord} />
+      </div>
 
-        {/* Insights Grid */}
-        {isLoading ? (
-          <InsightGridSkeleton count={6} />
-        ) : !displayInsights || displayInsights.length === 0 ? (
-          <EmptyInsightsState
-            onRunAnalysis={handleRunAnalysis}
-            isRunning={isAnalysisRunning}
-          />
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {displayInsights.map((insight) => (
-              <DeepInsightCard
-                key={insight.id}
-                insight={insight}
-                onSymbolClick={handleSymbolClick}
-                onClick={() => handleInsightClick(insight.id)}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Show "View More" if there are more insights */}
-        {displayInsights && displayInsights.length >= 9 && (
-          <div className="flex justify-center mt-6">
-            <Link href="/insights">
-              <Button variant="outline">
-                View All Insights
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
-          </div>
-        )}
-      </section>
-
-      {/* Recent Conversations Section */}
-      <RecentConversationsSection />
+      {/* Row 4: Outcome Tracking + Top Symbols & Sectors */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <OutcomeTrackingStats data={outcomesSummary} isLoading={isLoadingOutcomes} />
+        <TopSymbolsSectors data={patternsSummary} isLoading={isLoadingPatterns} />
+      </div>
     </div>
   );
 }
