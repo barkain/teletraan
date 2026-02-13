@@ -794,7 +794,7 @@ function EmptyFilterState() {
 // ---------------------------------------------------------------------------
 
 export default function ReportsPage() {
-  const { data, isLoading, error } = useReportList({ limit: 200 });
+  const { data, isLoading, error } = useReportList({ limit: 100 });
 
   // View toggle
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
