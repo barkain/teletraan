@@ -185,7 +185,9 @@ async def test_llm_connection(
 ) -> LLMTestResult:
     """Test the current LLM provider connection.
 
-    Makes a simple LLM call to verify the configuration works.
+    Tests the API endpoint directly via HTTP instead of through the SDK,
+    because the Claude CLI silently falls back to subscription auth when
+    an API key is invalid — making SDK-based tests always succeed.
     """
     from config import get_settings
 
@@ -193,28 +195,96 @@ async def test_llm_connection(
     provider = settings.get_llm_provider()
     model = settings.ANTHROPIC_MODEL
 
-    try:
-        from llm.client_pool import pool_query_llm
+    result = await _test_llm_connection_http(provider, model, settings)
+    return LLMTestResult(**result)
 
-        response = await pool_query_llm(
-            system_prompt="You are a helpful assistant. Reply in one short sentence.",
-            user_prompt="Say hello and confirm you are working.",
-            agent_name="llm-connection-test",
-        )
 
-        preview = response[:200] if response else None
-        return LLMTestResult(
-            success=True,
-            message="Connection successful",
-            provider=provider,
-            model=model,
-            response_preview=preview,
-        )
-    except Exception as e:
-        logger.warning("LLM connection test failed: %s", e)
-        return LLMTestResult(
-            success=False,
-            message=f"Connection failed: {e}",
-            provider=provider,
-            model=model,
-        )
+async def _test_llm_connection_http(
+    provider: str, model: str, settings: Any
+) -> dict:
+    """Test LLM connection directly via HTTP, bypassing SDK subscription fallback."""
+    import aiohttp
+
+    if provider in ("proxy", "anthropic_api"):
+        # Determine base URL and API key based on provider
+        if provider == "proxy":
+            base_url = (settings.ANTHROPIC_BASE_URL or "https://api.anthropic.com").rstrip("/")
+            api_key = settings.ANTHROPIC_AUTH_TOKEN
+        else:
+            base_url = "https://api.anthropic.com"
+            api_key = settings.ANTHROPIC_API_KEY
+
+        if not api_key:
+            return {
+                "success": False,
+                "message": f"No API key configured for provider '{provider}'",
+                "provider": provider,
+                "model": model,
+            }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                resp = await session.post(
+                    f"{base_url}/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "max_tokens": 10,
+                        "messages": [{"role": "user", "content": "hi"}],
+                    },
+                    timeout=aiohttp.ClientTimeout(total=15),
+                )
+                if resp.status == 200:
+                    data = await resp.json()
+                    preview = data.get("content", [{}])[0].get("text", "")
+                    return {
+                        "success": True,
+                        "message": "Connection successful",
+                        "provider": provider,
+                        "model": model,
+                        "response_preview": preview[:200] if preview else None,
+                    }
+                elif resp.status in (401, 403):
+                    return {
+                        "success": False,
+                        "message": "Invalid API key or unauthorized",
+                        "provider": provider,
+                        "model": model,
+                    }
+                else:
+                    body = await resp.text()
+                    return {
+                        "success": False,
+                        "message": f"HTTP {resp.status}: {body[:200]}",
+                        "provider": provider,
+                        "model": model,
+                    }
+        except aiohttp.ClientError as e:
+            logger.warning("LLM connection test failed: %s", e)
+            return {
+                "success": False,
+                "message": f"Connection failed: {e}",
+                "provider": provider,
+                "model": model,
+            }
+
+    elif provider == "subscription":
+        return {
+            "success": True,
+            "message": "Subscription auth (using local Claude Code login). Cannot verify remotely.",
+            "provider": provider,
+            "model": model,
+        }
+
+    else:
+        # bedrock, vertex, azure — can't easily test without full cloud SDK
+        return {
+            "success": True,
+            "message": f"Provider '{provider}' configured. Full validation requires cloud credentials.",
+            "provider": provider,
+            "model": model,
+        }
