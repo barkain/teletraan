@@ -1,6 +1,5 @@
 """FastAPI application entry point."""
 
-import resource
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -9,8 +8,11 @@ from collections.abc import AsyncIterator
 # Raise the soft file-descriptor limit to avoid "Too many open files" (Errno 24)
 # under the autonomous analysis pipeline (Claude SDK subprocesses + yfinance
 # ThreadPoolExecutor + SQLite connections can exceed macOS default of 256).
-_soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 4096), _hard))
+# The `resource` module is Unix-only; skip on Windows.
+if sys.platform != "win32":
+    import resource
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 4096), _hard))
 
 from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
@@ -53,7 +55,12 @@ VERSION = "1.0.0"
 
 
 def _print_startup_banner() -> None:
-    """Print a spectacular ASCII art banner on server startup."""
+    """Print a spectacular ASCII art banner on server startup.
+
+    Uses print() instead of logger.info() because uvicorn reconfigures
+    logging after module import, which can suppress logger output during
+    the lifespan startup phase.
+    """
     banner = f"""
 \033[38;5;46m
     $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
@@ -90,7 +97,7 @@ def _print_startup_banner() -> None:
     $                                                                          $
     $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
 \033[0m"""
-    logger.info(banner)
+    print(banner, flush=True)  # noqa: T201 — intentional print for startup visibility
 
 
 async def _cleanup_stale_analysis_tasks() -> None:
@@ -138,6 +145,39 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan handler for startup and shutdown."""
     # Startup: Display banner
     _print_startup_banner()
+    # Log active LLM provider — use print() for guaranteed visibility
+    # (uvicorn reconfigures logging after module import, suppressing logger.info
+    # output during the lifespan startup phase)
+    llm_provider = settings.get_llm_provider()
+    llm_display = settings.get_llm_display_name()
+    print(  # noqa: T201
+        f"\033[38;5;39m[LLM]\033[0m Provider: {llm_display} (provider={llm_provider})",
+        flush=True,
+    )
+    if llm_provider == "subscription":
+        print(  # noqa: T201
+            "\033[38;5;208m[LLM]\033[0m WARNING: Using Claude Code subscription auth. "
+            "This is NOT recommended for distributed deployments. "
+            "Set ANTHROPIC_API_KEY or configure a cloud provider "
+            "(Bedrock/Vertex/Azure) for production use.",
+            flush=True,
+        )
+    # Log GitHub Pages publishing status
+    if settings.GITHUB_PAGES_ENABLED:
+        from api.routes.reports import get_publishing_config
+        pub_config = get_publishing_config()
+        print(  # noqa: T201
+            f"\033[38;5;39m[Publishing]\033[0m GitHub Pages: ENABLED "
+            f"(repo: {pub_config['org']}/{pub_config['repo']}, "
+            f"branch: {pub_config['branch']})",
+            flush=True,
+        )
+    else:
+        print(  # noqa: T201
+            "\033[38;5;39m[Publishing]\033[0m GitHub Pages: DISABLED "
+            "(set GITHUB_PAGES_ENABLED=true in .env to enable)",
+            flush=True,
+        )
     # Initialize database and create tables
     await init_db()
     # Mark any leftover in-progress analysis tasks as failed

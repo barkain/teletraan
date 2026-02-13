@@ -84,7 +84,55 @@ mkdir -p data
 
 # Create .env if it doesn't exist
 if [ ! -f .env ]; then
-    echo "DATABASE_URL=sqlite+aiosqlite:///./data/market-analyzer.db" > .env
+    cat > .env << 'ENVEOF'
+DATABASE_URL=sqlite+aiosqlite:///./data/market-analyzer.db
+
+# --- LLM Provider Configuration ---
+# The app uses claude-agent-sdk for LLM access. Uncomment ONE authentication method:
+#
+# Option 1: Anthropic API Key (recommended for production / distributed deployments)
+# ANTHROPIC_API_KEY=sk-ant-...
+#
+# Option 2: Amazon Bedrock (requires AWS credentials in environment)
+# CLAUDE_CODE_USE_BEDROCK=1
+# AWS_REGION=us-east-1
+#
+# Option 3: Google Vertex AI (requires GCP credentials)
+# CLAUDE_CODE_USE_VERTEX=1
+# VERTEX_PROJECT=my-project
+# VERTEX_REGION=us-central1
+#
+# Option 4: Azure AI Foundry (requires Azure credentials)
+# CLAUDE_CODE_USE_FOUNDRY=1
+#
+# Option 5: z.ai or API Proxy
+# ANTHROPIC_AUTH_TOKEN=your-zai-api-key
+# ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic
+# API_TIMEOUT_MS=3000000
+#
+# Option 6: Ollama (local models)
+# ANTHROPIC_AUTH_TOKEN=ollama
+# ANTHROPIC_API_KEY=
+# ANTHROPIC_BASE_URL=http://localhost:11434
+# Note: Run with a model that has 64k+ context, e.g.: claude --model qwen3-coder
+#
+# Default (nothing set): Uses local Claude Code subscription auth
+# WARNING: Subscription auth is for local development only.
+# Anthropic TOS prohibits using claude.ai login in distributed apps.
+
+# Optional: Override default model (default: claude-sonnet-4-20250514)
+# ANTHROPIC_MODEL=claude-sonnet-4-20250514
+
+# --- Data Source API Keys (optional) ---
+# FRED_API_KEY=your-fred-key
+# FINNHUB_API_KEY=your-finnhub-key
+
+# --- GitHub Pages Publishing (disabled by default for fork safety) ---
+# Uncomment and set to enable automatic report publishing to GitHub Pages.
+# GITHUB_PAGES_ENABLED=true
+# GITHUB_PAGES_REPO=your-username/your-repo
+# GITHUB_PAGES_BASE_URL=https://your-username.github.io/your-repo
+ENVEOF
     echo -e "${GREEN}  ✓ Created .env file${NC}"
 fi
 

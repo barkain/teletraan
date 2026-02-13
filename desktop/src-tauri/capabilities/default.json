@@ -1,0 +1,24 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for Teletraan desktop app",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/teletraan-backend",
+          "sidecar": true,
+          "args": [
+            { "validator": "\\S+" },
+            { "validator": "\\S+" },
+            { "validator": "\\S+" },
+            { "validator": "\\S+" }
+          ]
+        }
+      ]
+    }
+  ]
+}

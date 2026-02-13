@@ -3,8 +3,9 @@
 This module provides a conversational AI agent that can answer questions about
 stocks, sectors, and market conditions using real-time data and technical analysis.
 
-Uses claude-agent-sdk which leverages the user's existing Claude Code subscription
-(no separate API key needed).
+Uses claude-agent-sdk with configurable authentication: Anthropic API key,
+Amazon Bedrock, Google Vertex AI, Azure AI Foundry, or Claude Code subscription.
+See config.py for provider configuration.
 """
 
 import json
@@ -245,11 +246,13 @@ When discussing technical indicators:
 
     def _get_options(self) -> ClaudeAgentOptions:
         """Create Claude Agent options with MCP tools configured."""
+        from llm.client_pool import _build_llm_env
         return ClaudeAgentOptions(
             system_prompt=self.SYSTEM_PROMPT,
             mcp_servers={"market-analyzer": _market_tools_server},
             allowed_tools=self._allowed_tools,
             max_turns=self.max_tool_iterations,
+            env=_build_llm_env(),
         )
 
     async def chat(
@@ -306,6 +309,10 @@ When discussing technical indicators:
                 full_prompt = "\n\n".join(context_parts) + f"\n\nUSER: {message}"
             else:
                 full_prompt = message
+
+            # Ensure LLM provider env vars are configured before SDK client
+            from llm.client_pool import _configure_llm_env
+            _configure_llm_env()
 
             # Use ClaudeSDKClient for bidirectional streaming with tool support
             async with ClaudeSDKClient(options=options) as client:

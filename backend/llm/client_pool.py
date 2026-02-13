@@ -22,6 +22,122 @@ logger = logging.getLogger(__name__)
 # Pool configuration
 POOL_SIZE = 5  # Max concurrent LLM sessions (main.py raises FD limit to 4096; 5 clients use ~50-75 FDs)
 
+# ---------------------------------------------------------------------------
+# LLM provider environment setup
+# ---------------------------------------------------------------------------
+# The claude-agent-sdk reads auth from env vars.  We propagate the values
+# from our Settings so that env vars are in place before any SDK client
+# is created.
+
+_llm_env_configured = False
+
+
+def _build_llm_env() -> dict[str, str]:
+    """Build the environment variable dict for the chosen LLM provider.
+
+    Returns a dict suitable for ``ClaudeAgentOptions.env`` so that auth
+    vars are passed **explicitly** to the spawned CLI subprocess rather
+    than relying solely on ``os.environ`` inheritance (which can be lost
+    across threads or if another module mutates the global env).
+    """
+    from config import get_settings
+    settings = get_settings()
+    provider = settings.get_llm_provider()
+
+    env: dict[str, str] = {}
+
+    if provider == "proxy":
+        token = settings.ANTHROPIC_AUTH_TOKEN or settings.ANTHROPIC_API_KEY
+        if token:
+            env["ANTHROPIC_API_KEY"] = token
+            env["ANTHROPIC_AUTH_TOKEN"] = token
+        elif settings.ANTHROPIC_API_KEY is not None:
+            env["ANTHROPIC_API_KEY"] = settings.ANTHROPIC_API_KEY
+        if settings.ANTHROPIC_BASE_URL:
+            env["ANTHROPIC_BASE_URL"] = settings.ANTHROPIC_BASE_URL
+        if settings.API_TIMEOUT_MS:
+            env["API_TIMEOUT_MS"] = str(settings.API_TIMEOUT_MS)
+
+    elif provider == "anthropic_api":
+        if settings.ANTHROPIC_API_KEY:
+            env["ANTHROPIC_API_KEY"] = settings.ANTHROPIC_API_KEY
+        if settings.ANTHROPIC_BASE_URL:
+            env["ANTHROPIC_BASE_URL"] = settings.ANTHROPIC_BASE_URL
+        if settings.API_TIMEOUT_MS:
+            env["API_TIMEOUT_MS"] = str(settings.API_TIMEOUT_MS)
+
+    elif provider == "bedrock":
+        env["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        if settings.AWS_REGION:
+            env["AWS_REGION"] = settings.AWS_REGION
+
+    elif provider == "vertex":
+        env["CLAUDE_CODE_USE_VERTEX"] = "1"
+        if settings.VERTEX_PROJECT:
+            env["CLOUD_ML_PROJECT_ID"] = settings.VERTEX_PROJECT
+        if settings.VERTEX_REGION:
+            env["CLOUD_ML_REGION"] = settings.VERTEX_REGION
+
+    elif provider == "azure":
+        env["CLAUDE_CODE_USE_FOUNDRY"] = "1"
+
+    return env
+
+
+def _configure_llm_env() -> None:
+    """Set environment variables for the chosen LLM provider.
+
+    Called once (lazily) before the first SDK client is created.
+    Mirrors ``_build_llm_env()`` into ``os.environ`` for backwards
+    compatibility with any code that reads env vars directly.
+    """
+    global _llm_env_configured
+    if _llm_env_configured:
+        return
+
+    from config import get_settings
+    settings = get_settings()
+    provider = settings.get_llm_provider()
+
+    env = _build_llm_env()
+    os.environ.update(env)
+
+    # Logging
+    if provider == "proxy":
+        logger.info(
+            "LLM provider: %s -- endpoint: %s",
+            settings.get_llm_display_name(),
+            settings.ANTHROPIC_BASE_URL,
+        )
+    elif provider == "anthropic_api":
+        logger.info(
+            "LLM provider: Anthropic API (direct) -- model: %s, endpoint: %s",
+            settings.ANTHROPIC_MODEL,
+            settings.ANTHROPIC_BASE_URL or "https://api.anthropic.com",
+        )
+    elif provider == "bedrock":
+        logger.info(
+            "LLM provider: Amazon Bedrock -- region: %s",
+            settings.AWS_REGION or "(default)",
+        )
+    elif provider == "vertex":
+        logger.info(
+            "LLM provider: Google Vertex AI -- project: %s, region: %s",
+            settings.VERTEX_PROJECT or "(default)",
+            settings.VERTEX_REGION or "(default)",
+        )
+    elif provider == "azure":
+        logger.info("LLM provider: Azure AI Foundry")
+    else:
+        logger.warning(
+            "LLM provider: Claude Code subscription auth. "
+            "This relies on a local Claude Code login and is NOT recommended "
+            "for distributed/production deployments (see Anthropic TOS). "
+            "Set ANTHROPIC_API_KEY or a cloud provider flag for production use."
+        )
+
+    _llm_env_configured = True
+
 
 class ClientPool:
     """Async pool of reusable ClaudeSDKClient instances.
@@ -58,7 +174,11 @@ class ClientPool:
 
     async def _create_client(self) -> ClaudeSDKClient:
         """Create and connect a new ClaudeSDKClient with no system prompt."""
-        options = ClaudeAgentOptions()  # No system_prompt -- callers prepend to user prompt
+        # Ensure LLM provider env vars are set in os.environ (backwards compat)
+        _configure_llm_env()
+        # Pass auth env vars explicitly via options.env so the spawned CLI
+        # subprocess receives them regardless of os.environ state.
+        options = ClaudeAgentOptions(env=_build_llm_env())
         client = ClaudeSDKClient(options=options)
         await client.connect()
         self._total_created += 1

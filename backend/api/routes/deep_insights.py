@@ -16,7 +16,12 @@ from models.analysis_task import AnalysisTask, AnalysisTaskStatus, PHASE_NAMES
 from schemas.deep_insight import DeepInsightResponse, DeepInsightListResponse
 from analysis.deep_engine import deep_analysis_engine
 from analysis.autonomous_engine import get_autonomous_engine
-from api.routes.reports import _build_report_html, _publish_to_ghpages, _REPO_DIR
+from api.routes.reports import (
+    _build_report_html,
+    _publish_to_ghpages,
+    _REPO_DIR,
+    is_publishing_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -365,10 +370,18 @@ async def _auto_publish_report(task_id: str) -> None:
 
     Best-effort: any failure is logged as a warning and never propagated.
     Called after the autonomous pipeline marks a task as completed.
+    Skipped entirely when publishing is disabled (the default for forks).
 
     Args:
         task_id: The completed task ID to publish.
     """
+    if not is_publishing_enabled():
+        logger.info(
+            "GitHub Pages publishing is disabled. "
+            "Set GITHUB_PAGES_ENABLED=true to enable."
+        )
+        return
+
     async with async_session_factory() as session:
         result = await session.execute(
             select(AnalysisTask).where(AnalysisTask.id == task_id)
