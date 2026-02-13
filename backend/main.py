@@ -162,24 +162,43 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "(Bedrock/Vertex/Azure) for production use.",
             flush=True,
         )
-    # Log GitHub Pages publishing status
-    if settings.GITHUB_PAGES_ENABLED:
-        from api.routes.reports import get_publishing_config
-        pub_config = get_publishing_config()
-        print(  # noqa: T201
-            f"\033[38;5;39m[Publishing]\033[0m GitHub Pages: ENABLED "
-            f"(repo: {pub_config['org']}/{pub_config['repo']}, "
-            f"branch: {pub_config['branch']})",
-            flush=True,
-        )
+    # Log report publishing status
+    from api.routes.reports import get_publishing_config, is_publishing_enabled
+    pub_config = get_publishing_config()
+    pub_method = pub_config["method"]
+    if is_publishing_enabled():
+        if pub_method == "github_pages":
+            print(  # noqa: T201
+                f"\033[38;5;39m[Publishing]\033[0m GitHub Pages: ENABLED "
+                f"(repo: {pub_config['org']}/{pub_config['repo']}, "
+                f"branch: {pub_config['branch']})",
+                flush=True,
+            )
+        elif pub_method == "static_dir":
+            print(  # noqa: T201
+                f"\033[38;5;39m[Publishing]\033[0m Static Directory: ENABLED "
+                f"(dir: {pub_config['publish_dir']}, "
+                f"url: {pub_config['base_url'] or 'not set'})",
+                flush=True,
+            )
     else:
+        if pub_method == "none":
+            detail = "PUBLISH_METHOD=none"
+        elif pub_method == "static_dir":
+            detail = "set PUBLISH_DIR in .env to enable"
+        else:
+            detail = "set GITHUB_PAGES_ENABLED=true in .env to enable"
         print(  # noqa: T201
-            "\033[38;5;39m[Publishing]\033[0m GitHub Pages: DISABLED "
-            "(set GITHUB_PAGES_ENABLED=true in .env to enable)",
+            f"\033[38;5;39m[Publishing]\033[0m DISABLED ({detail})",
             flush=True,
         )
     # Initialize database and create tables
     await init_db()
+    # Load saved LLM settings from database into os.environ
+    # (must happen after init_db so tables exist, but before LLM provider detection)
+    from services.llm_settings import load_llm_settings_on_startup
+    async with async_session_factory() as session:
+        await load_llm_settings_on_startup(session)
     # Mark any leftover in-progress analysis tasks as failed
     await _cleanup_stale_analysis_tasks()
     # Start ETL scheduler for background data fetching

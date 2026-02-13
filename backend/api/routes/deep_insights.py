@@ -18,7 +18,7 @@ from analysis.deep_engine import deep_analysis_engine
 from analysis.autonomous_engine import get_autonomous_engine
 from api.routes.reports import (
     _build_report_html,
-    _publish_to_ghpages,
+    publish_report_async,
     _REPO_DIR,
     is_publishing_enabled,
 )
@@ -377,8 +377,8 @@ async def _auto_publish_report(task_id: str) -> None:
     """
     if not is_publishing_enabled():
         logger.info(
-            "GitHub Pages publishing is disabled. "
-            "Set GITHUB_PAGES_ENABLED=true to enable."
+            "Report publishing is disabled. "
+            "Configure PUBLISH_METHOD and enable publishing in .env."
         )
         return
 
@@ -405,7 +405,7 @@ async def _auto_publish_report(task_id: str) -> None:
                     insights.append(ins)
 
         html_content = _build_report_html(task, insights)
-        published_url = await _publish_to_ghpages(
+        published_url = await publish_report_async(
             task, html_content, _REPO_DIR, insights,
         )
 

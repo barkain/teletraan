@@ -127,11 +127,22 @@ DATABASE_URL=sqlite+aiosqlite:///./data/market-analyzer.db
 # FRED_API_KEY=your-fred-key
 # FINNHUB_API_KEY=your-finnhub-key
 
-# --- GitHub Pages Publishing (disabled by default for fork safety) ---
-# Uncomment and set to enable automatic report publishing to GitHub Pages.
+# --- Report Publishing (disabled by default for fork safety) ---
+# PUBLISH_METHOD controls where reports go: github_pages | static_dir | none
+# PUBLISH_METHOD=github_pages
+
+# Option A: GitHub Pages (default method)
 # GITHUB_PAGES_ENABLED=true
 # GITHUB_PAGES_REPO=your-username/your-repo
 # GITHUB_PAGES_BASE_URL=https://your-username.github.io/your-repo
+
+# Option B: Static directory (for nginx, S3 sync, Netlify, etc.)
+# PUBLISH_METHOD=static_dir
+# PUBLISH_DIR=/var/www/reports
+# PUBLISH_URL=https://reports.example.com
+
+# Option C: Disable publishing entirely
+# PUBLISH_METHOD=none
 ENVEOF
     echo -e "${GREEN}  ✓ Created .env file${NC}"
 fi

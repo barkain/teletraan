@@ -139,6 +139,55 @@ export interface WatchlistSettings {
 }
 
 // ============================================
+// LLM Provider Settings
+// ============================================
+
+export type LLMProviderType =
+  | 'auto'
+  | 'anthropic_api'
+  | 'bedrock'
+  | 'vertex'
+  | 'azure'
+  | 'proxy'
+  | 'ollama'
+  | 'subscription';
+
+export interface LLMProviderStatus {
+  active_provider: string;
+  active_provider_display: string;
+  configured_provider: string;
+  model: string;
+  env_override: boolean;
+  anthropic_api_key: string | null;
+  anthropic_auth_token: string | null;
+  anthropic_base_url: string | null;
+  api_timeout_ms: number | null;
+  aws_region: string | null;
+  vertex_project: string | null;
+  vertex_region: string | null;
+}
+
+export interface LLMProviderConfig {
+  llm_provider?: string | null;
+  anthropic_api_key?: string | null;
+  anthropic_auth_token?: string | null;
+  anthropic_base_url?: string | null;
+  api_timeout_ms?: number | null;
+  anthropic_model?: string | null;
+  aws_region?: string | null;
+  vertex_project?: string | null;
+  vertex_region?: string | null;
+}
+
+export interface LLMTestResult {
+  success: boolean;
+  message: string;
+  provider: string;
+  model: string;
+  response_preview: string | null;
+}
+
+// ============================================
 // Deep Insights Types
 // ============================================
 

@@ -59,14 +59,33 @@ def _auto_detect_github_repo() -> str | None:
 
 
 def is_publishing_enabled() -> bool:
-    """Check whether GitHub Pages publishing is allowed.
+    """Check whether report publishing is allowed.
 
-    Returns True only when the user has explicitly opted in via
-    ``GITHUB_PAGES_ENABLED=true``.  When the setting is False (the default),
-    publishing is silently skipped — this prevents forks from accidentally
-    pushing reports to the original author's GitHub Pages.
+    Returns True when publishing is configured and the user has explicitly
+    opted in.  For the ``github_pages`` method the legacy
+    ``GITHUB_PAGES_ENABLED`` flag must be ``True``.  For the ``static_dir``
+    method, ``PUBLISH_DIR`` must be set.  When ``PUBLISH_METHOD`` is
+    ``"none"`` publishing is always disabled.
     """
     settings = get_settings()
+
+    method = settings.PUBLISH_METHOD.lower()
+
+    # Explicit disable
+    if method == "none":
+        return False
+
+    # Static directory publishing -- enabled when a directory is configured
+    if method == "static_dir":
+        if not settings.PUBLISH_DIR:
+            logger.warning(
+                "PUBLISH_METHOD=static_dir but PUBLISH_DIR is not set. "
+                "Publishing is disabled."
+            )
+            return False
+        return True
+
+    # GitHub Pages (default) -- honour legacy GITHUB_PAGES_ENABLED flag
     if not settings.GITHUB_PAGES_ENABLED:
         return False
     # Explicit repo override — always trust it
@@ -92,10 +111,41 @@ def is_publishing_enabled() -> bool:
 def get_publishing_config() -> dict:
     """Return the resolved publishing configuration.
 
-    Keys: ``repo`` (str), ``org`` (str), ``branch`` (str), ``base_url`` (str).
-    Values come from explicit settings when available, otherwise auto-detected.
+    Keys returned:
+      ``method`` (str) — ``"github_pages"`` | ``"static_dir"`` | ``"none"``
+      ``base_url`` (str) — public base URL for published reports
+      ``publish_dir`` (str | None) — local directory for ``static_dir`` method
+
+    For the ``github_pages`` method, additional keys are provided:
+      ``org`` (str), ``repo`` (str), ``branch`` (str).
     """
     settings = get_settings()
+    method = settings.PUBLISH_METHOD.lower()
+
+    # -- static_dir method --------------------------------------------------
+    if method == "static_dir":
+        base_url = (settings.PUBLISH_URL or "").rstrip("/")
+        return {
+            "method": "static_dir",
+            "base_url": base_url,
+            "publish_dir": settings.PUBLISH_DIR,
+            "org": "",
+            "repo": "",
+            "branch": "",
+        }
+
+    # -- none method --------------------------------------------------------
+    if method == "none":
+        return {
+            "method": "none",
+            "base_url": "",
+            "publish_dir": None,
+            "org": "",
+            "repo": "",
+            "branch": "",
+        }
+
+    # -- github_pages method (default) --------------------------------------
     branch = settings.GITHUB_PAGES_BRANCH
 
     if settings.GITHUB_PAGES_REPO:
@@ -109,12 +159,22 @@ def get_publishing_config() -> dict:
         else:
             org, repo = "unknown", "unknown"
 
-    if settings.GITHUB_PAGES_BASE_URL:
+    # PUBLISH_URL takes precedence, then GITHUB_PAGES_BASE_URL, then derived
+    if settings.PUBLISH_URL:
+        base_url = settings.PUBLISH_URL.rstrip("/")
+    elif settings.GITHUB_PAGES_BASE_URL:
         base_url = settings.GITHUB_PAGES_BASE_URL.rstrip("/")
     else:
         base_url = f"https://{org}.github.io/{repo}"
 
-    return {"org": org, "repo": repo, "branch": branch, "base_url": base_url}
+    return {
+        "method": "github_pages",
+        "org": org,
+        "repo": repo,
+        "branch": branch,
+        "base_url": base_url,
+        "publish_dir": None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1143,7 +1203,7 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
 </html>"""
 
 
-def _do_publish(
+def _do_publish_github_pages(
     task: AnalysisTask,
     html_content: str,
     repo_dir: str,
@@ -1160,7 +1220,7 @@ def _do_publish(
     read when regenerating the index page so that each card is enriched with
     symbol pills, action distributions, confidence bars, and summaries.
 
-    Returns the published GitHub Pages URL on success.
+    Returns the published URL on success.
     Raises ``RuntimeError`` on failure.
     """
     filename = _report_filename(task)
@@ -1337,6 +1397,112 @@ def _do_publish(
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def _do_publish_static_dir(
+    task: AnalysisTask,
+    html_content: str,
+    insights: list[DeepInsight] | None = None,
+) -> str:
+    """Publish an HTML report by copying it to a local directory.
+
+    Copies the report HTML and a JSON metadata sidecar into
+    ``PUBLISH_DIR/reports/`` and regenerates the index page.  This is useful
+    when the directory is served by nginx, synced to S3, or deployed via
+    Netlify / Cloudflare Pages / etc.
+
+    Returns the constructed public URL on success.
+    Raises ``RuntimeError`` on failure.
+    """
+    pub_config = get_publishing_config()
+    publish_dir = pub_config["publish_dir"]
+    base_url = pub_config["base_url"]
+
+    if not publish_dir:
+        raise RuntimeError(
+            "PUBLISH_DIR is not configured. Set PUBLISH_DIR in your .env "
+            "to use the static_dir publishing method."
+        )
+
+    filename = _report_filename(task)
+
+    # Ensure target directories exist
+    reports_dir = os.path.join(publish_dir, "reports")
+    meta_dir = os.path.join(reports_dir, "meta")
+    os.makedirs(reports_dir, exist_ok=True)
+    os.makedirs(meta_dir, exist_ok=True)
+
+    # Write the report HTML
+    report_path = os.path.join(reports_dir, filename)
+    with open(report_path, "w", encoding="utf-8") as fh:
+        fh.write(html_content)
+
+    # Write the JSON metadata sidecar
+    meta = _build_report_metadata(task, insights or [], filename)
+    meta_path = os.path.join(meta_dir, filename.replace(".html", ".json"))
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False, indent=2)
+
+    # Regenerate the index page with all reports
+    report_files = sorted(
+        [f for f in os.listdir(reports_dir) if f.endswith(".html")],
+        reverse=True,
+    )
+    report_metas: list[dict] = []
+    for rf in report_files:
+        sidecar = os.path.join(meta_dir, rf.replace(".html", ".json"))
+        if os.path.isfile(sidecar):
+            try:
+                with open(sidecar, encoding="utf-8") as sf:
+                    report_metas.append(json.load(sf))
+                continue
+            except (json.JSONDecodeError, OSError):
+                pass
+        report_metas.append(_meta_from_filename(rf))
+
+    # For static dir, use empty org/repo since there is no GitHub context
+    index_html = _generate_index_html(report_metas, "", "")
+    with open(os.path.join(publish_dir, "index.html"), "w", encoding="utf-8") as fh:
+        fh.write(index_html)
+
+    # Write .nojekyll in case the directory is served by GitHub Pages
+    nojekyll_path = os.path.join(publish_dir, ".nojekyll")
+    if not os.path.exists(nojekyll_path):
+        with open(nojekyll_path, "w") as fh:
+            pass
+
+    logger.info("Published report %s to static dir %s", filename, publish_dir)
+    return f"{base_url}/reports/{filename}" if base_url else report_path
+
+
+def _do_publish(
+    task: AnalysisTask,
+    html_content: str,
+    repo_dir: str,
+    insights: list[DeepInsight] | None = None,
+) -> str:
+    """Dispatch report publishing to the configured method.
+
+    Reads ``PUBLISH_METHOD`` from settings and delegates to the appropriate
+    backend:
+      - ``github_pages`` -- push to a gh-pages branch (original behaviour)
+      - ``static_dir``   -- copy files to a local directory
+      - ``none``         -- should not be called (caller checks first)
+
+    Returns the published URL on success.
+    Raises ``RuntimeError`` on failure.
+    """
+    pub_config = get_publishing_config()
+    method = pub_config["method"]
+
+    if method == "static_dir":
+        return _do_publish_static_dir(task, html_content, insights)
+
+    if method == "none":
+        raise RuntimeError("Publishing is disabled (PUBLISH_METHOD=none).")
+
+    # Default: github_pages
+    return _do_publish_github_pages(task, html_content, repo_dir, insights)
+
+
 def _meta_from_filename(fname: str) -> dict:
     """Synthesize minimal report metadata from a filename.
 
@@ -1394,17 +1560,25 @@ def _meta_from_filename(fname: str) -> dict:
     }
 
 
-async def _publish_to_ghpages(
+async def publish_report_async(
     task: AnalysisTask,
     html_content: str,
     repo_dir: str,
     insights: list[DeepInsight] | None = None,
 ) -> str:
-    """Publish HTML report to gh-pages branch (async wrapper)."""
+    """Publish HTML report using the configured method (async wrapper).
+
+    Dispatches to ``_do_publish`` which routes to the appropriate backend
+    based on ``PUBLISH_METHOD`` in settings.
+    """
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None, _do_publish, task, html_content, repo_dir, insights,
     )
+
+
+# Backward-compatible alias — existing callers import this name.
+_publish_to_ghpages = publish_report_async
 
 
 # ---------------------------------------------------------------------------
@@ -1605,21 +1779,30 @@ async def publish_report(
     task_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Publish a completed analysis report to GitHub Pages.
+    """Publish a completed analysis report.
 
-    Generates a self-contained HTML report and pushes it to the
-    configured publishing branch under ``reports/{date}-{HHMM}-{regime}.html``.
-    An index page listing all published reports is maintained automatically.
+    Uses the configured ``PUBLISH_METHOD`` (github_pages, static_dir, or none)
+    to publish a self-contained HTML report.  An index page listing all
+    published reports is maintained automatically.
 
     Returns the public URL of the published report.
     """
     # 0. Check if publishing is enabled --------------------------------------
     if not is_publishing_enabled():
-        raise HTTPException(
-            status_code=400,
-            detail="GitHub Pages publishing is disabled. "
-            "Set GITHUB_PAGES_ENABLED=true in your .env to enable.",
-        )
+        pub_method = get_settings().PUBLISH_METHOD.lower()
+        if pub_method == "static_dir":
+            detail = (
+                "Static directory publishing is not configured. "
+                "Set PUBLISH_DIR in your .env to enable."
+            )
+        elif pub_method == "none":
+            detail = "Publishing is disabled (PUBLISH_METHOD=none)."
+        else:
+            detail = (
+                "GitHub Pages publishing is disabled. "
+                "Set GITHUB_PAGES_ENABLED=true in your .env to enable."
+            )
+        raise HTTPException(status_code=400, detail=detail)
 
     # 1. Load the task -------------------------------------------------------
     result = await db.execute(
@@ -1651,13 +1834,13 @@ async def publish_report(
 
     html_content = _build_report_html(task, insights)
 
-    # 3. Publish to gh-pages -------------------------------------------------
+    # 3. Publish using configured method -------------------------------------
     try:
-        published_url = await _publish_to_ghpages(
+        published_url = await publish_report_async(
             task, html_content, _REPO_DIR, insights,
         )
     except RuntimeError as exc:
-        logger.exception("GitHub Pages publish failed for task %s", task_id)
+        logger.exception("Report publish failed for task %s", task_id)
         raise HTTPException(
             status_code=500,
             detail=str(exc),

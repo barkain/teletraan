@@ -61,10 +61,21 @@ class Settings(BaseSettings):
     POLYMARKET_RATE_LIMIT: int = 30  # Max requests/minute to Polymarket APIs
     KALSHI_RATE_LIMIT: int = 20  # Max requests/minute to Kalshi API
 
-    # --- GitHub Pages Publishing ---
+    # --- Report Publishing ---
     # Publishing is DISABLED by default for fork safety.
     # If you fork this repo and run discovery, reports will NOT be pushed
     # to the original author's GitHub Pages unless you explicitly opt in.
+    #
+    # PUBLISH_METHOD controls where reports are published:
+    #   "github_pages" — push to a gh-pages branch (original behaviour)
+    #   "static_dir"   — copy HTML + JSON sidecar to a local directory
+    #                     (useful for nginx, S3 sync, Netlify, etc.)
+    #   "none"         — disable publishing entirely (reports saved locally only)
+    PUBLISH_METHOD: str = "github_pages"  # github_pages | static_dir | none
+    PUBLISH_URL: Optional[str] = None  # Base URL where reports are accessible (any method)
+    PUBLISH_DIR: Optional[str] = None  # Local directory to copy reports to (static_dir method)
+
+    # --- GitHub Pages settings (used when PUBLISH_METHOD=github_pages) ---
     GITHUB_PAGES_ENABLED: bool = False
     GITHUB_PAGES_REPO: Optional[str] = None  # e.g., "username/repo" — explicit override
     GITHUB_PAGES_BRANCH: str = "gh-pages"

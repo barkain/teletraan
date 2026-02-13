@@ -1,6 +1,7 @@
 """Settings API endpoints."""
 
 import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,12 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps import get_db
 from schemas.settings import (
     AllSettingsResponse,
+    LLMProviderConfig,
+    LLMProviderStatus,
+    LLMTestResult,
     SettingsResetResponse,
     SettingUpdate,
     WatchlistSettings,
     WatchlistUpdate,
 )
+from services.llm_settings import LLMSettingsService
 from services.settings import SettingsService, get_settings_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -132,3 +139,82 @@ async def remove_from_watchlist(
     """Remove symbols from the watchlist."""
     watchlist = await service.update_watchlist(symbols, action="remove")
     return {"watchlist": watchlist}
+
+
+# ============================================
+# LLM Provider Settings
+# ============================================
+
+
+def get_llm_service(db: AsyncSession = Depends(get_db)) -> LLMSettingsService:
+    """Dependency to get LLM settings service."""
+    return LLMSettingsService(db)
+
+
+@router.get("/llm", response_model=LLMProviderStatus)
+async def get_llm_settings(
+    service: LLMSettingsService = Depends(get_llm_service),
+) -> LLMProviderStatus:
+    """Get current LLM provider configuration.
+
+    API keys are masked (only last 4 chars shown).
+    """
+    status = await service.get_status()
+    return LLMProviderStatus(**status)
+
+
+@router.put("/llm", response_model=LLMProviderStatus)
+async def update_llm_settings(
+    config: LLMProviderConfig,
+    service: LLMSettingsService = Depends(get_llm_service),
+) -> LLMProviderStatus:
+    """Save LLM provider configuration.
+
+    Settings are stored in the database. Values from .env always take
+    priority and cannot be overridden through this endpoint.
+    Changes take effect immediately (no restart required).
+    """
+    await service.save(config.model_dump(exclude_none=True))
+    status = await service.get_status()
+    return LLMProviderStatus(**status)
+
+
+@router.post("/llm/test", response_model=LLMTestResult)
+async def test_llm_connection(
+    service: LLMSettingsService = Depends(get_llm_service),
+) -> LLMTestResult:
+    """Test the current LLM provider connection.
+
+    Makes a simple LLM call to verify the configuration works.
+    """
+    from config import get_settings
+
+    settings = get_settings()
+    provider = settings.get_llm_provider()
+    model = settings.ANTHROPIC_MODEL
+
+    try:
+        from llm.client_pool import pool_query_llm
+
+        response = await pool_query_llm(
+            system_prompt="You are a helpful assistant. Reply in one short sentence.",
+            user_prompt="Say hello and confirm you are working.",
+            agent_name="llm-connection-test",
+        )
+
+        preview = response[:200] if response else None
+        return LLMTestResult(
+            success=True,
+            message="Connection successful",
+            provider=provider,
+            model=model,
+            response_preview=preview,
+        )
+    except Exception as e:
+        logger.warning("LLM connection test failed: %s", e)
+        return LLMTestResult(
+            success=False,
+            message=f"Connection failed: {e}",
+            provider=provider,
+            model=model,
+        )
