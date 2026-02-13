@@ -40,6 +40,7 @@ import {
   ChevronUp,
   ChevronDown,
 } from 'lucide-react';
+import { ConnectionError } from '@/components/ui/empty-state';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -895,16 +896,7 @@ export default function ReportsPage() {
       {isLoading ? (
         <ReportsListSkeleton />
       ) : error ? (
-        <Card className="py-12">
-          <CardContent className="flex flex-col items-center justify-center text-center">
-            <CardTitle className="text-lg mb-2 text-destructive">
-              Error Loading Reports
-            </CardTitle>
-            <CardDescription>
-              {error instanceof Error ? error.message : 'An unexpected error occurred'}
-            </CardDescription>
-          </CardContent>
-        </Card>
+        <ConnectionError error={error} />
       ) : allReports.length === 0 ? (
         <EmptyState />
       ) : (

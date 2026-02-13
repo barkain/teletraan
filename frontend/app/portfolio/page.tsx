@@ -19,6 +19,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import type { PortfolioHolding, HoldingCreate, HoldingUpdate } from '@/types';
 import { Briefcase, Plus, RefreshCw } from 'lucide-react';
+import { ConnectionError } from '@/components/ui/empty-state';
 
 function PortfolioSkeleton() {
   return (
@@ -169,16 +170,7 @@ export default function PortfolioPage() {
       {isLoading ? (
         <PortfolioSkeleton />
       ) : error ? (
-        <Card className="py-12">
-          <CardContent className="flex flex-col items-center justify-center text-center">
-            <CardTitle className="text-lg mb-2 text-destructive">
-              Error Loading Portfolio
-            </CardTitle>
-            <CardDescription>
-              {error instanceof Error ? error.message : 'An unexpected error occurred'}
-            </CardDescription>
-          </CardContent>
-        </Card>
+        <ConnectionError error={error} />
       ) : !portfolio || !hasHoldings ? (
         <EmptyState onAdd={handleOpenAddDialog} />
       ) : (

@@ -401,7 +401,7 @@ function MonthlyTrendChart({ isLoading: parentLoading }: MonthlyTrendChartProps)
   if (isError) {
     return (
       <div className="flex items-center justify-center h-[200px] text-muted-foreground">
-        Failed to load trend data
+        No trend data available yet
       </div>
     );
   }

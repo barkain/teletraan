@@ -481,7 +481,7 @@ export function StatisticalSignalsCard({
 
         {/* Error state */}
         {isError && (
-          <EmptyState message="Failed to load signals. Please try again." />
+          <EmptyState message="No signal data available right now." />
         )}
 
         {/* Empty state */}

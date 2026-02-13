@@ -13,6 +13,7 @@ import { StatisticalSignalsCard } from '@/components/insights/statistical-signal
 import { useDeepInsights, DeepInsightParams } from '@/lib/hooks/use-deep-insights';
 import type { DeepInsightType, InsightAction } from '@/types';
 import { Sparkles, ChevronLeft, ChevronRight, Search, Filter, Activity, PanelRightOpen } from 'lucide-react';
+import { ConnectionError } from '@/components/ui/empty-state';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -287,16 +288,7 @@ export default function InsightsPage() {
           {isLoading ? (
             <InsightsListSkeleton />
           ) : error ? (
-            <Card className="py-12">
-              <CardContent className="flex flex-col items-center justify-center text-center">
-                <CardTitle className="text-lg mb-2 text-destructive">
-                  Error Loading Insights
-                </CardTitle>
-                <CardDescription>
-                  {error instanceof Error ? error.message : 'An unexpected error occurred'}
-                </CardDescription>
-              </CardContent>
-            </Card>
+            <ConnectionError error={error} />
           ) : !data || data.items.length === 0 ? (
             <EmptyState />
           ) : (

@@ -15,20 +15,63 @@ struct HealthResponse {
     status: String,
 }
 
+/// Resolve the persistent data directory for the backend.
+///
+/// Uses Tauri's `app_data_dir()` which resolves to platform-appropriate paths:
+/// - macOS: ~/Library/Application Support/com.teletraan.app/
+/// - Linux: ~/.local/share/com.teletraan.app/
+/// - Windows: C:\Users\<User>\AppData\Roaming\com.teletraan.app\
+///
+/// Creates the directory (and `data/` subdirectory) if they don't exist.
+fn resolve_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {e}"))?;
+
+    // Ensure the directory tree exists
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| format!("Failed to create app data directory {}: {e}", data_dir.display()))?;
+
+    // Also pre-create the data/ subdirectory that the backend expects
+    let db_subdir = data_dir.join("data");
+    std::fs::create_dir_all(&db_subdir)
+        .map_err(|e| format!("Failed to create data subdirectory {}: {e}", db_subdir.display()))?;
+
+    log::info!("Backend data directory: {}", data_dir.display());
+    Ok(data_dir)
+}
+
 /// Spawn the Python backend sidecar and poll until it reports healthy.
 async fn start_backend(app: &AppHandle) -> Result<(), String> {
     log::info!("Starting Teletraan backend sidecar...");
+
+    // Resolve persistent data directory for the bundled app.
+    let data_dir = resolve_data_dir(app)?;
+
+    // Build the DATABASE_URL pointing into the app data directory.
+    let db_path = data_dir.join("data").join("market-analyzer.db");
+    let database_url = format!(
+        "sqlite+aiosqlite:///{}",
+        db_path.display()
+    );
 
     let shell = app.shell();
 
     // Build and spawn the sidecar command.
     // "teletraan-backend" resolves to src-tauri/binaries/teletraan-backend-<target_triple>.
+    // We set the working directory to the app data dir so any relative paths
+    // (e.g., ./data/) resolve correctly, and explicitly pass DATABASE_URL as well.
     let (mut rx, child) = shell
         .sidecar("teletraan-backend")
         .map_err(|e| format!("Failed to create sidecar command: {e}"))?
         .args(["--host", "127.0.0.1", "--port", "8000"])
+        .current_dir(data_dir)
+        .env("DATABASE_URL", &database_url)
         .spawn()
         .map_err(|e| format!("Failed to spawn backend sidecar: {e}"))?;
+
+    log::info!("Backend DATABASE_URL: {database_url}");
 
     // Stash the child handle so we can kill it later.
     let state = app.state::<BackendProcess>();
@@ -108,7 +151,8 @@ async fn start_backend(app: &AppHandle) -> Result<(), String> {
 /// Kill the backend sidecar (called on app exit).
 fn stop_backend(app: &AppHandle) {
     let state = app.state::<BackendProcess>();
-    if let Some(child) = state.0.lock().unwrap().take() {
+    let mut guard = state.0.lock().unwrap();
+    if let Some(child) = guard.take() {
         log::info!("Shutting down backend sidecar...");
         match child.kill() {
             Ok(()) => log::info!("Backend sidecar terminated."),

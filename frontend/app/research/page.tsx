@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardTitle } from '@/components/ui/c
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { ConnectionError } from '@/components/ui/empty-state';
 import {
   Select,
   SelectContent,
@@ -246,16 +247,7 @@ export default function ResearchPage() {
       {isLoading ? (
         <ResearchSkeleton />
       ) : error ? (
-        <Card className="py-12">
-          <CardContent className="flex flex-col items-center justify-center text-center">
-            <CardTitle className="text-lg mb-2 text-destructive">
-              Error Loading Research
-            </CardTitle>
-            <CardDescription>
-              {error instanceof Error ? error.message : 'An unexpected error occurred'}
-            </CardDescription>
-          </CardContent>
-        </Card>
+        <ConnectionError error={error} />
       ) : items.length === 0 ? (
         <EmptyState />
       ) : (

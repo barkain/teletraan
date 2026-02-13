@@ -1,8 +1,10 @@
-'use client';
+import InsightDetailClient from './insight-detail-client';
 
-import { use } from 'react';
-import Link from 'next/link';
-import { InsightDetailView } from '@/components/insights/insight-detail-view';
+// Workaround for Next.js static export: must return at least one param.
+// The placeholder ID is handled gracefully by the client component (shows "invalid").
+export async function generateStaticParams() {
+  return [{ id: '_' }];
+}
 
 interface InsightDetailPageProps {
   params: Promise<{
@@ -11,23 +13,5 @@ interface InsightDetailPageProps {
 }
 
 export default function InsightDetailPage({ params }: InsightDetailPageProps) {
-  const resolvedParams = use(params);
-  const insightId = parseInt(resolvedParams.id, 10);
-
-  // Validate the ID
-  if (isNaN(insightId) || insightId <= 0) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
-        <h1 className="text-2xl font-bold">Invalid Insight ID</h1>
-        <p className="text-muted-foreground">
-          The insight ID &quot;{resolvedParams.id}&quot; is not valid.
-        </p>
-        <Link href="/insights" className="text-primary underline hover:no-underline">
-          Return to Insights
-        </Link>
-      </div>
-    );
-  }
-
-  return <InsightDetailView insightId={insightId} />;
+  return <InsightDetailClient params={params} />;
 }

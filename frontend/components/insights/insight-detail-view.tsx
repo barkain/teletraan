@@ -40,6 +40,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/component
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
+import { ConnectionError, isNetworkError } from '@/components/ui/empty-state';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import {
   RadarChart,
@@ -2116,23 +2117,27 @@ export function InsightDetailView({ insightId }: InsightDetailViewProps) {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Insights
         </Button>
-        <Card className="py-12 bg-card/80 backdrop-blur-sm border-border/50">
-          <CardContent className="flex flex-col items-center justify-center text-center">
-            <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
-            <CardTitle className="text-lg mb-2">Error Loading Insight</CardTitle>
-            <CardDescription className="max-w-sm mb-4">
-              {error instanceof Error ? error.message : 'Failed to load insight details'}
-            </CardDescription>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => router.push('/insights')}>
-                Back to Insights
-              </Button>
-              <Button onClick={() => refetch()}>
-                Try Again
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        {isNetworkError(error) ? (
+          <ConnectionError error={error} />
+        ) : (
+          <Card className="py-12 bg-card/80 backdrop-blur-sm border-border/50">
+            <CardContent className="flex flex-col items-center justify-center text-center">
+              <AlertTriangle className="h-12 w-12 text-muted-foreground mb-4" />
+              <CardTitle className="text-lg mb-2">Insight Not Found</CardTitle>
+              <CardDescription className="max-w-sm mb-4">
+                {error instanceof Error ? error.message : 'This insight may have been removed or is unavailable.'}
+              </CardDescription>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => router.push('/insights')}>
+                  Back to Insights
+                </Button>
+                <Button onClick={() => refetch()}>
+                  Try Again
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     );
   }

@@ -8,6 +8,7 @@ import { PatternDetailDrawer } from '@/components/patterns/pattern-detail-drawer
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { BookOpen, Brain, Sparkles, ArrowRight } from 'lucide-react';
+import { ConnectionError, isNetworkError } from '@/components/ui/empty-state';
 import { knowledgeApi } from '@/lib/api';
 import { useDeepInsights } from '@/lib/hooks/use-deep-insights';
 import type { KnowledgePattern, ConversationTheme } from '@/lib/types/knowledge';
@@ -42,7 +43,7 @@ export default function PatternsPage() {
         setThemes(themesResponse.items || []);
       } catch (err) {
         console.error('Failed to fetch knowledge data:', err);
-        setError('Failed to load patterns and themes');
+        setError(isNetworkError(err) ? 'network' : 'server');
         setPatterns([]);
         setThemes([]);
       } finally {
@@ -89,12 +90,7 @@ export default function PatternsPage() {
       )}
 
       {error ? (
-        <Card className="min-h-[600px] flex items-center justify-center">
-          <div className="text-center text-muted-foreground">
-            <p className="text-lg font-medium">{error}</p>
-            <p className="text-sm mt-1">Please try again later</p>
-          </div>
-        </Card>
+        <ConnectionError error={error === 'network' ? new TypeError('Failed to fetch') : new Error('Failed to load patterns')} className="min-h-[400px]" />
       ) : showEmptyState ? (
         /* Progressive empty state */
         <Card className="min-h-[400px] flex items-center justify-center">
