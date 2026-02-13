@@ -12,6 +12,7 @@ from schemas.settings import (
     AllSettingsResponse,
     LLMProviderConfig,
     LLMProviderStatus,
+    LLMTestRequest,
     LLMTestResult,
     SettingsResetResponse,
     SettingUpdate,
@@ -181,38 +182,37 @@ async def update_llm_settings(
 
 @router.post("/llm/test", response_model=LLMTestResult)
 async def test_llm_connection(
-    service: LLMSettingsService = Depends(get_llm_service),
+    body: LLMTestRequest,
 ) -> LLMTestResult:
-    """Test the current LLM provider connection.
+    """Test the LLM provider connection using values from the request body.
 
-    Tests the API endpoint directly via HTTP instead of through the SDK,
-    because the Claude CLI silently falls back to subscription auth when
-    an API key is invalid — making SDK-based tests always succeed.
+    The frontend sends the current form values so the user can test
+    *before* saving. We never fall back to server config here.
     """
-    from config import get_settings
+    provider = body.provider
+    model = body.model or "claude-sonnet-4-20250514"
 
-    settings = get_settings()
-    provider = settings.get_llm_provider()
-    model = settings.ANTHROPIC_MODEL
-
-    result = await _test_llm_connection_http(provider, model, settings)
+    result = await _test_llm_connection_http(provider, model, body)
     return LLMTestResult(**result)
 
 
 async def _test_llm_connection_http(
-    provider: str, model: str, settings: Any
+    provider: str, model: str, body: LLMTestRequest
 ) -> dict:
-    """Test LLM connection directly via HTTP, bypassing SDK subscription fallback."""
+    """Test LLM connection directly via HTTP, bypassing SDK subscription fallback.
+
+    Uses the values from the request body, NOT from server config.
+    """
     import aiohttp
 
     if provider in ("proxy", "anthropic_api"):
         # Determine base URL and API key based on provider
         if provider == "proxy":
-            base_url = (settings.ANTHROPIC_BASE_URL or "https://api.anthropic.com").rstrip("/")
-            api_key = settings.ANTHROPIC_AUTH_TOKEN
+            base_url = (body.base_url or "https://api.anthropic.com").rstrip("/")
+            api_key = body.auth_token
         else:
             base_url = "https://api.anthropic.com"
-            api_key = settings.ANTHROPIC_API_KEY
+            api_key = body.api_key
 
         if not api_key:
             return {
@@ -221,6 +221,8 @@ async def _test_llm_connection_http(
                 "provider": provider,
                 "model": model,
             }
+
+        timeout_s = (body.timeout_ms / 1000) if body.timeout_ms else 15
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -236,7 +238,7 @@ async def _test_llm_connection_http(
                         "max_tokens": 10,
                         "messages": [{"role": "user", "content": "hi"}],
                     },
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    timeout=aiohttp.ClientTimeout(total=timeout_s),
                 )
                 if resp.status == 200:
                     data = await resp.json()
@@ -256,10 +258,10 @@ async def _test_llm_connection_http(
                         "model": model,
                     }
                 else:
-                    body = await resp.text()
+                    resp_body = await resp.text()
                     return {
                         "success": False,
-                        "message": f"HTTP {resp.status}: {body[:200]}",
+                        "message": f"HTTP {resp.status}: {resp_body[:200]}",
                         "provider": provider,
                         "model": model,
                     }
@@ -281,7 +283,7 @@ async def _test_llm_connection_http(
         }
 
     else:
-        # bedrock, vertex, azure — can't easily test without full cloud SDK
+        # bedrock, vertex, azure, ollama — can't easily test without full cloud SDK
         return {
             "success": True,
             "message": f"Provider '{provider}' configured. Full validation requires cloud credentials.",

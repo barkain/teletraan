@@ -104,16 +104,26 @@ export default function SettingsPage() {
   };
 
   const handleTestConnection = () => {
-    testConnection(undefined, {
-      onSuccess: (result) => {
-        if (result.success) {
-          toast.success('Connection test passed');
-        } else {
-          toast.error(`Connection test failed: ${result.message}`);
-        }
+    testConnection(
+      {
+        provider: selectedProvider,
+        auth_token: llmForm.anthropic_auth_token || null,
+        base_url: llmForm.anthropic_base_url || null,
+        api_key: llmForm.anthropic_api_key || null,
+        model: llmForm.anthropic_model || null,
+        timeout_ms: llmForm.api_timeout_ms || null,
       },
-      onError: (err) => toast.error(`Test error: ${err.message}`),
-    });
+      {
+        onSuccess: (result) => {
+          if (result.success) {
+            toast.success('Connection test passed');
+          } else {
+            toast.error(`Connection test failed: ${result.message}`);
+          }
+        },
+        onError: (err) => toast.error(`Test error: ${err.message}`),
+      },
+    );
   };
 
   // Watchlist handlers

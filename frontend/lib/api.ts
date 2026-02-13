@@ -336,8 +336,8 @@ export const api = {
         fetchApi<LLMProviderStatus>('/api/v1/settings/llm'),
       update: (config: LLMProviderConfig) =>
         putApi<LLMProviderStatus>('/api/v1/settings/llm', config),
-      test: () =>
-        postApi<LLMTestResult>('/api/v1/settings/llm/test'),
+      test: (body: LLMTestRequest) =>
+        postApi<LLMTestResult>('/api/v1/settings/llm/test', body),
     },
   },
 
@@ -439,7 +439,7 @@ export const chatApi = {
 };
 
 // Import types
-import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, LLMProviderStatus, LLMProviderConfig, LLMTestResult } from '@/types';
+import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, LLMProviderStatus, LLMProviderConfig, LLMTestRequest, LLMTestResult } from '@/types';
 import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, PatternsSummary, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
 import type { FollowUpResearch, ResearchListResponse, ResearchListParams, ResearchCreateRequest } from '@/lib/types/research';
 import type { ReportListResponse, ReportDetail, PublishResponse } from '@/lib/types/report';

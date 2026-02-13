@@ -179,6 +179,15 @@ export interface LLMProviderConfig {
   vertex_region?: string | null;
 }
 
+export interface LLMTestRequest {
+  provider: string;
+  auth_token?: string | null;
+  base_url?: string | null;
+  api_key?: string | null;
+  model?: string | null;
+  timeout_ms?: number | null;
+}
+
 export interface LLMTestResult {
   success: boolean;
   message: string;

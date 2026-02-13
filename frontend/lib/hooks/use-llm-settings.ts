@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { LLMProviderStatus, LLMProviderConfig, LLMTestResult } from '@/types';
+import type { LLMProviderStatus, LLMProviderConfig, LLMTestRequest, LLMTestResult } from '@/types';
 
 export const llmSettingsKeys = {
   all: ['llm-settings'] as const,
@@ -28,7 +28,7 @@ export function useUpdateLLMSettings() {
 }
 
 export function useTestLLMConnection() {
-  return useMutation<LLMTestResult, Error>({
-    mutationFn: () => api.settings.llm.test(),
+  return useMutation<LLMTestResult, Error, LLMTestRequest>({
+    mutationFn: (body) => api.settings.llm.test(body),
   });
 }

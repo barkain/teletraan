@@ -105,6 +105,21 @@ class LLMProviderStatus(BaseModel):
     vertex_region: str | None = None
 
 
+class LLMTestRequest(BaseModel):
+    """Schema for POST /settings/llm/test request body.
+
+    The test endpoint uses these values directly instead of reading
+    from server config, so the user can test before saving.
+    """
+
+    provider: str  # proxy | anthropic_api | subscription | bedrock | vertex | azure | ollama
+    auth_token: str | None = None  # For proxy provider
+    base_url: str | None = None  # For proxy / ollama
+    api_key: str | None = None  # For anthropic_api
+    model: str | None = None
+    timeout_ms: int | None = None
+
+
 class LLMTestResult(BaseModel):
     """Schema for POST /settings/llm/test response."""
 
