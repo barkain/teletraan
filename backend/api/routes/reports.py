@@ -840,9 +840,38 @@ async def list_reports(
     result = await db.execute(query)
     tasks = result.scalars().all()
 
+    # Batch-query DeepInsight records for all tasks to compute aggregates
+    all_insight_ids: list[int] = []
+    for task in tasks:
+        if task.result_insight_ids:
+            all_insight_ids.extend(task.result_insight_ids)
+
+    insights_by_id: dict[int, DeepInsight] = {}
+    if all_insight_ids:
+        ins_result = await db.execute(
+            select(DeepInsight).where(DeepInsight.id.in_(all_insight_ids))
+        )
+        for ins in ins_result.scalars().all():
+            insights_by_id[ins.id] = ins
+
     items = []
     for task in tasks:
-        insight_count = len(task.result_insight_ids) if task.result_insight_ids else 0
+        task_ids = task.result_insight_ids or []
+        ins_list = [insights_by_id[iid] for iid in task_ids if iid in insights_by_id]
+
+        # Compute aggregate fields
+        symbols = sorted(set(ins.primary_symbol for ins in ins_list if ins.primary_symbol))
+        action_counts: dict[str, int] = {}
+        confidences: list[float] = []
+        types: set[str] = set()
+        for ins in ins_list:
+            if ins.action:
+                action_counts[ins.action] = action_counts.get(ins.action, 0) + 1
+            if ins.confidence is not None:
+                confidences.append(ins.confidence)
+            if ins.insight_type:
+                types.add(ins.insight_type)
+
         items.append(
             ReportSummary(
                 id=task.id,
@@ -852,8 +881,12 @@ async def list_reports(
                 market_regime=task.market_regime,
                 top_sectors=task.top_sectors or [],
                 discovery_summary=task.discovery_summary,
-                insights_count=insight_count,
+                insights_count=len(task_ids),
                 published_url=task.published_url,
+                symbols=symbols,
+                action_summary=action_counts,
+                avg_confidence=sum(confidences) / len(confidences) if confidences else 0.0,
+                insight_types=sorted(types),
             )
         )
 
