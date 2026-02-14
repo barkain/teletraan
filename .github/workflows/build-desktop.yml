@@ -126,8 +126,62 @@ jobs:
             --hidden-import uvicorn.protocols.http.auto \
             --hidden-import uvicorn.protocols.websockets.auto \
             --hidden-import uvicorn.lifespan.on \
+            --hidden-import uvicorn.protocols.http.h11_impl \
+            --hidden-import uvicorn.protocols.http.httptools_impl \
+            --hidden-import uvicorn.protocols.websockets.wsproto_impl \
+            --hidden-import uvicorn.protocols.websockets.websockets_impl \
+            --hidden-import uvicorn.loops.uvloop \
+            --hidden-import uvicorn.loops.asyncio \
             --hidden-import aiosqlite \
+            --hidden-import fastapi \
+            --hidden-import fastapi.middleware \
+            --hidden-import fastapi.middleware.cors \
+            --hidden-import fastapi.responses \
+            --hidden-import fastapi.routing \
+            --hidden-import fastapi.security \
+            --hidden-import fastapi.websockets \
+            --hidden-import pydantic \
+            --hidden-import pydantic.deprecated.decorator \
+            --hidden-import pydantic._internal._generate_schema \
+            --hidden-import pydantic._internal._validators \
+            --hidden-import pydantic_settings \
+            --hidden-import pydantic_core \
+            --hidden-import starlette \
+            --hidden-import starlette.middleware \
+            --hidden-import starlette.middleware.cors \
+            --hidden-import starlette.routing \
+            --hidden-import starlette.responses \
+            --hidden-import starlette.websockets \
+            --hidden-import starlette.formparsers \
+            --hidden-import starlette.concurrency \
+            --hidden-import starlette.status \
+            --hidden-import httpx \
+            --hidden-import httpcore \
+            --hidden-import h11 \
+            --hidden-import anyio \
+            --hidden-import anyio._backends._asyncio \
+            --hidden-import sniffio \
+            --hidden-import certifi \
+            --hidden-import idna \
+            --hidden-import aiohttp \
+            --hidden-import multidict \
+            --hidden-import yarl \
+            --hidden-import async_timeout \
+            --hidden-import frozenlist \
+            --hidden-import aiosignal \
+            --hidden-import yfinance \
+            --hidden-import apscheduler \
+            --hidden-import apscheduler.schedulers.asyncio \
+            --hidden-import apscheduler.triggers.cron \
+            --hidden-import fredapi \
+            --hidden-import dotenv \
+            --hidden-import python_dotenv \
             --collect-data sqlalchemy \
+            --collect-submodules fastapi \
+            --collect-submodules starlette \
+            --collect-submodules pydantic \
+            --collect-submodules pydantic_core \
+            --collect-submodules uvicorn \
             main.py
 
       - name: Bundle backend with PyInstaller (Windows)
@@ -143,8 +197,62 @@ jobs:
             --hidden-import uvicorn.protocols.http.auto `
             --hidden-import uvicorn.protocols.websockets.auto `
             --hidden-import uvicorn.lifespan.on `
+            --hidden-import uvicorn.protocols.http.h11_impl `
+            --hidden-import uvicorn.protocols.http.httptools_impl `
+            --hidden-import uvicorn.protocols.websockets.wsproto_impl `
+            --hidden-import uvicorn.protocols.websockets.websockets_impl `
+            --hidden-import uvicorn.loops.uvloop `
+            --hidden-import uvicorn.loops.asyncio `
             --hidden-import aiosqlite `
+            --hidden-import fastapi `
+            --hidden-import fastapi.middleware `
+            --hidden-import fastapi.middleware.cors `
+            --hidden-import fastapi.responses `
+            --hidden-import fastapi.routing `
+            --hidden-import fastapi.security `
+            --hidden-import fastapi.websockets `
+            --hidden-import pydantic `
+            --hidden-import pydantic.deprecated.decorator `
+            --hidden-import pydantic._internal._generate_schema `
+            --hidden-import pydantic._internal._validators `
+            --hidden-import pydantic_settings `
+            --hidden-import pydantic_core `
+            --hidden-import starlette `
+            --hidden-import starlette.middleware `
+            --hidden-import starlette.middleware.cors `
+            --hidden-import starlette.routing `
+            --hidden-import starlette.responses `
+            --hidden-import starlette.websockets `
+            --hidden-import starlette.formparsers `
+            --hidden-import starlette.concurrency `
+            --hidden-import starlette.status `
+            --hidden-import httpx `
+            --hidden-import httpcore `
+            --hidden-import h11 `
+            --hidden-import anyio `
+            --hidden-import anyio._backends._asyncio `
+            --hidden-import sniffio `
+            --hidden-import certifi `
+            --hidden-import idna `
+            --hidden-import aiohttp `
+            --hidden-import multidict `
+            --hidden-import yarl `
+            --hidden-import async_timeout `
+            --hidden-import frozenlist `
+            --hidden-import aiosignal `
+            --hidden-import yfinance `
+            --hidden-import apscheduler `
+            --hidden-import apscheduler.schedulers.asyncio `
+            --hidden-import apscheduler.triggers.cron `
+            --hidden-import fredapi `
+            --hidden-import dotenv `
+            --hidden-import python_dotenv `
             --collect-data sqlalchemy `
+            --collect-submodules fastapi `
+            --collect-submodules starlette `
+            --collect-submodules pydantic `
+            --collect-submodules pydantic_core `
+            --collect-submodules uvicorn `
             main.py
 
       # ── Copy sidecar binary with target-triple suffix ────────
