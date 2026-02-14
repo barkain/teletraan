@@ -6,6 +6,9 @@ on:
     tags:
       - "v*" # Build on version tags (e.g. v0.1.0)
 
+permissions:
+  contents: write
+
 # Prevent multiple builds from running simultaneously for the same ref.
 concurrency:
   group: desktop-build-${{ github.ref }}

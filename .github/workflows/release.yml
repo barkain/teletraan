@@ -11,6 +11,9 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: write
+
 # Prevent multiple release builds from running simultaneously for the same ref.
 concurrency:
   group: release-${{ github.ref }}
