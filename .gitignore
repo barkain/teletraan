@@ -41,6 +41,10 @@ build/
 *.egg
 .next/
 
+# Tauri / Desktop build artifacts
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/
+
 # Test artifacts
 test-results/
 coverage/
