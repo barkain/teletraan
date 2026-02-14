@@ -51,6 +51,7 @@ import { GradientProgressBar } from '@/components/insights/gradient-progress-bar
 import { LLMActivityFeed } from '@/components/insights/llm-activity-feed';
 import { useRecentDeepInsights } from '@/lib/hooks/use-deep-insights';
 import { useAnalysisTask } from '@/lib/hooks/use-analysis-task';
+import type { LLMActivityEntry } from '@/lib/hooks/use-analysis-task';
 import { knowledgeApi, outcomesApi } from '@/lib/api';
 import type { DeepInsight, InsightAction, AutonomousAnalysisResponse } from '@/types';
 import type { TrackRecordStats, MonthlyTrendResponse, OutcomeSummary } from '@/lib/types/track-record';
@@ -273,7 +274,7 @@ interface AnalysisStatusBannerProps {
   isCancelled?: boolean;
   elapsedSeconds?: number;
   onCancel?: () => void;
-  activityLog?: any[];
+  activityLog?: LLMActivityEntry[];
   task?: {
     market_regime?: string | null;
     top_sectors?: string[] | null;

@@ -293,9 +293,13 @@ function InsightsListView({ onInsightClick }: { onInsightClick: (id: number) => 
   // View mode: default to 'grid' on server/initial render, restore from localStorage after mount.
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
 
+  // Hydrate sidebar and view mode preferences from localStorage after mount.
+  // setState in an effect is intentional here: localStorage is unavailable during SSR,
+  // so we must read it in an effect and update state to reflect the stored preference.
   useEffect(() => {
     const stored = localStorage.getItem(SIGNALS_SIDEBAR_KEY);
     // Default to true when no preference is stored
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrating from localStorage, unavailable during SSR
     setShowSignalsSidebar(stored !== null ? stored === 'true' : true);
     setSidebarHydrated(true);
 
