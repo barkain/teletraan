@@ -812,11 +812,12 @@ class MacroScanner:
             # Use provided LLM client
             return await self.llm_client.analyze(prompt)
 
-        return await pool_query_llm(
+        result = await pool_query_llm(
             system_prompt=f"You are a {self.role}.",
             user_prompt=prompt,
             agent_name=self.name,
         )
+        return result.text
 
     def _parse_result(self, response: str) -> MacroScanResult:
         """Parse LLM response into MacroScanResult.

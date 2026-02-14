@@ -67,7 +67,7 @@ async function setupGlobalMocks(page: import('@playwright/test').Page) {
   });
 }
 
-test.describe('Navigation - Desktop Header', () => {
+test.describe('Navigation - Desktop Sidebar', () => {
   test.beforeEach(async ({ page }) => {
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
@@ -76,40 +76,40 @@ test.describe('Navigation - Desktop Header', () => {
     });
   });
 
-  test('header has correct primary navigation links', async ({ page }) => {
+  test('sidebar has correct primary navigation links', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    const header = page.locator('header');
+    const sidebar = page.locator('aside');
 
-    // Desktop nav is the visible nav element inside header
-    const desktopNav = header.locator('nav');
-    await expect(desktopNav.first()).toBeVisible({ timeout: 10000 });
+    // Sidebar nav is visible on desktop
+    const sidebarNav = sidebar.locator('nav');
+    await expect(sidebarNav.first()).toBeVisible({ timeout: 10000 });
 
-    await expect(header.locator('a', { hasText: 'Home' }).first()).toBeVisible();
-    await expect(header.locator('a', { hasText: 'Insights' }).first()).toBeVisible();
-    await expect(header.locator('a', { hasText: 'Conversations' }).first()).toBeVisible();
-    await expect(header.locator('a', { hasText: 'Research' }).first()).toBeVisible();
+    await expect(sidebar.getByRole('link', { name: 'Home' })).toBeVisible();
+    await expect(sidebar.getByRole('link', { name: 'Insights' })).toBeVisible();
+    await expect(sidebar.getByRole('link', { name: 'Conversations' })).toBeVisible();
+    await expect(sidebar.getByRole('link', { name: 'Research' })).toBeVisible();
 
-    await expect(header.locator('button', { hasText: 'Data' }).first()).toBeVisible();
+    await expect(sidebar.locator('button', { hasText: 'Data' }).first()).toBeVisible();
   });
 
-  test('Data dropdown reveals Market Data and Signals links', async ({ page }) => {
+  test('Data collapsible reveals Market Data and Signals links', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    const header = page.locator('header');
+    const sidebar = page.locator('aside');
 
-    // Click the Data dropdown button in the desktop nav
-    const dataButton = header.locator('nav button', { hasText: 'Data' });
+    // Click the Data collapsible button in the sidebar
+    const dataButton = sidebar.locator('button', { hasText: 'Data' });
     await expect(dataButton).toBeVisible({ timeout: 10000 });
     await dataButton.click();
 
-    // Dropdown menu items appear as role="menuitem" in the dropdown content
-    await expect(page.locator('[role="menuitem"]', { hasText: 'Market Data' })).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('[role="menuitem"]', { hasText: 'Signals' })).toBeVisible();
+    // Data section items appear after expanding
+    await expect(sidebar.locator('text=Market Data')).toBeVisible({ timeout: 5000 });
+    await expect(sidebar.locator('text=Signals')).toBeVisible();
   });
 
   test('clicking Home link navigates to home page', async ({ page }) => {
@@ -117,9 +117,9 @@ test.describe('Navigation - Desktop Header', () => {
     await page.goto('/insights');
     await page.waitForLoadState('domcontentloaded');
 
-    // Use the desktop nav links (inside header > nav)
-    const desktopNav = page.locator('header nav');
-    const homeLink = desktopNav.locator('a', { hasText: 'Home' }).first();
+    // Use the sidebar nav links
+    const sidebar = page.locator('aside');
+    const homeLink = sidebar.getByRole('link', { name: 'Home' });
     await expect(homeLink).toBeVisible({ timeout: 10000 });
     await homeLink.click();
     await page.waitForURL('**/');
@@ -132,8 +132,8 @@ test.describe('Navigation - Desktop Header', () => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    const desktopNav = page.locator('header nav');
-    const insightsLink = desktopNav.locator('a', { hasText: 'Insights' }).first();
+    const sidebar = page.locator('aside');
+    const insightsLink = sidebar.getByRole('link', { name: 'Insights' });
     await expect(insightsLink).toBeVisible({ timeout: 10000 });
     await insightsLink.click();
     await page.waitForURL('**/insights');
@@ -146,8 +146,8 @@ test.describe('Navigation - Desktop Header', () => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    const desktopNav = page.locator('header nav');
-    const conversationsLink = desktopNav.locator('a', { hasText: 'Conversations' }).first();
+    const sidebar = page.locator('aside');
+    const conversationsLink = sidebar.getByRole('link', { name: 'Conversations' });
     await expect(conversationsLink).toBeVisible({ timeout: 10000 });
     await conversationsLink.click();
     await page.waitForURL('**/conversations');
@@ -160,8 +160,8 @@ test.describe('Navigation - Desktop Header', () => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    const desktopNav = page.locator('header nav');
-    const researchLink = desktopNav.locator('a', { hasText: 'Research' }).first();
+    const sidebar = page.locator('aside');
+    const researchLink = sidebar.getByRole('link', { name: 'Research' });
     await expect(researchLink).toBeVisible({ timeout: 10000 });
     await researchLink.click();
     await page.waitForURL('**/research');
@@ -169,20 +169,21 @@ test.describe('Navigation - Desktop Header', () => {
     expect(page.url()).toContain('/research');
   });
 
-  test('clicking Market Data from Data dropdown navigates correctly', async ({ page }) => {
+  test('clicking Market Data from Data section navigates correctly', async ({ page }) => {
     await setupGlobalMocks(page);
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    // Click the Data dropdown in header nav
-    const dataButton = page.locator('header nav button', { hasText: 'Data' });
+    // Click the Data collapsible in sidebar
+    const sidebar = page.locator('aside');
+    const dataButton = sidebar.locator('button', { hasText: 'Data' });
     await expect(dataButton).toBeVisible({ timeout: 10000 });
     await dataButton.click();
 
-    // Click the Market Data menu item in the dropdown
-    const marketDataItem = page.locator('[role="menuitem"]', { hasText: 'Market Data' });
-    await expect(marketDataItem).toBeVisible({ timeout: 5000 });
-    await marketDataItem.click();
+    // Click the Market Data link in the expanded section
+    const marketDataLink = sidebar.getByRole('link', { name: 'Market Data' });
+    await expect(marketDataLink).toBeVisible({ timeout: 5000 });
+    await marketDataLink.click();
     await page.waitForURL('**/stocks');
 
     expect(page.url()).toContain('/stocks');
@@ -193,9 +194,9 @@ test.describe('Navigation - Desktop Header', () => {
     await page.goto('/insights');
     await page.waitForLoadState('domcontentloaded');
 
-    const header = page.locator('header');
+    const sidebar = page.locator('aside');
 
-    const insightsLink = header.locator('nav a', { hasText: 'Insights' }).first();
+    const insightsLink = sidebar.getByRole('link', { name: 'Insights' });
     await expect(insightsLink).toBeVisible({ timeout: 10000 });
     const classes = await insightsLink.getAttribute('class');
     expect(classes).toContain('bg-secondary');
@@ -325,6 +326,13 @@ test.describe('Navigation - Mobile Menu', () => {
     await mobileMenuBtn.click();
 
     const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+
+    // Data section is collapsible -- expand it first
+    const dataButton = dialog.locator('button', { hasText: 'Data' });
+    await expect(dataButton).toBeVisible({ timeout: 5000 });
+    await dataButton.click();
+
     await expect(dialog.locator('text=Market Data')).toBeVisible({ timeout: 5000 });
     await expect(dialog.locator('text=Signals')).toBeVisible();
   });
@@ -379,50 +387,61 @@ test.describe('Navigation - Theme Toggle', () => {
     await expect(themeToggle).toBeVisible({ timeout: 10000 });
   });
 
-  test('theme toggle opens dropdown with Light, Dark, System options', async ({ page }) => {
+  test('theme toggle switches between light and dark themes', async ({ page }) => {
     await setupGlobalMocks(page);
+    await page.goto('/');
+    await page.waitForLoadState('domcontentloaded');
+
+    // The theme toggle is a simple button that toggles between light and dark
+    const themeToggle = page.locator('button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle theme' }) });
+    await expect(themeToggle).toBeVisible({ timeout: 10000 });
+
+    // Get initial theme
+    const initialClasses = await page.locator('html').getAttribute('class');
+
+    // Click to toggle theme
+    await themeToggle.click();
+    await page.waitForTimeout(500);
+
+    const newClasses = await page.locator('html').getAttribute('class');
+    // Theme should have changed
+    expect(newClasses).not.toEqual(initialClasses);
+  });
+
+  test('clicking theme toggle applies dark class when in light mode', async ({ page }) => {
+    await setupGlobalMocks(page);
+    // Set initial theme to light via localStorage before navigation
+    await page.addInitScript(() => {
+      localStorage.setItem('theme', 'light');
+    });
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
     const themeToggle = page.locator('button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle theme' }) });
     await expect(themeToggle).toBeVisible({ timeout: 10000 });
+
+    // Click toggle to switch from light to dark
     await themeToggle.click();
-
-    await expect(page.locator('[role="menuitem"]', { hasText: 'Light' })).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('[role="menuitem"]', { hasText: 'Dark' })).toBeVisible();
-    await expect(page.locator('[role="menuitem"]', { hasText: 'System' })).toBeVisible();
-  });
-
-  test('selecting Dark theme applies dark class', async ({ page }) => {
-    await setupGlobalMocks(page);
-    await page.goto('/');
-    await page.waitForLoadState('domcontentloaded');
-
-    const themeToggle = page.locator('button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle theme' }) });
-    await themeToggle.click();
-
-    const darkOption = page.locator('[role="menuitem"]', { hasText: 'Dark' });
-    await expect(darkOption).toBeVisible({ timeout: 5000 });
-    await darkOption.click();
-
     await page.waitForTimeout(500);
 
     const htmlClasses = await page.locator('html').getAttribute('class');
     expect(htmlClasses).toContain('dark');
   });
 
-  test('selecting Light theme applies light class', async ({ page }) => {
+  test('clicking theme toggle applies light class when in dark mode', async ({ page }) => {
     await setupGlobalMocks(page);
+    // Set initial theme to dark via localStorage before navigation
+    await page.addInitScript(() => {
+      localStorage.setItem('theme', 'dark');
+    });
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
     const themeToggle = page.locator('button').filter({ has: page.locator('.sr-only', { hasText: 'Toggle theme' }) });
+    await expect(themeToggle).toBeVisible({ timeout: 10000 });
+
+    // Click toggle to switch from dark to light
     await themeToggle.click();
-
-    const lightOption = page.locator('[role="menuitem"]', { hasText: 'Light' });
-    await expect(lightOption).toBeVisible({ timeout: 5000 });
-    await lightOption.click();
-
     await page.waitForTimeout(500);
 
     const htmlClasses = await page.locator('html').getAttribute('class');

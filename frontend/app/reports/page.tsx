@@ -40,6 +40,7 @@ import {
   ChevronUp,
   ChevronDown,
 } from 'lucide-react';
+import { ConnectionError } from '@/components/ui/empty-state';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -263,8 +264,6 @@ function FilterBar({
   dateRange,
   onDateRangeChange,
   regimeOptions,
-  filteredCount,
-  totalCount,
   activeFilterCount,
   onClearFilters,
 }: {
@@ -275,8 +274,6 @@ function FilterBar({
   dateRange: DateRange;
   onDateRangeChange: (v: DateRange) => void;
   regimeOptions: string[];
-  filteredCount: number;
-  totalCount: number;
   activeFilterCount: number;
   onClearFilters: () => void;
 }) {
@@ -330,11 +327,6 @@ function FilterBar({
           Clear ({activeFilterCount})
         </Button>
       )}
-
-      {/* Count */}
-      <span className="text-sm text-muted-foreground whitespace-nowrap ml-auto">
-        Showing {filteredCount} of {totalCount} reports
-      </span>
     </div>
   );
 }
@@ -805,7 +797,7 @@ export default function ReportsPage() {
   const [dateRange, setDateRange] = useState<DateRange>('all');
 
   // All reports
-  const allReports = data?.items ?? [];
+  const allReports = useMemo(() => data?.items ?? [], [data?.items]);
 
   // Extract unique regimes
   const regimeOptions = useMemo(() => {
@@ -866,45 +858,16 @@ export default function ReportsPage() {
   return (
     <div className="space-y-6">
       {/* 1. Page Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Analysis Reports</h1>
-          <p className="text-muted-foreground mt-1">AI-powered market intelligence reports</p>
-        </div>
-        <div className="flex items-center gap-1 rounded-lg border border-border/50 p-1 bg-card/80 backdrop-blur-sm">
-          <Button
-            variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
-            size="icon-sm"
-            onClick={() => setViewMode('grid')}
-            aria-label="Grid view"
-          >
-            <LayoutGrid className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={viewMode === 'list' ? 'secondary' : 'ghost'}
-            size="icon-sm"
-            onClick={() => setViewMode('list')}
-            aria-label="List view"
-          >
-            <List className="h-4 w-4" />
-          </Button>
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Analysis Reports</h1>
+        <p className="text-muted-foreground mt-1">AI-powered market intelligence reports</p>
       </div>
 
       {/* Content */}
       {isLoading ? (
         <ReportsListSkeleton />
       ) : error ? (
-        <Card className="py-12">
-          <CardContent className="flex flex-col items-center justify-center text-center">
-            <CardTitle className="text-lg mb-2 text-destructive">
-              Error Loading Reports
-            </CardTitle>
-            <CardDescription>
-              {error instanceof Error ? error.message : 'An unexpected error occurred'}
-            </CardDescription>
-          </CardContent>
-        </Card>
+        <ConnectionError error={error} />
       ) : allReports.length === 0 ? (
         <EmptyState />
       ) : (
@@ -921,11 +884,36 @@ export default function ReportsPage() {
             dateRange={dateRange}
             onDateRangeChange={setDateRange}
             regimeOptions={regimeOptions}
-            filteredCount={filteredReports.length}
-            totalCount={allReports.length}
             activeFilterCount={activeFilterCount}
             onClearFilters={handleClearFilters}
           />
+
+          {/* Results Count + View Toggle */}
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">
+              Showing {filteredReports.length} of {allReports.length} reports
+            </span>
+            <div className="flex items-center gap-1 border rounded-md p-0.5">
+              <Button
+                variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={() => setViewMode('grid')}
+                aria-label="Grid view"
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={viewMode === 'list' ? 'default' : 'ghost'}
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={() => setViewMode('list')}
+                aria-label="List view"
+              >
+                <List className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
 
           {/* 4/5/6. Grid or List view */}
           {viewMode === 'grid' ? (

@@ -24,7 +24,7 @@ export function renderMarkdown(content: string): React.ReactNode {
   const elements: React.ReactNode[] = [];
   let inCodeBlock = false;
   let codeContent: string[] = [];
-  let codeLanguage = '';
+  let _codeLanguage = '';
   let inTable = false;
   let tableRows: string[][] = [];
 
@@ -46,7 +46,7 @@ export function renderMarkdown(content: string): React.ReactNode {
     if (line.startsWith('```')) {
       if (!inCodeBlock) {
         inCodeBlock = true;
-        codeLanguage = line.slice(3).trim();
+        _codeLanguage = line.slice(3).trim();
         codeContent = [];
       } else {
         inCodeBlock = false;

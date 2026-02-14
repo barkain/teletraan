@@ -12,13 +12,13 @@ import {
   Clock,
   Archive,
   CheckCircle,
-  Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ConnectionError } from '@/components/ui/empty-state';
 import {
   useAllConversations,
   type InsightConversation,
@@ -295,16 +295,7 @@ export default function ConversationsPage() {
       {isLoading ? (
         <ConversationsListSkeleton />
       ) : error ? (
-        <Card className="py-12">
-          <CardContent className="flex flex-col items-center justify-center text-center">
-            <CardTitle className="text-lg mb-2 text-destructive">
-              Error Loading Conversations
-            </CardTitle>
-            <CardDescription>
-              {error instanceof Error ? error.message : 'An unexpected error occurred'}
-            </CardDescription>
-          </CardContent>
-        </Card>
+        <ConnectionError error={error} />
       ) : conversations.length === 0 ? (
         <EmptyState />
       ) : (

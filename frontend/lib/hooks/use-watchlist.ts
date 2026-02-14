@@ -1,8 +1,8 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, putApi, fetchApi } from '@/lib/api';
-import type { WatchlistSettings, SettingsResponse } from '@/types';
+import { api } from '@/lib/api';
+import type { WatchlistSettings } from '@/types';
 
 // Query keys for watchlist
 export const watchlistKeys = {

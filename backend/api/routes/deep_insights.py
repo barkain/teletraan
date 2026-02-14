@@ -16,7 +16,12 @@ from models.analysis_task import AnalysisTask, AnalysisTaskStatus, PHASE_NAMES
 from schemas.deep_insight import DeepInsightResponse, DeepInsightListResponse
 from analysis.deep_engine import deep_analysis_engine
 from analysis.autonomous_engine import get_autonomous_engine
-from api.routes.reports import _build_report_html, _publish_to_ghpages, _REPO_DIR
+from api.routes.reports import (
+    _build_report_html,
+    publish_report_async,
+    _REPO_DIR,
+    is_publishing_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +108,8 @@ async def list_deep_insights(
     action: str | None = None,
     insight_type: str | None = None,
     symbol: str | None = None,
+    start_date: str | None = Query(default=None, description="Filter insights created on or after this date (YYYY-MM-DD)"),
+    end_date: str | None = Query(default=None, description="Filter insights created on or before this date (YYYY-MM-DD)"),
 ):
     """List deep insights with filtering."""
     query = select(DeepInsight).order_by(desc(DeepInsight.created_at))
@@ -123,6 +130,19 @@ async def list_deep_insights(
             (DeepInsight.primary_symbol == symbol)
             | (DeepInsight.related_symbols.contains([symbol]))
         )
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            query = query.where(DeepInsight.created_at >= start_dt)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            # Include the entire end date by setting time to end of day
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            query = query.where(DeepInsight.created_at <= end_dt)
+        except ValueError:
+            pass
 
     # Count total
     count_query = select(func.count()).select_from(query.subquery())
@@ -365,10 +385,18 @@ async def _auto_publish_report(task_id: str) -> None:
 
     Best-effort: any failure is logged as a warning and never propagated.
     Called after the autonomous pipeline marks a task as completed.
+    Skipped entirely when publishing is disabled (the default for forks).
 
     Args:
         task_id: The completed task ID to publish.
     """
+    if not is_publishing_enabled():
+        logger.info(
+            "Report publishing is disabled. "
+            "Configure PUBLISH_METHOD and enable publishing in .env."
+        )
+        return
+
     async with async_session_factory() as session:
         result = await session.execute(
             select(AnalysisTask).where(AnalysisTask.id == task_id)
@@ -392,7 +420,7 @@ async def _auto_publish_report(task_id: str) -> None:
                     insights.append(ins)
 
         html_content = _build_report_html(task, insights)
-        published_url = await _publish_to_ghpages(
+        published_url = await publish_report_async(
             task, html_content, _REPO_DIR, insights,
         )
 
@@ -466,6 +494,18 @@ async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_co
                         f"{s.name} {(s.change_20d or s.change_5d or s.change_1d or 0):+.1f}%"
                         for s in sorted_sectors[:6]
                     ]
+
+                # Persist LLM usage metrics from the analysis run
+                if analysis_result.run_metrics:
+                    try:
+                        metrics_fields = analysis_result.run_metrics.to_task_fields()
+                        for field_name, value in metrics_fields.items():
+                            setattr(task, field_name, value)
+                    except Exception as metrics_err:
+                        logger.warning(
+                            "Failed to persist run metrics for task %s: %s",
+                            task_id, metrics_err,
+                        )
 
                 await session.commit()
                 logger.info(f"Background analysis {task_id} completed successfully")

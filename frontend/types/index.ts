@@ -139,6 +139,64 @@ export interface WatchlistSettings {
 }
 
 // ============================================
+// LLM Provider Settings
+// ============================================
+
+export type LLMProviderType =
+  | 'auto'
+  | 'anthropic_api'
+  | 'bedrock'
+  | 'vertex'
+  | 'azure'
+  | 'proxy'
+  | 'ollama'
+  | 'subscription';
+
+export interface LLMProviderStatus {
+  active_provider: string;
+  active_provider_display: string;
+  configured_provider: string;
+  model: string;
+  env_override: boolean;
+  anthropic_api_key: string | null;
+  anthropic_auth_token: string | null;
+  anthropic_base_url: string | null;
+  api_timeout_ms: number | null;
+  aws_region: string | null;
+  vertex_project: string | null;
+  vertex_region: string | null;
+}
+
+export interface LLMProviderConfig {
+  llm_provider?: string | null;
+  anthropic_api_key?: string | null;
+  anthropic_auth_token?: string | null;
+  anthropic_base_url?: string | null;
+  api_timeout_ms?: number | null;
+  anthropic_model?: string | null;
+  aws_region?: string | null;
+  vertex_project?: string | null;
+  vertex_region?: string | null;
+}
+
+export interface LLMTestRequest {
+  provider: string;
+  auth_token?: string | null;
+  base_url?: string | null;
+  api_key?: string | null;
+  model?: string | null;
+  timeout_ms?: number | null;
+}
+
+export interface LLMTestResult {
+  success: boolean;
+  message: string;
+  provider: string;
+  model: string;
+  response_preview: string | null;
+}
+
+// ============================================
 // Deep Insights Types
 // ============================================
 
@@ -344,4 +402,74 @@ export interface PortfolioImpact {
   overall_bullish_exposure: number;
   overall_bearish_exposure: number;
   insight_count: number;
+}
+
+// ============================================
+// Run / Analysis Task Types
+// ============================================
+
+// Phase timing detail
+export interface PhaseTimingDetail {
+  start: string;
+  end: string;
+  duration_seconds: number;
+}
+
+// Phase token usage detail
+export interface PhaseTokenUsageDetail {
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+}
+
+// Run summary (from list and detail endpoints — mirrors AnalysisTask.to_dict())
+export interface RunSummary {
+  id: string;
+  status: string;
+  progress: number;
+  current_phase: string | null;
+  phase_details: string | null;
+  max_insights: number | null;
+  deep_dive_count: number | null;
+  result_insight_ids: number[] | null;
+  result_analysis_id: string | null;
+  market_regime: string | null;
+  top_sectors: string[] | null;
+  discovery_summary: string | null;
+  phases_completed: string[] | null;
+  phase_summaries: Record<string, string> | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  elapsed_seconds: number | null;
+  published_url: string | null;
+  phase_timings: Record<string, PhaseTimingDetail> | null;
+  phase_token_usage: Record<string, PhaseTokenUsageDetail> | null;
+  total_input_tokens: number | null;
+  total_output_tokens: number | null;
+  total_cost_usd: number | null;
+  model_used: string | null;
+  provider_used: string | null;
+  llm_call_count: number | null;
+  created_at: string | null;
+}
+
+// Paginated runs response
+export interface RunListResponse {
+  runs: RunSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+// Aggregate stats across all runs
+export interface RunsAggregateStats {
+  total_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  avg_duration_seconds: number | null;
+  avg_cost_usd: number | null;
 }

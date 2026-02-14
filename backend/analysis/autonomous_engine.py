@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -98,7 +99,7 @@ from analysis.context_builder import MarketContextBuilder  # type: ignore[import
 from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
 from analysis.pattern_extractor import PatternExtractor  # type: ignore[import-not-found]
 from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
-from llm.client_pool import pool_query_llm  # type: ignore[import-not-found]
+from llm.client_pool import pool_query_llm, LLMQueryResult  # type: ignore[import-not-found]
 
 # Optional alternative data sources (availability flags)
 _HAS_PREDICTIONS = importlib.util.find_spec("data.adapters.prediction_markets") is not None
@@ -129,6 +130,7 @@ class AutonomousAnalysisResult:
     phases_completed: list[str] = field(default_factory=list)
     phase_summaries: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    run_metrics: RunMetrics | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
@@ -157,6 +159,88 @@ class AutonomousAnalysisResult:
             "phases_completed": self.phases_completed,
             "phase_summaries": self.phase_summaries,
             "errors": self.errors,
+        }
+
+
+@dataclass
+class RunMetrics:
+    """Accumulator for LLM usage and phase timing metrics across an analysis run."""
+
+    phase_timings: dict[str, dict[str, Any]] = field(default_factory=dict)
+    phase_token_usage: dict[str, dict[str, Any]] = field(default_factory=dict)
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cost_usd: float = 0.0
+    model: str = ""
+    provider: str = ""
+    llm_call_count: int = 0
+
+    # Track which phase is currently active so _query_llm can attribute tokens
+    _current_phase: str | None = field(default=None, repr=False)
+
+    def start_phase(self, name: str) -> None:
+        """Record the start of a pipeline phase."""
+        self.phase_timings[name] = {
+            "start": datetime.utcnow().isoformat(),
+            "end": None,
+            "duration_seconds": 0.0,
+        }
+        # Initialise token bucket for the phase
+        if name not in self.phase_token_usage:
+            self.phase_token_usage[name] = {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": 0.0,
+                "llm_calls": 0,
+            }
+        self._current_phase = name
+
+    def end_phase(self, name: str) -> None:
+        """Record the end of a pipeline phase and compute duration."""
+        entry = self.phase_timings.get(name)
+        if entry and entry.get("start"):
+            end_time = datetime.utcnow()
+            entry["end"] = end_time.isoformat()
+            try:
+                start_dt = datetime.fromisoformat(entry["start"])
+                entry["duration_seconds"] = round(
+                    (end_time - start_dt).total_seconds(), 2
+                )
+            except (ValueError, TypeError) as parse_err:
+                logger.debug("Could not compute phase duration for %s: %s", name, parse_err)
+        if self._current_phase == name:
+            self._current_phase = None
+
+    def record_llm_call(self, result: LLMQueryResult) -> None:
+        """Accumulate token counts and cost from a single LLM call."""
+        self.total_input_tokens += result.input_tokens
+        self.total_output_tokens += result.output_tokens
+        self.total_cost_usd += result.cost_usd
+        self.llm_call_count += 1
+
+        if result.model and not self.model:
+            self.model = result.model
+
+        # Attribute to current phase
+        phase = self._current_phase
+        if phase and phase in self.phase_token_usage:
+            bucket = self.phase_token_usage[phase]
+            bucket["input_tokens"] += result.input_tokens
+            bucket["output_tokens"] += result.output_tokens
+            bucket["cost_usd"] += result.cost_usd
+            bucket["llm_calls"] = bucket.get("llm_calls", 0) + 1
+
+    def to_task_fields(self) -> dict[str, Any]:
+        """Return a dict of values ready to set on an AnalysisTask row."""
+        return {
+            "phase_timings": json.dumps(self.phase_timings),
+            "phase_token_usage": json.dumps(self.phase_token_usage),
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_cost_usd": round(self.total_cost_usd, 6),
+            "model_used": self.model,
+            "provider_used": self.provider,
+            "llm_call_count": self.llm_call_count,
         }
 
 
@@ -233,6 +317,9 @@ class AutonomousDeepEngine:
         self.max_retries = max_retries
         self.timeout_seconds = timeout_seconds
         self.context_builder = MarketContextBuilder()
+
+        # Per-run metrics accumulator (set at the start of each analysis run)
+        self._run_metrics: RunMetrics | None = None
 
         # Phase 1: Macro Scanner
         self.macro_scanner = MacroScanner()
@@ -396,6 +483,17 @@ class AutonomousDeepEngine:
         start_time = datetime.utcnow()
         result = AutonomousAnalysisResult(analysis_id=analysis_id)
 
+        # Initialise per-run metrics accumulator
+        metrics = RunMetrics()
+        self._run_metrics = metrics
+        try:
+            from config import get_settings  # type: ignore[import-not-found]
+            cfg = get_settings()
+            metrics.provider = cfg.get_llm_provider()
+            metrics.model = getattr(cfg, "ANTHROPIC_MODEL", "")
+        except Exception as cfg_err:
+            logger.debug("Could not read LLM config for metrics: %s", cfg_err)
+
         logger.info(f"Starting autonomous analysis {analysis_id}")
 
         try:
@@ -404,6 +502,8 @@ class AutonomousDeepEngine:
             # all independent -- run them concurrently to save wall-clock time.
             logger.info("Phase 1+2 + data pre-fetch: Scanning macro, fetching heatmap & alternative data concurrently...")
             await self._update_task_progress(task_id, "macro_scan", 10, "Scanning macro environment & fetching heatmap...")
+            metrics.start_phase("macro_scan")
+            metrics.start_phase("heatmap_fetch")
 
             macro_coro = self._run_macro_scan()
             heatmap_coro = self._run_heatmap_fetch()
@@ -440,6 +540,7 @@ class AutonomousDeepEngine:
             macro_result: MacroScanResult = phase1_result
             result.macro_result = macro_result
             result.phases_completed.append("macro_scan")
+            metrics.end_phase("macro_scan")
             logger.info(f"Macro scan complete. Regime: {macro_result.market_regime}")
 
             # Capture macro scan summary from structured data
@@ -455,6 +556,7 @@ class AutonomousDeepEngine:
             result.phase_summaries["macro_scan"] = " ".join(macro_summary_parts)
 
             # --- Handle Phase 2 (heatmap fetch) result ---
+            metrics.end_phase("heatmap_fetch")
             if isinstance(phase2_result, BaseException):
                 logger.warning(f"Heatmap fetch failed (will use legacy fallback): {phase2_result}")
                 result.errors.append(f"Heatmap fetch failed (using legacy fallback): {str(phase2_result)}")
@@ -502,9 +604,16 @@ class AutonomousDeepEngine:
         result.elapsed_seconds = (datetime.utcnow() - start_time).total_seconds()
         self._last_analysis_time = datetime.utcnow()
 
+        # Attach metrics to result and clear instance reference
+        result.run_metrics = metrics
+        self._run_metrics = None
+
         logger.info(
             f"Autonomous analysis complete in {result.elapsed_seconds:.1f}s. "
-            f"Generated {len(result.insights)} insights."
+            f"Generated {len(result.insights)} insights. "
+            f"LLM calls: {metrics.llm_call_count}, "
+            f"tokens: {metrics.total_input_tokens}+{metrics.total_output_tokens}, "
+            f"cost: ${metrics.total_cost_usd:.4f}"
         )
 
         return result
@@ -546,11 +655,15 @@ class AutonomousDeepEngine:
         # ===== PHASE 3: Heatmap Analysis =====
         logger.info("Phase 3: Analyzing heatmap patterns...")
         await self._update_task_progress(task_id, "heatmap_analysis", 35, "Analyzing heatmap patterns...")
+        if self._run_metrics:
+            self._run_metrics.start_phase("heatmap_analysis")
         heatmap_analysis_result = await self._run_heatmap_analysis(
             heatmap_data, macro_result
         )
         result.heatmap_analysis = heatmap_analysis_result
         result.phases_completed.append("heatmap_analysis")
+        if self._run_metrics:
+            self._run_metrics.end_phase("heatmap_analysis")
         logger.info(
             f"Heatmap analysis complete. Selected {len(heatmap_analysis_result.selected_stocks)} stocks"
         )
@@ -599,6 +712,8 @@ class AutonomousDeepEngine:
             task_id, "deep_dive", 55,
             f"Analyzing {len(symbols_to_analyze)} candidates..."
         )
+        if self._run_metrics:
+            self._run_metrics.start_phase("deep_dive")
 
         # Build discovery context using macro result and heatmap analysis
         discovery_context = self._build_heatmap_discovery_context(
@@ -638,6 +753,8 @@ class AutonomousDeepEngine:
 
         result.analyst_reports = analyst_reports
         result.phases_completed.append("deep_dive")
+        if self._run_metrics:
+            self._run_metrics.end_phase("deep_dive")
         await self._update_task_progress(task_id, "deep_dive", 70, "Deep analysis complete")
 
         # Capture deep dive summary
@@ -656,6 +773,8 @@ class AutonomousDeepEngine:
         await self._update_task_progress(
             task_id, "coverage_evaluation", 75, "Evaluating coverage..."
         )
+        if self._run_metrics:
+            self._run_metrics.start_phase("coverage_evaluation")
 
         analyst_reports = await self._run_coverage_loop(
             analyst_reports=analyst_reports,
@@ -666,6 +785,8 @@ class AutonomousDeepEngine:
         )
         result.analyst_reports = analyst_reports
         result.phases_completed.append("coverage_evaluation")
+        if self._run_metrics:
+            self._run_metrics.end_phase("coverage_evaluation")
 
         # Capture coverage evaluation summary
         pre_coverage_count = len(symbols_to_analyze)
@@ -688,6 +809,8 @@ class AutonomousDeepEngine:
         # ===== PHASE 5: Synthesis =====
         logger.info("Phase 5: Synthesizing insights...")
         await self._update_task_progress(task_id, "synthesis", 90, "Synthesizing insights...")
+        if self._run_metrics:
+            self._run_metrics.start_phase("synthesis")
         insights_data = await self._run_synthesis_with_heatmap(
             analyst_reports=analyst_reports,
             macro_context=macro_result,
@@ -696,6 +819,8 @@ class AutonomousDeepEngine:
             portfolio_holdings=portfolio_holdings,
         )
         result.phases_completed.append("synthesis")
+        if self._run_metrics:
+            self._run_metrics.end_phase("synthesis")
 
         # Save insights to database
         async with async_session_factory() as session:
@@ -1390,9 +1515,13 @@ class AutonomousDeepEngine:
             # ===== LEGACY PHASE 2: Sector Rotation =====
             logger.info("Legacy Phase 2: Analyzing sector rotation...")
             await self._update_task_progress(task_id, "sector_rotation", 25, "Analyzing sector rotation...")
+            if self._run_metrics:
+                self._run_metrics.start_phase("sector_rotation")
             sector_result = await self._run_sector_rotation(macro_result)
             result.sector_result = sector_result
             result.phases_completed.append("sector_rotation")
+            if self._run_metrics:
+                self._run_metrics.end_phase("sector_rotation")
 
             # Capture sector rotation summary
             top_sector_names = [s.sector_name for s in sector_result.top_sectors[:3]]
@@ -1413,9 +1542,13 @@ class AutonomousDeepEngine:
             # ===== LEGACY PHASE 3: Opportunity Hunt =====
             logger.info("Legacy Phase 3: Hunting for opportunities...")
             await self._update_task_progress(task_id, "opportunity_hunt", 45, "Discovering opportunities...")
+            if self._run_metrics:
+                self._run_metrics.start_phase("opportunity_hunt")
             candidates = await self._run_opportunity_hunt(macro_result, sector_result)
             result.candidates = candidates
             result.phases_completed.append("opportunity_hunt")
+            if self._run_metrics:
+                self._run_metrics.end_phase("opportunity_hunt")
 
             # Capture opportunity hunt summary
             candidate_symbols = [c.symbol for c in candidates.candidates[:5]]
@@ -1450,6 +1583,8 @@ class AutonomousDeepEngine:
                 task_id, "deep_dive", 55,
                 f"Analyzing {len(symbols_to_analyze)} candidates..."
             )
+            if self._run_metrics:
+                self._run_metrics.start_phase("deep_dive")
 
             discovery_context = await self._build_discovery_context(
                 macro_result, sector_result
@@ -1479,6 +1614,8 @@ class AutonomousDeepEngine:
 
             result.analyst_reports = analyst_reports
             result.phases_completed.append("deep_dive")
+            if self._run_metrics:
+                self._run_metrics.end_phase("deep_dive")
             await self._update_task_progress(task_id, "deep_dive", 70, "Deep analysis complete")
 
             # Capture legacy deep dive summary
@@ -1495,6 +1632,8 @@ class AutonomousDeepEngine:
             # ===== LEGACY PHASE 5: Synthesis =====
             logger.info("Legacy Phase 5: Synthesizing insights...")
             await self._update_task_progress(task_id, "synthesis", 85, "Synthesizing insights...")
+            if self._run_metrics:
+                self._run_metrics.start_phase("synthesis")
             insights_data = await self._run_synthesis(
                 analyst_reports=analyst_reports,
                 macro_context=macro_result,
@@ -1504,6 +1643,8 @@ class AutonomousDeepEngine:
                 portfolio_holdings=portfolio_holdings,
             )
             result.phases_completed.append("synthesis")
+            if self._run_metrics:
+                self._run_metrics.end_phase("synthesis")
 
             async with async_session_factory() as session:
                 saved_insights = await self._store_insights(
@@ -2357,7 +2498,13 @@ class AutonomousDeepEngine:
         Returns:
             LLM response text.
         """
-        return await pool_query_llm(system_prompt, user_prompt, agent_name)
+        result = await pool_query_llm(system_prompt, user_prompt, agent_name)
+        try:
+            if self._run_metrics is not None:
+                self._run_metrics.record_llm_call(result)
+        except Exception as metrics_err:
+            logger.debug("Metrics recording failed (non-fatal): %s", metrics_err)
+        return result.text
 
     async def get_more_insights(
         self,

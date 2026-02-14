@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test } from './fixtures';
 
 test.describe('Debug Deep Insights', () => {
   test('Check dashboard AI Insights section', async ({ page }) => {

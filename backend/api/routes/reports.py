@@ -15,6 +15,7 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_db
+from config import get_settings
 from models.analysis_task import AnalysisTask, AnalysisTaskStatus
 from models.deep_insight import DeepInsight
 from schemas.report import (
@@ -32,6 +33,148 @@ router = APIRouter()
 # Resolve the repository root directory (two levels up from this file)
 # ---------------------------------------------------------------------------
 _REPO_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+
+# ---------------------------------------------------------------------------
+# GitHub Pages publishing gate
+# ---------------------------------------------------------------------------
+
+
+def _auto_detect_github_repo() -> str | None:
+    """Try to detect org/repo from git remote origin. Returns None on failure."""
+    git_path = shutil.which("git")
+    if not git_path:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603
+            [git_path, "remote", "get-url", "origin"],
+            capture_output=True, text=True, cwd=_REPO_DIR, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            org, repo = _parse_github_org_repo(result.stdout.strip())
+            return f"{org}/{repo}"
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
+def is_publishing_enabled() -> bool:
+    """Check whether report publishing is allowed.
+
+    Returns True when publishing is configured and the user has explicitly
+    opted in.  For the ``github_pages`` method the legacy
+    ``GITHUB_PAGES_ENABLED`` flag must be ``True``.  For the ``static_dir``
+    method, ``PUBLISH_DIR`` must be set.  When ``PUBLISH_METHOD`` is
+    ``"none"`` publishing is always disabled.
+    """
+    settings = get_settings()
+
+    method = settings.PUBLISH_METHOD.lower()
+
+    # Explicit disable
+    if method == "none":
+        return False
+
+    # Static directory publishing -- enabled when a directory is configured
+    if method == "static_dir":
+        if not settings.PUBLISH_DIR:
+            logger.warning(
+                "PUBLISH_METHOD=static_dir but PUBLISH_DIR is not set. "
+                "Publishing is disabled."
+            )
+            return False
+        return True
+
+    # GitHub Pages (default) -- honour legacy GITHUB_PAGES_ENABLED flag
+    if not settings.GITHUB_PAGES_ENABLED:
+        return False
+    # Explicit repo override — always trust it
+    if settings.GITHUB_PAGES_REPO:
+        return True
+    # Auto-detect from git remote; warn about fork risk but allow
+    detected = _auto_detect_github_repo()
+    if detected:
+        logger.warning(
+            "GITHUB_PAGES_REPO is not set — auto-detected '%s' from git remote. "
+            "If this is a fork, set GITHUB_PAGES_REPO to your own repo to avoid "
+            "publishing to the upstream repository's GitHub Pages.",
+            detected,
+        )
+        return True
+    logger.warning(
+        "GitHub Pages publishing is enabled but no repo could be determined. "
+        "Set GITHUB_PAGES_REPO in your .env file."
+    )
+    return False
+
+
+def get_publishing_config() -> dict:
+    """Return the resolved publishing configuration.
+
+    Keys returned:
+      ``method`` (str) — ``"github_pages"`` | ``"static_dir"`` | ``"none"``
+      ``base_url`` (str) — public base URL for published reports
+      ``publish_dir`` (str | None) — local directory for ``static_dir`` method
+
+    For the ``github_pages`` method, additional keys are provided:
+      ``org`` (str), ``repo`` (str), ``branch`` (str).
+    """
+    settings = get_settings()
+    method = settings.PUBLISH_METHOD.lower()
+
+    # -- static_dir method --------------------------------------------------
+    if method == "static_dir":
+        base_url = (settings.PUBLISH_URL or "").rstrip("/")
+        return {
+            "method": "static_dir",
+            "base_url": base_url,
+            "publish_dir": settings.PUBLISH_DIR,
+            "org": "",
+            "repo": "",
+            "branch": "",
+        }
+
+    # -- none method --------------------------------------------------------
+    if method == "none":
+        return {
+            "method": "none",
+            "base_url": "",
+            "publish_dir": None,
+            "org": "",
+            "repo": "",
+            "branch": "",
+        }
+
+    # -- github_pages method (default) --------------------------------------
+    branch = settings.GITHUB_PAGES_BRANCH
+
+    if settings.GITHUB_PAGES_REPO:
+        parts = settings.GITHUB_PAGES_REPO.split("/", 1)
+        org = parts[0] if len(parts) >= 2 else parts[0]
+        repo = parts[1] if len(parts) >= 2 else parts[0]
+    else:
+        detected = _auto_detect_github_repo()
+        if detected:
+            org, repo = detected.split("/", 1)
+        else:
+            org, repo = "unknown", "unknown"
+
+    # PUBLISH_URL takes precedence, then GITHUB_PAGES_BASE_URL, then derived
+    if settings.PUBLISH_URL:
+        base_url = settings.PUBLISH_URL.rstrip("/")
+    elif settings.GITHUB_PAGES_BASE_URL:
+        base_url = settings.GITHUB_PAGES_BASE_URL.rstrip("/")
+    else:
+        base_url = f"https://{org}.github.io/{repo}"
+
+    return {
+        "method": "github_pages",
+        "org": org,
+        "repo": repo,
+        "branch": branch,
+        "base_url": base_url,
+        "publish_dir": None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -644,6 +787,100 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
     white-space: nowrap;
   }}
 
+  /* --- View Toggle --- */
+  .view-toggle {{
+    display: flex;
+    gap: 2px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 2px;
+  }}
+  .view-toggle-btn {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    color: #64748B;
+    transition: all 0.2s ease;
+  }}
+  .view-toggle-btn:hover {{
+    color: #94A3B8;
+    background: rgba(255,255,255,0.06);
+  }}
+  .view-toggle-btn.active {{
+    background: rgba(99,102,241,0.2);
+    color: #A5B4FC;
+    box-shadow: 0 0 8px rgba(99,102,241,0.15);
+  }}
+  .view-toggle-btn svg {{
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }}
+
+  /* --- List View Mode --- */
+  .report-container.list-view .report-grid {{
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }}
+  .report-container.list-view .report-card {{
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    border-radius: 10px;
+  }}
+  .report-container.list-view .report-card:hover {{
+    transform: translateY(-1px) scale(1.002);
+  }}
+  .report-container.list-view .card-top-row {{
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    min-width: 0;
+  }}
+  .report-container.list-view .card-date {{
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 130px;
+  }}
+  .report-container.list-view .card-time {{
+    font-size: 11px;
+    margin-top: 0;
+    flex-shrink: 0;
+    min-width: 70px;
+  }}
+  .report-container.list-view .card-badges {{
+    flex-shrink: 0;
+  }}
+  .report-container.list-view .symbol-row {{
+    min-height: 0;
+    flex-shrink: 1;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }}
+  .report-container.list-view .action-row {{
+    display: none;
+  }}
+  .report-container.list-view .card-stats-row {{
+    flex-shrink: 0;
+    min-width: 160px;
+  }}
+  .report-container.list-view .card-summary {{
+    display: none;
+  }}
+  .report-container.list-view .card-footer-row {{
+    display: none;
+  }}
+
   /* --- Month Groups --- */
   .month-group {{
     margin-bottom: 36px;
@@ -890,8 +1127,37 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
   .month-group:nth-child(1) .report-card:nth-child(6) {{ animation-delay: 0.20s; }}
 
   /* Responsive */
+  /* === DISCLAIMER BANNER === */
+  .disclaimer-banner {{
+    background: rgba(255,165,0,0.08);
+    border: 1px solid rgba(255,165,0,0.2);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 0.75rem;
+    color: #9ca3af;
+    line-height: 1.5;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }}
+  .disclaimer-banner strong {{
+    color: #d1d5db;
+  }}
+  .disclaimer-icon {{
+    flex-shrink: 0;
+    font-size: 1rem;
+    line-height: 1.4;
+  }}
+  .disclaimer-footer {{
+    font-size: 0.7rem;
+    margin-top: 32px;
+    opacity: 0.8;
+  }}
+
   @media (max-width: 1024px) {{
     .report-grid {{ grid-template-columns: repeat(2, 1fr); }}
+    .report-container.list-view .report-grid {{ grid-template-columns: 1fr; }}
   }}
   @media (max-width: 640px) {{
     .container {{ padding: 24px 16px; }}
@@ -910,6 +1176,16 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
       margin-left: 0;
       text-align: center;
     }}
+    /* Revert list-view to card layout on mobile */
+    .report-container.list-view .report-card {{
+      flex-direction: column;
+      align-items: stretch;
+      padding: 20px;
+    }}
+    .report-container.list-view .card-date {{ font-size: 17px; min-width: 0; }}
+    .report-container.list-view .card-summary {{ display: -webkit-box; }}
+    .report-container.list-view .card-footer-row {{ display: flex; }}
+    .report-container.list-view .action-row {{ display: flex; }}
   }}
 </style>
 </head>
@@ -918,6 +1194,17 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
   <div class="header">
     <h1>Teletraan Intelligence</h1>
     <p>Published market analysis reports</p>
+  </div>
+
+  <div class="disclaimer-banner">
+    <span class="disclaimer-icon">&#x26A0;&#xFE0F;</span>
+    <span>
+      <strong>DISCLAIMER:</strong> This report is generated by an AI system for informational and educational purposes only.
+      It does not constitute financial advice, investment recommendations, or solicitation to buy or sell any securities.
+      The information provided may be inaccurate, incomplete, or outdated. Past performance does not guarantee future results.
+      Always consult a qualified financial advisor before making investment decisions. The authors and contributors of this
+      tool accept no liability for any financial losses or damages arising from the use of this information.
+    </span>
   </div>
 
   <div class="stats-bar">
@@ -932,11 +1219,28 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
     <select id="regimeFilter">
       <option value="">All Regimes</option>
 {regime_options}    </select>
+    <div class="view-toggle">
+      <button class="view-toggle-btn active" id="gridViewBtn" title="Grid view" aria-label="Grid view">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+      </button>
+      <button class="view-toggle-btn" id="listViewBtn" title="List view" aria-label="List view">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1.5" width="14" height="2.5" rx="1"/><rect x="1" y="6.75" width="14" height="2.5" rx="1"/><rect x="1" y="12" width="14" height="2.5" rx="1"/></svg>
+      </button>
+    </div>
     <span class="result-count" id="resultCount">{total_reports} report{"s" if total_reports != 1 else ""}</span>
   </div>
 
-  <div id="reportContainer">
+  <div id="reportContainer" class="report-container">
     {month_sections if month_sections else empty_state}
+  </div>
+
+  <div class="disclaimer-banner disclaimer-footer">
+    <span class="disclaimer-icon">&#x26A0;&#xFE0F;</span>
+    <span>
+      <strong>DISCLAIMER:</strong> This report is generated by an AI system for informational and educational purposes only.
+      It does not constitute financial advice, investment recommendations, or solicitation to buy or sell any securities.
+      Always consult a qualified financial advisor before making investment decisions.
+    </span>
   </div>
 
   <div class="footer">
@@ -1006,13 +1310,42 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
 
   searchEl.addEventListener('input', applyFilters);
   regimeEl.addEventListener('change', applyFilters);
+
+  // --- View Toggle (Grid / List) ---
+  var container = document.getElementById('reportContainer');
+  var gridBtn = document.getElementById('gridViewBtn');
+  var listBtn = document.getElementById('listViewBtn');
+  var VIEW_KEY = 'teletraan-view-mode';
+
+  function setView(mode) {{
+    if (mode === 'list') {{
+      container.classList.add('list-view');
+      listBtn.classList.add('active');
+      gridBtn.classList.remove('active');
+    }} else {{
+      container.classList.remove('list-view');
+      gridBtn.classList.add('active');
+      listBtn.classList.remove('active');
+      mode = 'grid';
+    }}
+    try {{ localStorage.setItem(VIEW_KEY, mode); }} catch(e) {{}}
+  }}
+
+  gridBtn.addEventListener('click', function() {{ setView('grid'); }});
+  listBtn.addEventListener('click', function() {{ setView('list'); }});
+
+  // Restore saved preference
+  try {{
+    var saved = localStorage.getItem(VIEW_KEY);
+    if (saved === 'list') setView('list');
+  }} catch(e) {{}}
 }})();
 </script>
 </body>
 </html>"""
 
 
-def _do_publish(
+def _do_publish_github_pages(
     task: AnalysisTask,
     html_content: str,
     repo_dir: str,
@@ -1029,7 +1362,7 @@ def _do_publish(
     read when regenerating the index page so that each card is enriched with
     symbol pills, action distributions, confidence bars, and summaries.
 
-    Returns the published GitHub Pages URL on success.
+    Returns the published URL on success.
     Raises ``RuntimeError`` on failure.
     """
     filename = _report_filename(task)
@@ -1037,33 +1370,39 @@ def _do_publish(
     # Resolve full path to git executable (raises RuntimeError if missing)
     git_path = _resolve_executable("git")
 
-    # Determine remote URL and derive org/repo
+    # Use centralized publishing config (respects settings overrides)
+    pub_config = get_publishing_config()
+    org = pub_config["org"]
+    repo = pub_config["repo"]
+    branch = pub_config["branch"]
+    base_url = pub_config["base_url"]
+
+    # Determine remote URL for git operations
     remote_result = _git_run(
         ["remote", "get-url", "origin"],
         git_path=git_path,
         cwd=repo_dir,
     )
     remote_url = remote_result.stdout.strip() if remote_result.returncode == 0 else ""
-    org, repo = _parse_github_org_repo(remote_url) if remote_url else ("barkain", "teletraan")
 
     tmpdir = tempfile.mkdtemp(prefix="teletraan_ghpages_")
     try:
-        # Check if gh-pages branch exists on remote
+        # Check if the publishing branch exists on remote
         ls_result = _git_run(
-            ["ls-remote", "--heads", "origin", "gh-pages"],
+            ["ls-remote", "--heads", "origin", branch],
             git_path=git_path,
             cwd=repo_dir,
         )
-        gh_pages_exists = "gh-pages" in ls_result.stdout
+        branch_exists = branch in ls_result.stdout
 
         work_dir = os.path.join(tmpdir, "ghpages")
 
-        if gh_pages_exists:
-            # Clone only the gh-pages branch (shallow)
+        if branch_exists:
+            # Clone only the publishing branch (shallow)
             clone_result = _git_run(
                 [
                     "clone",
-                    "--branch", "gh-pages",
+                    "--branch", branch,
                     "--single-branch",
                     "--depth", "1",
                     remote_url,
@@ -1072,13 +1411,13 @@ def _do_publish(
                 git_path=git_path,
             )
             if clone_result.returncode != 0:
-                raise RuntimeError(f"Failed to clone gh-pages: {clone_result.stderr}")
+                raise RuntimeError(f"Failed to clone {branch}: {clone_result.stderr}")
         else:
             # Create a new orphan branch
             os.makedirs(work_dir)
             _git_run(["init"], git_path=git_path, cwd=work_dir, check=True)
             _git_run(
-                ["checkout", "--orphan", "gh-pages"],
+                ["checkout", "--orphan", branch],
                 git_path=git_path,
                 cwd=work_dir,
                 check=True,
@@ -1161,14 +1500,14 @@ def _do_publish(
             raise RuntimeError(f"Git commit failed: {commit_result.stderr}")
 
         push_result = _git_run(
-            ["push", "origin", "gh-pages"],
+            ["push", "origin", branch],
             git_path=git_path,
             cwd=work_dir,
         )
         if push_result.returncode != 0:
             # Retry with force push (e.g. history diverged due to manual edits)
             push_result = _git_run(
-                ["push", "--force", "origin", "gh-pages"],
+                ["push", "--force", "origin", branch],
                 git_path=git_path,
                 cwd=work_dir,
             )
@@ -1179,12 +1518,13 @@ def _do_publish(
         gh_path = shutil.which("gh")
         if gh_path is not None:
             try:
+                source_json = f'{{"branch":"{branch}","path":"/"}}'
                 subprocess.run(  # noqa: S603
                     [
                         gh_path, "api",
                         f"repos/{org}/{repo}/pages",
                         "-X", "POST",
-                        "-f", 'source={"branch":"gh-pages","path":"/"}',
+                        "-f", f"source={source_json}",
                     ],
                     capture_output=True,
                     text=True,
@@ -1193,10 +1533,116 @@ def _do_publish(
             except subprocess.TimeoutExpired:
                 pass
 
-        return f"https://{org}.github.io/{repo}/reports/{filename}"
+        return f"{base_url}/reports/{filename}"
 
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _do_publish_static_dir(
+    task: AnalysisTask,
+    html_content: str,
+    insights: list[DeepInsight] | None = None,
+) -> str:
+    """Publish an HTML report by copying it to a local directory.
+
+    Copies the report HTML and a JSON metadata sidecar into
+    ``PUBLISH_DIR/reports/`` and regenerates the index page.  This is useful
+    when the directory is served by nginx, synced to S3, or deployed via
+    Netlify / Cloudflare Pages / etc.
+
+    Returns the constructed public URL on success.
+    Raises ``RuntimeError`` on failure.
+    """
+    pub_config = get_publishing_config()
+    publish_dir = pub_config["publish_dir"]
+    base_url = pub_config["base_url"]
+
+    if not publish_dir:
+        raise RuntimeError(
+            "PUBLISH_DIR is not configured. Set PUBLISH_DIR in your .env "
+            "to use the static_dir publishing method."
+        )
+
+    filename = _report_filename(task)
+
+    # Ensure target directories exist
+    reports_dir = os.path.join(publish_dir, "reports")
+    meta_dir = os.path.join(reports_dir, "meta")
+    os.makedirs(reports_dir, exist_ok=True)
+    os.makedirs(meta_dir, exist_ok=True)
+
+    # Write the report HTML
+    report_path = os.path.join(reports_dir, filename)
+    with open(report_path, "w", encoding="utf-8") as fh:
+        fh.write(html_content)
+
+    # Write the JSON metadata sidecar
+    meta = _build_report_metadata(task, insights or [], filename)
+    meta_path = os.path.join(meta_dir, filename.replace(".html", ".json"))
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False, indent=2)
+
+    # Regenerate the index page with all reports
+    report_files = sorted(
+        [f for f in os.listdir(reports_dir) if f.endswith(".html")],
+        reverse=True,
+    )
+    report_metas: list[dict] = []
+    for rf in report_files:
+        sidecar = os.path.join(meta_dir, rf.replace(".html", ".json"))
+        if os.path.isfile(sidecar):
+            try:
+                with open(sidecar, encoding="utf-8") as sf:
+                    report_metas.append(json.load(sf))
+                continue
+            except (json.JSONDecodeError, OSError):
+                pass
+        report_metas.append(_meta_from_filename(rf))
+
+    # For static dir, use empty org/repo since there is no GitHub context
+    index_html = _generate_index_html(report_metas, "", "")
+    with open(os.path.join(publish_dir, "index.html"), "w", encoding="utf-8") as fh:
+        fh.write(index_html)
+
+    # Write .nojekyll in case the directory is served by GitHub Pages
+    nojekyll_path = os.path.join(publish_dir, ".nojekyll")
+    if not os.path.exists(nojekyll_path):
+        with open(nojekyll_path, "w") as fh:
+            pass
+
+    logger.info("Published report %s to static dir %s", filename, publish_dir)
+    return f"{base_url}/reports/{filename}" if base_url else report_path
+
+
+def _do_publish(
+    task: AnalysisTask,
+    html_content: str,
+    repo_dir: str,
+    insights: list[DeepInsight] | None = None,
+) -> str:
+    """Dispatch report publishing to the configured method.
+
+    Reads ``PUBLISH_METHOD`` from settings and delegates to the appropriate
+    backend:
+      - ``github_pages`` -- push to a gh-pages branch (original behaviour)
+      - ``static_dir``   -- copy files to a local directory
+      - ``none``         -- should not be called (caller checks first)
+
+    Returns the published URL on success.
+    Raises ``RuntimeError`` on failure.
+    """
+    pub_config = get_publishing_config()
+    method = pub_config["method"]
+
+    if method == "static_dir":
+        return _do_publish_static_dir(task, html_content, insights)
+
+    if method == "none":
+        raise RuntimeError("Publishing is disabled (PUBLISH_METHOD=none).")
+
+    # Default: github_pages
+    return _do_publish_github_pages(task, html_content, repo_dir, insights)
 
 
 def _meta_from_filename(fname: str) -> dict:
@@ -1256,17 +1702,25 @@ def _meta_from_filename(fname: str) -> dict:
     }
 
 
-async def _publish_to_ghpages(
+async def publish_report_async(
     task: AnalysisTask,
     html_content: str,
     repo_dir: str,
     insights: list[DeepInsight] | None = None,
 ) -> str:
-    """Publish HTML report to gh-pages branch (async wrapper)."""
+    """Publish HTML report using the configured method (async wrapper).
+
+    Dispatches to ``_do_publish`` which routes to the appropriate backend
+    based on ``PUBLISH_METHOD`` in settings.
+    """
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None, _do_publish, task, html_content, repo_dir, insights,
     )
+
+
+# Backward-compatible alias — existing callers import this name.
+_publish_to_ghpages = publish_report_async
 
 
 # ---------------------------------------------------------------------------
@@ -1467,14 +1921,31 @@ async def publish_report(
     task_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Publish a completed analysis report to GitHub Pages.
+    """Publish a completed analysis report.
 
-    Generates a self-contained HTML report and pushes it to the
-    ``gh-pages`` branch under ``reports/{date}-{HHMM}-{regime}.html``.
-    An index page listing all published reports is maintained automatically.
+    Uses the configured ``PUBLISH_METHOD`` (github_pages, static_dir, or none)
+    to publish a self-contained HTML report.  An index page listing all
+    published reports is maintained automatically.
 
     Returns the public URL of the published report.
     """
+    # 0. Check if publishing is enabled --------------------------------------
+    if not is_publishing_enabled():
+        pub_method = get_settings().PUBLISH_METHOD.lower()
+        if pub_method == "static_dir":
+            detail = (
+                "Static directory publishing is not configured. "
+                "Set PUBLISH_DIR in your .env to enable."
+            )
+        elif pub_method == "none":
+            detail = "Publishing is disabled (PUBLISH_METHOD=none)."
+        else:
+            detail = (
+                "GitHub Pages publishing is disabled. "
+                "Set GITHUB_PAGES_ENABLED=true in your .env to enable."
+            )
+        raise HTTPException(status_code=400, detail=detail)
+
     # 1. Load the task -------------------------------------------------------
     result = await db.execute(
         select(AnalysisTask).where(AnalysisTask.id == task_id)
@@ -1505,13 +1976,13 @@ async def publish_report(
 
     html_content = _build_report_html(task, insights)
 
-    # 3. Publish to gh-pages -------------------------------------------------
+    # 3. Publish using configured method -------------------------------------
     try:
-        published_url = await _publish_to_ghpages(
+        published_url = await publish_report_async(
             task, html_content, _REPO_DIR, insights,
         )
     except RuntimeError as exc:
-        logger.exception("GitHub Pages publish failed for task %s", task_id)
+        logger.exception("Report publish failed for task %s", task_id)
         raise HTTPException(
             status_code=500,
             detail=str(exc),
@@ -4647,6 +5118,34 @@ body {{
   color: #cbd5e1;
   margin-bottom: 4px;
 }}
+
+/* === DISCLAIMER BANNER === */
+.disclaimer-banner {{
+  background: rgba(255,165,0,0.08);
+  border: 1px solid rgba(255,165,0,0.2);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  line-height: 1.5;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}}
+.disclaimer-banner strong {{
+  color: #d1d5db;
+}}
+.disclaimer-icon {{
+  flex-shrink: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+}}
+.disclaimer-footer {{
+  font-size: 0.7rem;
+  margin-top: 32px;
+  opacity: 0.8;
+}}
 </style>
 </head>
 <body>
@@ -4664,6 +5163,18 @@ body {{
 </div>
 
 <div class="container">
+
+  <!-- DISCLAIMER (top) -->
+  <div class="disclaimer-banner">
+    <span class="disclaimer-icon">&#x26A0;&#xFE0F;</span>
+    <span>
+      <strong>DISCLAIMER:</strong> This report is generated by an AI system for informational and educational purposes only.
+      It does not constitute financial advice, investment recommendations, or solicitation to buy or sell any securities.
+      The information provided may be inaccurate, incomplete, or outdated. Past performance does not guarantee future results.
+      Always consult a qualified financial advisor before making investment decisions. The authors and contributors of this
+      tool accept no liability for any financial losses or damages arising from the use of this information.
+    </span>
+  </div>
 
   <!-- KPI ROW -->
   <div class="kpi-row">
@@ -4746,6 +5257,16 @@ body {{
     <div id="insights-container">
       {cards_html}
     </div>
+  </div>
+
+  <!-- DISCLAIMER (footer) -->
+  <div class="disclaimer-banner disclaimer-footer">
+    <span class="disclaimer-icon">&#x26A0;&#xFE0F;</span>
+    <span>
+      <strong>DISCLAIMER:</strong> This report is generated by an AI system for informational and educational purposes only.
+      It does not constitute financial advice, investment recommendations, or solicitation to buy or sell any securities.
+      Always consult a qualified financial advisor before making investment decisions.
+    </span>
   </div>
 
   <!-- FOOTER -->

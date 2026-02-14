@@ -30,7 +30,7 @@ export async function fetchApi<T>(
     }
   }
 
-  const { params: _, ...fetchOptions } = options || {};
+  const { params: _params, ...fetchOptions } = options || {};
 
   const res = await fetch(url, {
     ...fetchOptions,
@@ -331,6 +331,16 @@ export const api = {
       update: (symbols: string[]) =>
         putApi<WatchlistSettings>('/api/v1/settings/watchlist', { symbols }),
     },
+    llm: {
+      get: () =>
+        fetchApi<LLMProviderStatus>('/api/v1/settings/llm'),
+      update: (config: LLMProviderConfig) =>
+        putApi<LLMProviderStatus>('/api/v1/settings/llm', config),
+      test: (body: LLMTestRequest) =>
+        postApi<LLMTestResult>('/api/v1/settings/llm/test', body),
+      reset: () =>
+        deleteApi<{ status: string; message: string }>('/api/v1/settings/llm'),
+    },
   },
 
   // Portfolio
@@ -431,10 +441,11 @@ export const chatApi = {
 };
 
 // Import types
-import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact } from '@/types';
+import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, LLMProviderStatus, LLMProviderConfig, LLMTestRequest, LLMTestResult, RunListResponse, RunsAggregateStats, RunSummary } from '@/types';
 import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, PatternsSummary, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
 import type { FollowUpResearch, ResearchListResponse, ResearchListParams, ResearchCreateRequest } from '@/lib/types/research';
 import type { ReportListResponse, ReportDetail, PublishResponse } from '@/lib/types/report';
+import type { TrackRecordStats, MonthlyTrendResponse, OutcomeSummary } from '@/lib/types/track-record';
 
 // ============================================
 // Data Refresh API
@@ -482,6 +493,14 @@ export const knowledgeApi = {
     },
   },
 
+  // Track Record
+  trackRecord: () =>
+    fetchApi<TrackRecordStats>('/api/v1/knowledge/track-record'),
+
+  // Monthly Trend
+  monthlyTrend: () =>
+    fetchApi<MonthlyTrendResponse>('/api/v1/knowledge/track-record/monthly-trend'),
+
   // Themes
   themes: {
     list: async (params?: ConversationThemesParams): Promise<ConversationThemesResponse> => {
@@ -492,4 +511,28 @@ export const knowledgeApi = {
     get: (id: string) =>
       fetchApi<ConversationTheme>(`/api/v1/knowledge/themes/${id}`),
   },
+};
+
+// ============================================
+// Outcomes API
+// ============================================
+
+export const outcomesApi = {
+  summary: () =>
+    fetchApi<OutcomeSummary>('/api/v1/outcomes/summary'),
+};
+
+// ============================================
+// Runs API
+// ============================================
+
+export const runsApi = {
+  list: (params?: { page?: number; page_size?: number; status?: string; search?: string }) =>
+    fetchApi<RunListResponse>('/api/v1/runs', {
+      params: params as Record<string, string | number | boolean | undefined>,
+    }),
+  stats: () =>
+    fetchApi<RunsAggregateStats>('/api/v1/runs/stats'),
+  get: (id: string) =>
+    fetchApi<RunSummary>(`/api/v1/runs/${id}`),
 };

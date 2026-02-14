@@ -501,13 +501,13 @@ class PatternExtractor:
         )
 
         try:
-            response_text = await pool_query_llm(system_prompt, prompt, "pattern_extractor")
-            logger.debug(f"LLM extraction response: {len(response_text)} chars")
+            response_result = await pool_query_llm(system_prompt, prompt, "pattern_extractor")
+            logger.debug(f"LLM extraction response: {len(response_result.text)} chars")
         except Exception as e:
             logger.exception(f"LLM extraction failed: {e}")
             raise
 
-        return response_text
+        return response_result.text
 
     def _parse_pattern_response(self, response: str) -> list[dict[str, Any]]:
         """Parse JSON array of patterns from LLM response.

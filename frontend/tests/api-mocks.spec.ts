@@ -34,6 +34,8 @@ test.describe('API Mock Tests', () => {
               risk_factors: ['Market volatility', 'Sector rotation risk'],
               invalidation_trigger: 'Close below 170',
               historical_precedent: 'Similar setup led to 15% gains in 2023',
+              analysts_involved: ['technical_analyst', 'momentum_analyst'],
+              data_sources: ['yahoo_finance'],
               created_at: new Date().toISOString(),
             },
             {
@@ -51,6 +53,8 @@ test.describe('API Mock Tests', () => {
               ],
               risk_factors: ['Fed policy shift'],
               invalidation_trigger: 'Tech breakout',
+              analysts_involved: ['sector_analyst'],
+              data_sources: ['yahoo_finance'],
               created_at: new Date().toISOString(),
             },
           ],
@@ -384,7 +388,7 @@ test.describe('API Mock Tests', () => {
 
   test('network timeout handling', async ({ page }) => {
     // Mock API to timeout
-    await page.route('**/api/v1/deep-insights**', async (route) => {
+    await page.route('**/api/v1/deep-insights**', async (_route) => {
       await new Promise((resolve) => setTimeout(resolve, 60000)); // Long delay
     });
 

@@ -105,7 +105,7 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
   const [taskId, setTaskId] = useState<string | null>(null);
   const [task, setTask] = useState<AnalysisTaskStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [startTime, setStartTime] = useState<number | null>(null);
+  const [_startTime, setStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
 
   // Refs for callbacks to avoid stale closures

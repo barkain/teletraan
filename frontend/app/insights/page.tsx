@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,8 +11,10 @@ import { Input } from '@/components/ui/input';
 import { DeepInsightCard } from '@/components/insights/deep-insight-card';
 import { StatisticalSignalsCard } from '@/components/insights/statistical-signals-card';
 import { useDeepInsights, DeepInsightParams } from '@/lib/hooks/use-deep-insights';
-import type { DeepInsightType, InsightAction } from '@/types';
-import { Sparkles, ChevronLeft, ChevronRight, Search, Filter, Activity, PanelRightOpen } from 'lucide-react';
+import type { DeepInsight, DeepInsightType, InsightAction } from '@/types';
+import { Sparkles, ChevronLeft, ChevronRight, Search, Filter, Activity, PanelRightOpen, Calendar, LayoutGrid, List, TrendingUp, TrendingDown, Minus, Target } from 'lucide-react';
+import { ConnectionError } from '@/components/ui/empty-state';
+import { cn } from '@/lib/utils';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -122,6 +124,90 @@ function Pagination({
 }
 
 const SIGNALS_SIDEBAR_KEY = 'market-analyzer-signals-sidebar-visible';
+const VIEW_MODE_KEY = 'market-analyzer-insights-view-mode';
+
+type ViewMode = 'grid' | 'list';
+
+/** Action badge config for compact list view */
+const listActionConfig: Record<InsightAction, {
+  color: string;
+  icon: typeof TrendingUp;
+  label: string;
+}> = {
+  STRONG_BUY: { color: 'bg-green-600 text-white', icon: TrendingUp, label: 'Strong Buy' },
+  BUY: { color: 'bg-green-500 text-white', icon: TrendingUp, label: 'Buy' },
+  HOLD: { color: 'bg-yellow-500 text-white', icon: Minus, label: 'Hold' },
+  SELL: { color: 'bg-red-500 text-white', icon: TrendingDown, label: 'Sell' },
+  STRONG_SELL: { color: 'bg-red-600 text-white', icon: TrendingDown, label: 'Strong Sell' },
+  WATCH: { color: 'bg-blue-500 text-white', icon: Target, label: 'Watch' },
+};
+
+/** Compact list row for an insight */
+function InsightListRow({
+  insight,
+  onClick,
+  onSymbolClick,
+}: {
+  insight: DeepInsight;
+  onClick: () => void;
+  onSymbolClick: (symbol: string) => void;
+}) {
+  const action = listActionConfig[insight.action];
+  const ActionIcon = action.icon;
+  const confidencePct = Math.round(insight.confidence * 100);
+  const confidenceColor =
+    confidencePct >= 75 ? 'text-green-600 dark:text-green-400' :
+    confidencePct >= 50 ? 'text-yellow-600 dark:text-yellow-400' :
+    'text-red-600 dark:text-red-400';
+
+  const dateStr = insight.created_at
+    ? new Date(insight.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : '';
+
+  return (
+    <div
+      className="flex items-center gap-3 px-4 py-3 border border-border/50 rounded-lg bg-card/80 backdrop-blur-sm hover:shadow-md hover:bg-accent/30 transition-all duration-150 cursor-pointer"
+      onClick={onClick}
+    >
+      {/* Action badge */}
+      <Badge className={cn(action.color, 'shadow-sm font-semibold px-2.5 py-0.5 text-xs shrink-0 gap-1')}>
+        <ActionIcon className="w-3 h-3" />
+        {action.label}
+      </Badge>
+
+      {/* Primary symbol */}
+      {insight.primary_symbol ? (
+        <Badge
+          variant="outline"
+          className="font-bold text-xs shrink-0 cursor-pointer hover:bg-primary/10 border-2 px-2 py-0.5"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSymbolClick(insight.primary_symbol!);
+          }}
+        >
+          {insight.primary_symbol}
+        </Badge>
+      ) : (
+        <span className="w-12 shrink-0" />
+      )}
+
+      {/* Title */}
+      <span className="flex-1 min-w-0 text-sm font-medium truncate">
+        {insight.title}
+      </span>
+
+      {/* Confidence */}
+      <span className={cn('text-sm font-semibold tabular-nums shrink-0', confidenceColor)}>
+        {confidencePct}%
+      </span>
+
+      {/* Date */}
+      <span className="text-xs text-muted-foreground shrink-0 w-16 text-right">
+        {dateStr}
+      </span>
+    </div>
+  );
+}
 
 export default function InsightsPage() {
   const router = useRouter();
@@ -129,20 +215,38 @@ export default function InsightsPage() {
   const [actionFilter, setActionFilter] = useState<InsightAction | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<DeepInsightType | 'all'>('all');
   const [symbolFilter, setSymbolFilter] = useState('');
-  const [showSignalsSidebar, setShowSignalsSidebar] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem(SIGNALS_SIDEBAR_KEY);
-      if (stored !== null) {
-        return stored === 'true';
-      }
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  // Default to false on server and initial client render to avoid hydration mismatch.
+  // The stored preference is restored in useEffect after mount.
+  const [showSignalsSidebar, setShowSignalsSidebar] = useState(false);
+  const [sidebarHydrated, setSidebarHydrated] = useState(false);
+
+  // View mode: default to 'grid' on server/initial render, restore from localStorage after mount.
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
+
+  useEffect(() => {
+    const stored = localStorage.getItem(SIGNALS_SIDEBAR_KEY);
+    // Default to true when no preference is stored
+    setShowSignalsSidebar(stored !== null ? stored === 'true' : true);
+    setSidebarHydrated(true);
+
+    const storedView = localStorage.getItem(VIEW_MODE_KEY);
+    if (storedView === 'grid' || storedView === 'list') {
+      setViewMode(storedView);
     }
-    return true;
-  });
+  }, []);
 
   // Save sidebar preference to localStorage
   const handleToggleSignalsSidebar = (visible: boolean) => {
     setShowSignalsSidebar(visible);
     localStorage.setItem(SIGNALS_SIDEBAR_KEY, String(visible));
+  };
+
+  // Save view mode preference to localStorage
+  const handleSetViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem(VIEW_MODE_KEY, mode);
   };
 
   const params: DeepInsightParams = {
@@ -151,6 +255,8 @@ export default function InsightsPage() {
     ...(actionFilter !== 'all' && { action: actionFilter }),
     ...(typeFilter !== 'all' && { insight_type: typeFilter }),
     ...(symbolFilter && { symbol: symbolFilter.toUpperCase() }),
+    ...(dateFrom && { start_date: dateFrom }),
+    ...(dateTo && { end_date: dateTo }),
   };
 
   const { data, isLoading, error } = useDeepInsights(params);
@@ -174,10 +280,12 @@ export default function InsightsPage() {
     setActionFilter('all');
     setTypeFilter('all');
     setSymbolFilter('');
+    setDateFrom('');
+    setDateTo('');
     setPage(1);
   };
 
-  const hasFilters = actionFilter !== 'all' || typeFilter !== 'all' || symbolFilter !== '';
+  const hasFilters = actionFilter !== 'all' || typeFilter !== 'all' || symbolFilter !== '' || dateFrom !== '' || dateTo !== '';
 
   return (
     <div className="space-y-6">
@@ -259,6 +367,36 @@ export default function InsightsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="flex gap-2 items-end">
+                  <div className="w-[150px]">
+                    <label className="text-sm font-medium mb-2 block">From</label>
+                    <div className="relative">
+                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                      <Input
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => {
+                          setDateFrom(e.target.value);
+                          setPage(1);
+                        }}
+                        max={dateTo || undefined}
+                        className="pl-9"
+                      />
+                    </div>
+                  </div>
+                  <div className="w-[150px]">
+                    <label className="text-sm font-medium mb-2 block">To</label>
+                    <Input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => {
+                        setDateTo(e.target.value);
+                        setPage(1);
+                      }}
+                      min={dateFrom || undefined}
+                    />
+                  </div>
+                </div>
                 {hasFilters && (
                   <Button variant="ghost" size="sm" onClick={handleClearFilters}>
                     Clear Filters
@@ -268,18 +406,40 @@ export default function InsightsPage() {
             </CardContent>
           </Card>
 
-          {/* Results Count */}
+          {/* Results Count + View Toggle */}
           {data && !isLoading && (
-            <div className="flex items-center gap-2">
-              <p className="text-sm text-muted-foreground">
-                Showing {data.items.length} of {data.total} insights
-              </p>
-              {hasFilters && (
-                <Badge variant="secondary" className="gap-1">
-                  <Filter className="h-3 w-3" />
-                  Filtered
-                </Badge>
-              )}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-muted-foreground">
+                  Showing {data.items.length} of {data.total} insights
+                </p>
+                {hasFilters && (
+                  <Badge variant="secondary" className="gap-1">
+                    <Filter className="h-3 w-3" />
+                    Filtered
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-1 border rounded-md p-0.5">
+                <Button
+                  variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => handleSetViewMode('grid')}
+                  aria-label="Grid view"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={viewMode === 'list' ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => handleSetViewMode('list')}
+                  aria-label="List view"
+                >
+                  <List className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           )}
 
@@ -287,30 +447,34 @@ export default function InsightsPage() {
           {isLoading ? (
             <InsightsListSkeleton />
           ) : error ? (
-            <Card className="py-12">
-              <CardContent className="flex flex-col items-center justify-center text-center">
-                <CardTitle className="text-lg mb-2 text-destructive">
-                  Error Loading Insights
-                </CardTitle>
-                <CardDescription>
-                  {error instanceof Error ? error.message : 'An unexpected error occurred'}
-                </CardDescription>
-              </CardContent>
-            </Card>
+            <ConnectionError error={error} />
           ) : !data || data.items.length === 0 ? (
             <EmptyState />
           ) : (
             <>
-              <div className="grid gap-4 md:grid-cols-2">
-                {data.items.map((insight) => (
-                  <DeepInsightCard
-                    key={insight.id}
-                    insight={insight}
-                    onSymbolClick={handleSymbolClick}
-                    onClick={() => handleInsightClick(insight.id)}
-                  />
-                ))}
-              </div>
+              {viewMode === 'grid' ? (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {data.items.map((insight) => (
+                    <DeepInsightCard
+                      key={insight.id}
+                      insight={insight}
+                      onSymbolClick={handleSymbolClick}
+                      onClick={() => handleInsightClick(insight.id)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {data.items.map((insight) => (
+                    <InsightListRow
+                      key={insight.id}
+                      insight={insight}
+                      onClick={() => handleInsightClick(insight.id)}
+                      onSymbolClick={handleSymbolClick}
+                    />
+                  ))}
+                </div>
+              )}
 
               {/* Pagination */}
               <Pagination
@@ -337,7 +501,7 @@ export default function InsightsPage() {
       </div>
 
       {/* Floating button to show signals sidebar when hidden */}
-      {!showSignalsSidebar && (
+      {sidebarHydrated && !showSignalsSidebar && (
         <Button
           variant="outline"
           size="sm"

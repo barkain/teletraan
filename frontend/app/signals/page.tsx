@@ -10,6 +10,7 @@ import { InsightDetail } from '@/components/insights/insight-detail';
 import { useInsights } from '@/lib/hooks/use-insights';
 import type { Insight, InsightFilters as InsightFiltersType } from '@/types';
 import { Radio, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ConnectionError } from '@/components/ui/empty-state';
 import { ExportDialog } from '@/components/export';
 
 // Helper to format date as YYYY-MM-DD for input[type="date"]
@@ -170,16 +171,7 @@ export default function SignalsPage() {
       {isLoading ? (
         <SignalsListSkeleton />
       ) : error ? (
-        <Card className="py-12">
-          <CardContent className="flex flex-col items-center justify-center text-center">
-            <CardTitle className="text-lg mb-2 text-destructive">
-              Error Loading Signals
-            </CardTitle>
-            <CardDescription>
-              {error instanceof Error ? error.message : 'An unexpected error occurred'}
-            </CardDescription>
-          </CardContent>
-        </Card>
+        <ConnectionError error={error} />
       ) : !data || data.items.length === 0 ? (
         <EmptyState />
       ) : (

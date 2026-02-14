@@ -54,6 +54,7 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
   - `PatternExtractor` — LLM-based pattern extraction from each insight
   - `OutcomeTracker` — starts tracking predictions for insights with primary symbols
   - Auto-publisher — generates HTML report and pushes to `gh-pages` branch (autonomous engine)
+- **Metrics instrumentation** — per-phase timing, token usage, and cost tracking via `RunMetrics`
 - **API routes** (`api/routes/`):
   - `analysis.py` — basic analysis endpoints
   - `deep_insights.py` — autonomous & deep analysis, auto-publish
@@ -63,10 +64,11 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
   - `knowledge.py` — patterns, themes, track record, monthly trend
   - `outcomes.py` — insight outcome tracking (start, check, summary)
   - `insight_conversations.py` — conversational insight exploration
+  - `runs.py` — past analysis runs, LLM metrics, paginated list + stats
   - `chat.py`, `stocks.py`, `search.py`, `settings.py`, `export.py`, `health.py`
 - **Models** (`models/`):
+  - `analysis_task.py` — AnalysisTask with 8 LLM metrics fields: `total_input_tokens`, `total_output_tokens`, `total_cost_usd`, `model_used`, `provider_used`, `llm_call_count`, `phase_timings` (JSON), `phase_token_usage` (JSON)
   - `deep_insight.py` — DeepInsight
-  - `analysis_task.py` — AnalysisTask
   - `portfolio.py` — Portfolio + PortfolioHolding
   - `knowledge_pattern.py` — KnowledgePattern (validated trading patterns)
   - `insight_outcome.py` — InsightOutcome (thesis tracking)
@@ -84,6 +86,8 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
 - **shadcn/ui** (new-york style) + Tailwind CSS 4 + Recharts
 - `fetchApi`/`postApi` in `lib/api.ts` for typed API calls
 - `useChat` hook manages WebSocket with auto-reconnect
+- **Runs page** (`app/runs/page.tsx`) — displays past analysis runs with LLM metrics and filtering
+- **useRuns hook** (`lib/hooks/use-runs.ts`) — TanStack Query hooks for runs list, stats, and detail
 - Autonomous analysis: polls status endpoint every 2s, task ID in localStorage for reload resilience
 
 ### Communication
@@ -101,12 +105,14 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
 - **Custom exceptions**: `NotFoundError`, `ValidationError`, `DataSourceError` with registered FastAPI handlers
 - **Agent prompts**: System prompt constants + `format_*_context()` / `parse_*_response()` per analyst in `analysis/agents/`
 - **Post-analysis pipeline**: After synthesis, `PatternExtractor` + `OutcomeTracker` + Auto-Publisher run on each insight
+- **Metrics pipeline**: `RunMetrics` captures phase-level timing and token usage, aggregated into AnalysisTask at completion
 - **ClaudeSDK client pool**: 3 persistent connections in `llm/client_pool.py` with lazy creation and async checkout
 - **Auto-migration**: `database.py` auto-detects missing columns on startup via `_sync_migrate_missing_columns()`
 - **yfinance TTL cache**: 5-min module-level cache in `analysis/agents/heatmap_fetcher.py` for batch downloads and market caps
 - **ThreadPoolExecutor**: 8-worker pool in `heatmap_fetcher.py` for parallel market cap fetching
 - **FD limit**: Raised to 4096 in `main.py` to handle concurrent subprocess + connection load
 - **Portfolio-aware discovery**: `AutonomousDeepEngine` loads portfolio holdings and ensures held symbols are included in deep dives
+- **Runs API routes**: `/api/v1/runs` prefix with endpoints `/stats`, `GET /`, `GET /{run_id}` for metrics dashboard
 
 ## Environment Variables
 
@@ -125,3 +131,16 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
 SQLite at `backend/data/market-analyzer.db`. Auto-created on first startup via `init_db()`. Tables created from SQLAlchemy models. The `data/` directory is created by `start.sh`.
 
 Missing columns are auto-migrated on startup: `database.py` compares SQLAlchemy model columns against existing SQLite tables and issues `ALTER TABLE ADD COLUMN` for any gaps, eliminating the need for manual schema migrations during development.
+
+### AnalysisTask Columns for LLM Metrics
+
+The `AnalysisTask` model includes 8 new columns for tracking LLM usage across analysis runs:
+
+- `total_input_tokens` (Integer, nullable) — aggregate input tokens consumed
+- `total_output_tokens` (Integer, nullable) — aggregate output tokens generated
+- `total_cost_usd` (Float, nullable) — total cost in USD (rounded to 6 decimals)
+- `model_used` (String(100), nullable) — model identifier (e.g., "claude-sonnet-4-5-20250929")
+- `provider_used` (String(50), nullable) — provider name (e.g., "claude_sdk", "openai")
+- `llm_call_count` (Integer, nullable) — total number of LLM calls made
+- `phase_timings` (Text/JSON, nullable) — per-phase start/end/duration in ISO format
+- `phase_token_usage` (Text/JSON, nullable) — per-phase input/output tokens and cost

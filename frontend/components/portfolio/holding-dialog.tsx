@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, FormEvent } from 'react';
+import { useState, useCallback, FormEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,8 +47,13 @@ export function HoldingDialog({
   const [notes, setNotes] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Reset form when dialog opens or holding changes
-  useEffect(() => {
+  // Track previous open/holding values to detect changes without setting state in effect
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [prevHoldingId, setPrevHoldingId] = useState(holding?.id);
+
+  if (open !== prevOpen || holding?.id !== prevHoldingId) {
+    setPrevOpen(open);
+    setPrevHoldingId(holding?.id);
     if (open) {
       if (holding) {
         setSymbol(holding.symbol);
@@ -63,7 +68,7 @@ export function HoldingDialog({
       }
       setErrors({});
     }
-  }, [open, holding]);
+  }
 
   const sharesNum = parseFloat(shares) || 0;
   const costBasisNum = parseFloat(costBasis) || 0;

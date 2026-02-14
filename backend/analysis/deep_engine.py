@@ -450,7 +450,8 @@ class DeepAnalysisEngine:
         Returns:
             Full response text from the LLM.
         """
-        return await pool_query_llm(system_prompt, user_prompt, agent_name)
+        result = await pool_query_llm(system_prompt, user_prompt, agent_name)
+        return result.text
 
     async def _store_insights(
         self,

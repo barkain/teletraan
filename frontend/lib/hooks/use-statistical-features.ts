@@ -5,9 +5,7 @@ import { fetchApi, postApi, ApiError } from '@/lib/api';
 import { toast } from 'sonner';
 import { useEffect } from 'react';
 import type {
-  StatisticalFeature,
   StatisticalFeaturesResponse,
-  ActiveSignal,
   ActiveSignalsResponse,
   ActiveSignalsParams,
   ComputeFeaturesResponse,

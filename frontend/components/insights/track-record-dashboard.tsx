@@ -401,7 +401,7 @@ function MonthlyTrendChart({ isLoading: parentLoading }: MonthlyTrendChartProps)
   if (isError) {
     return (
       <div className="flex items-center justify-center h-[200px] text-muted-foreground">
-        Failed to load trend data
+        No trend data available yet
       </div>
     );
   }
@@ -705,6 +705,40 @@ interface ActivePredictionsListProps {
   isLoading: boolean;
 }
 
+function ActiveSortableHeader({
+  field,
+  sortField,
+  sortDir,
+  onSort,
+  children,
+}: {
+  field: ActiveSortField;
+  sortField: ActiveSortField;
+  sortDir: ActiveSortDir;
+  onSort: (field: ActiveSortField) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <TableHead
+      className="cursor-pointer hover:bg-muted/50 transition-colors"
+      onClick={() => onSort(field)}
+    >
+      <div className="flex items-center gap-1">
+        {children}
+        {sortField === field ? (
+          sortDir === 'desc' ? (
+            <ChevronDown className="h-3 w-3" />
+          ) : (
+            <ChevronUp className="h-3 w-3" />
+          )
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-30" />
+        )}
+      </div>
+    </TableHead>
+  );
+}
+
 function ActivePredictionsList({ outcomes, isLoading }: ActivePredictionsListProps) {
   const [sortField, setSortField] = React.useState<ActiveSortField>('unrealized');
   const [sortDir, setSortDir] = React.useState<ActiveSortDir>('desc');
@@ -754,43 +788,17 @@ function ActivePredictionsList({ outcomes, isLoading }: ActivePredictionsListPro
     );
   }
 
-  const ActiveSortableHeader = ({
-    field,
-    children,
-  }: {
-    field: ActiveSortField;
-    children: React.ReactNode;
-  }) => (
-    <TableHead
-      className="cursor-pointer hover:bg-muted/50 transition-colors"
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center gap-1">
-        {children}
-        {sortField === field ? (
-          sortDir === 'desc' ? (
-            <ChevronDown className="h-3 w-3" />
-          ) : (
-            <ChevronUp className="h-3 w-3" />
-          )
-        ) : (
-          <ArrowUpDown className="h-3 w-3 opacity-30" />
-        )}
-      </div>
-    </TableHead>
-  );
-
   return (
     <div className="overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>
-            <ActiveSortableHeader field="symbol">Symbol</ActiveSortableHeader>
-            <ActiveSortableHeader field="direction">Direction</ActiveSortableHeader>
+            <ActiveSortableHeader field="symbol" sortField={sortField} sortDir={sortDir} onSort={handleSort}>Symbol</ActiveSortableHeader>
+            <ActiveSortableHeader field="direction" sortField={sortField} sortDir={sortDir} onSort={handleSort}>Direction</ActiveSortableHeader>
             <TableHead>Entry Price</TableHead>
             <TableHead>Current Price</TableHead>
-            <ActiveSortableHeader field="unrealized">Unrealized</ActiveSortableHeader>
-            <ActiveSortableHeader field="daysRemaining">Time Left</ActiveSortableHeader>
+            <ActiveSortableHeader field="unrealized" sortField={sortField} sortDir={sortDir} onSort={handleSort}>Unrealized</ActiveSortableHeader>
+            <ActiveSortableHeader field="daysRemaining" sortField={sortField} sortDir={sortDir} onSort={handleSort}>Time Left</ActiveSortableHeader>
             <TableHead className="w-[140px]">Progress</TableHead>
             <TableHead className="w-[40px]"></TableHead>
           </TableRow>

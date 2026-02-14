@@ -19,14 +19,13 @@ import {
   FlaskConical,
   BarChart3,
   Zap,
-  Settings,
-  Play,
   ChevronDown,
   Database,
   Target,
   BookOpen,
   Briefcase,
   FileText,
+  Activity,
 } from 'lucide-react';
 import { useDeepInsights } from '@/lib/hooks/use-deep-insights';
 
@@ -54,6 +53,7 @@ const primaryNav: SidebarItem[] = [
 const secondaryNav: SidebarItem[] = [
   { name: 'Market Data', href: '/stocks', icon: <BarChart3 className="h-4 w-4" /> },
   { name: 'Signals', href: '/signals', icon: <Zap className="h-4 w-4" /> },
+  { name: 'Past Runs', href: '/runs', icon: <Activity className="h-4 w-4" /> },
 ];
 
 function isActiveLink(pathname: string, href: string): boolean {
@@ -91,7 +91,7 @@ export function Sidebar() {
   });
 
   return (
-    <aside className="hidden md:flex w-64 flex-col border-r bg-background">
+    <aside className="hidden md:flex w-64 flex-col border-r bg-background sticky top-12 h-[calc(100vh-3rem)] overflow-y-auto">
       {/* Primary Navigation - Insight-focused */}
       <div className="flex flex-col gap-2 p-4">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
@@ -176,37 +176,6 @@ export function Sidebar() {
         </Collapsible>
       </div>
 
-      {/* Spacer to push bottom items down */}
-      <div className="flex-1" />
-
-      <Separator />
-
-      {/* Bottom Navigation */}
-      <div className="flex flex-col gap-2 p-4">
-        {/* Quick Action: Run Analysis */}
-        <Button
-          variant="default"
-          className="w-full justify-center gap-2"
-          asChild
-        >
-          <Link href="/analysis/run">
-            <Play className="h-4 w-4" />
-            Run Analysis
-          </Link>
-        </Button>
-
-        {/* Settings */}
-        <Button
-          variant={isActiveLink(pathname, '/settings') ? 'secondary' : 'ghost'}
-          className="justify-start gap-2"
-          asChild
-        >
-          <Link href="/settings">
-            <Settings className="h-4 w-4" />
-            Settings
-          </Link>
-        </Button>
-      </div>
     </aside>
   );
 }

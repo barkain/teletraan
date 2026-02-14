@@ -25,7 +25,6 @@ import {
   Database,
   Briefcase,
   BarChart3,
-  Activity,
   Globe,
   MessageCircle,
   GitBranch,
@@ -33,15 +32,15 @@ import {
   Layers,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
+import { ConnectionError, isNetworkError } from '@/components/ui/empty-state';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import {
   RadarChart,
@@ -169,7 +168,7 @@ const actionConfig: Record<InsightAction, { color: string; icon: typeof Trending
  * the overall meaning of the sentence and produces a fully rewritten explanation
  * in conversational English. Returns null when no meaningful simplification is possible.
  */
-function laymanExplain(text: string, analystHint?: string): string | null {
+function laymanExplain(text: string, _analystHint?: string): string | null {
   if (!text || text.trim().length === 0) return null;
 
   // --- Tier 1: Full-sentence pattern rewrites ---
@@ -2118,23 +2117,27 @@ export function InsightDetailView({ insightId }: InsightDetailViewProps) {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Insights
         </Button>
-        <Card className="py-12 bg-card/80 backdrop-blur-sm border-border/50">
-          <CardContent className="flex flex-col items-center justify-center text-center">
-            <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
-            <CardTitle className="text-lg mb-2">Error Loading Insight</CardTitle>
-            <CardDescription className="max-w-sm mb-4">
-              {error instanceof Error ? error.message : 'Failed to load insight details'}
-            </CardDescription>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => router.push('/insights')}>
-                Back to Insights
-              </Button>
-              <Button onClick={() => refetch()}>
-                Try Again
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        {isNetworkError(error) ? (
+          <ConnectionError error={error} />
+        ) : (
+          <Card className="py-12 bg-card/80 backdrop-blur-sm border-border/50">
+            <CardContent className="flex flex-col items-center justify-center text-center">
+              <AlertTriangle className="h-12 w-12 text-muted-foreground mb-4" />
+              <CardTitle className="text-lg mb-2">Insight Not Found</CardTitle>
+              <CardDescription className="max-w-sm mb-4">
+                {error instanceof Error ? error.message : 'This insight may have been removed or is unavailable.'}
+              </CardDescription>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => router.push('/insights')}>
+                  Back to Insights
+                </Button>
+                <Button onClick={() => refetch()}>
+                  Try Again
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     );
   }
