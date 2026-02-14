@@ -25,9 +25,6 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             label: macOS-arm64
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-            label: macOS-x64
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             label: Windows-x64
@@ -81,8 +78,14 @@ jobs:
         working-directory: frontend
 
       - name: Build frontend (static export for desktop)
-        run: npx next build --config next.config.desktop.mjs
+        shell: bash
         working-directory: frontend
+        run: |
+          mv next.config.ts next.config.ts.bak
+          cp next.config.desktop.mjs next.config.mjs
+          npx next build
+          mv next.config.mjs next.config.desktop.mjs.used
+          mv next.config.ts.bak next.config.ts
 
       - name: Copy frontend export to desktop/dist
         shell: bash
