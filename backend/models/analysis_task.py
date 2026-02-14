@@ -1,8 +1,9 @@
 """AnalysisTask model for tracking background autonomous analysis jobs."""
 
 import enum
+import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import JSON, Index, Integer, String, Text, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
@@ -168,6 +169,41 @@ class AnalysisTask(TimestampMixin, Base):
         nullable=True,
     )
 
+    # Per-phase metrics (JSON strings)
+    phase_timings: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )  # JSON: {"macro_scan": {"start": "ISO", "end": "ISO", "duration_seconds": 12.3}}
+    phase_token_usage: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )  # JSON: {"macro_scan": {"input_tokens": N, "output_tokens": N, "cost_usd": X}}
+
+    # Aggregate LLM usage metrics
+    total_input_tokens: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    total_output_tokens: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    total_cost_usd: Mapped[Optional[float]] = mapped_column(
+        nullable=True,
+    )
+    model_used: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )  # e.g., "claude-sonnet-4-5-20250929"
+    provider_used: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+    )  # e.g., "claude_sdk", "openai"
+    llm_call_count: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
     __table_args__ = (
         Index("ix_analysis_tasks_status_created", "status", "created_at"),
     )
@@ -177,6 +213,15 @@ class AnalysisTask(TimestampMixin, Base):
             f"<AnalysisTask(id={self.id!r}, status={self.status!r}, "
             f"progress={self.progress})>"
         )
+
+    def _parse_json_field(self, value: str | None) -> dict | None:
+        """Safely parse a JSON string field, returning None on failure."""
+        if value is None:
+            return None
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API response."""
@@ -200,5 +245,13 @@ class AnalysisTask(TimestampMixin, Base):
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "elapsed_seconds": self.elapsed_seconds,
             "published_url": self.published_url,
+            "phase_timings": self._parse_json_field(self.phase_timings),
+            "phase_token_usage": self._parse_json_field(self.phase_token_usage),
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_cost_usd": self.total_cost_usd,
+            "model_used": self.model_used,
+            "provider_used": self.provider_used,
+            "llm_call_count": self.llm_call_count,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

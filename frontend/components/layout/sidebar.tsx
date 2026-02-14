@@ -25,6 +25,7 @@ import {
   BookOpen,
   Briefcase,
   FileText,
+  Activity,
 } from 'lucide-react';
 import { useDeepInsights } from '@/lib/hooks/use-deep-insights';
 
@@ -52,6 +53,7 @@ const primaryNav: SidebarItem[] = [
 const secondaryNav: SidebarItem[] = [
   { name: 'Market Data', href: '/stocks', icon: <BarChart3 className="h-4 w-4" /> },
   { name: 'Signals', href: '/signals', icon: <Zap className="h-4 w-4" /> },
+  { name: 'Past Runs', href: '/runs', icon: <Activity className="h-4 w-4" /> },
 ];
 
 function isActiveLink(pathname: string, href: string): boolean {

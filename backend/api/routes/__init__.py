@@ -16,6 +16,7 @@ from api.routes.outcomes import router as outcomes_router
 from api.routes.portfolio import router as portfolio_router
 from api.routes.reports import router as reports_router
 from api.routes.research import router as research_router
+from api.routes.runs import router as runs_router
 from api.routes.search import router as search_router
 from api.routes.settings import router as settings_router
 from api.routes.statistical_features import router as statistical_features_router
@@ -42,6 +43,7 @@ router.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"])
 router.include_router(portfolio_router, prefix="/portfolio", tags=["portfolio"])
 router.include_router(reports_router, prefix="/reports", tags=["reports"])
 router.include_router(research_router, tags=["research"])
+router.include_router(runs_router, prefix="/runs", tags=["runs"])
 router.include_router(export_router)
 
 __all__ = ["router"]

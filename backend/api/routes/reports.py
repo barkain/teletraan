@@ -787,6 +787,100 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
     white-space: nowrap;
   }}
 
+  /* --- View Toggle --- */
+  .view-toggle {{
+    display: flex;
+    gap: 2px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 2px;
+  }}
+  .view-toggle-btn {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    color: #64748B;
+    transition: all 0.2s ease;
+  }}
+  .view-toggle-btn:hover {{
+    color: #94A3B8;
+    background: rgba(255,255,255,0.06);
+  }}
+  .view-toggle-btn.active {{
+    background: rgba(99,102,241,0.2);
+    color: #A5B4FC;
+    box-shadow: 0 0 8px rgba(99,102,241,0.15);
+  }}
+  .view-toggle-btn svg {{
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }}
+
+  /* --- List View Mode --- */
+  .report-container.list-view .report-grid {{
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }}
+  .report-container.list-view .report-card {{
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    border-radius: 10px;
+  }}
+  .report-container.list-view .report-card:hover {{
+    transform: translateY(-1px) scale(1.002);
+  }}
+  .report-container.list-view .card-top-row {{
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    min-width: 0;
+  }}
+  .report-container.list-view .card-date {{
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 130px;
+  }}
+  .report-container.list-view .card-time {{
+    font-size: 11px;
+    margin-top: 0;
+    flex-shrink: 0;
+    min-width: 70px;
+  }}
+  .report-container.list-view .card-badges {{
+    flex-shrink: 0;
+  }}
+  .report-container.list-view .symbol-row {{
+    min-height: 0;
+    flex-shrink: 1;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }}
+  .report-container.list-view .action-row {{
+    display: none;
+  }}
+  .report-container.list-view .card-stats-row {{
+    flex-shrink: 0;
+    min-width: 160px;
+  }}
+  .report-container.list-view .card-summary {{
+    display: none;
+  }}
+  .report-container.list-view .card-footer-row {{
+    display: none;
+  }}
+
   /* --- Month Groups --- */
   .month-group {{
     margin-bottom: 36px;
@@ -1063,6 +1157,7 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
 
   @media (max-width: 1024px) {{
     .report-grid {{ grid-template-columns: repeat(2, 1fr); }}
+    .report-container.list-view .report-grid {{ grid-template-columns: 1fr; }}
   }}
   @media (max-width: 640px) {{
     .container {{ padding: 24px 16px; }}
@@ -1081,6 +1176,16 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
       margin-left: 0;
       text-align: center;
     }}
+    /* Revert list-view to card layout on mobile */
+    .report-container.list-view .report-card {{
+      flex-direction: column;
+      align-items: stretch;
+      padding: 20px;
+    }}
+    .report-container.list-view .card-date {{ font-size: 17px; min-width: 0; }}
+    .report-container.list-view .card-summary {{ display: -webkit-box; }}
+    .report-container.list-view .card-footer-row {{ display: flex; }}
+    .report-container.list-view .action-row {{ display: flex; }}
   }}
 </style>
 </head>
@@ -1114,10 +1219,18 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
     <select id="regimeFilter">
       <option value="">All Regimes</option>
 {regime_options}    </select>
+    <div class="view-toggle">
+      <button class="view-toggle-btn active" id="gridViewBtn" title="Grid view" aria-label="Grid view">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+      </button>
+      <button class="view-toggle-btn" id="listViewBtn" title="List view" aria-label="List view">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1.5" width="14" height="2.5" rx="1"/><rect x="1" y="6.75" width="14" height="2.5" rx="1"/><rect x="1" y="12" width="14" height="2.5" rx="1"/></svg>
+      </button>
+    </div>
     <span class="result-count" id="resultCount">{total_reports} report{"s" if total_reports != 1 else ""}</span>
   </div>
 
-  <div id="reportContainer">
+  <div id="reportContainer" class="report-container">
     {month_sections if month_sections else empty_state}
   </div>
 
@@ -1197,6 +1310,35 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
 
   searchEl.addEventListener('input', applyFilters);
   regimeEl.addEventListener('change', applyFilters);
+
+  // --- View Toggle (Grid / List) ---
+  var container = document.getElementById('reportContainer');
+  var gridBtn = document.getElementById('gridViewBtn');
+  var listBtn = document.getElementById('listViewBtn');
+  var VIEW_KEY = 'teletraan-view-mode';
+
+  function setView(mode) {{
+    if (mode === 'list') {{
+      container.classList.add('list-view');
+      listBtn.classList.add('active');
+      gridBtn.classList.remove('active');
+    }} else {{
+      container.classList.remove('list-view');
+      gridBtn.classList.add('active');
+      listBtn.classList.remove('active');
+      mode = 'grid';
+    }}
+    try {{ localStorage.setItem(VIEW_KEY, mode); }} catch(e) {{}}
+  }}
+
+  gridBtn.addEventListener('click', function() {{ setView('grid'); }});
+  listBtn.addEventListener('click', function() {{ setView('list'); }});
+
+  // Restore saved preference
+  try {{
+    var saved = localStorage.getItem(VIEW_KEY);
+    if (saved === 'list') setView('list');
+  }} catch(e) {{}}
 }})();
 </script>
 </body>

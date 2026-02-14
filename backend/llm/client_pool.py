@@ -12,8 +12,10 @@ os.environ.setdefault("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient  # type: ignore[import-untyped]
 
@@ -21,6 +23,18 @@ logger = logging.getLogger(__name__)
 
 # Pool configuration
 POOL_SIZE = 5  # Max concurrent LLM sessions (main.py raises FD limit to 4096; 5 clients use ~50-75 FDs)
+
+
+@dataclass
+class LLMQueryResult:
+    """Result of an LLM query with usage metadata."""
+
+    text: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    duration_ms: float = 0.0
+    model: str = ""
 
 # ---------------------------------------------------------------------------
 # LLM provider environment setup
@@ -266,14 +280,17 @@ async def pool_query_llm(
     system_prompt: str,
     user_prompt: str,
     agent_name: str = "unknown",
-) -> str:
+) -> LLMQueryResult:
     """Execute an LLM query using a pooled client.
 
     Prepends system_prompt to user_prompt since pool clients have no
     fixed system prompt. This is the standard replacement for the
     per-module _query_llm() methods.
+
+    Returns:
+        LLMQueryResult with response text and usage metadata.
     """
-    from claude_agent_sdk import AssistantMessage, TextBlock  # type: ignore[import-untyped]
+    from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock  # type: ignore[import-untyped]
 
     pool = get_client_pool()
 
@@ -285,6 +302,13 @@ async def pool_query_llm(
 {user_prompt}"""
 
     response_text = ""
+    input_tokens = 0
+    output_tokens = 0
+    cost_usd = 0.0
+    sdk_duration_ms = 0.0
+    model = ""
+
+    start = time.monotonic()
     async with pool.checkout() as client:
         await client.query(combined_prompt)
         async for msg in client.receive_response():
@@ -292,6 +316,25 @@ async def pool_query_llm(
                 for block in msg.content:
                     if isinstance(block, TextBlock):
                         response_text += block.text
+            elif isinstance(msg, ResultMessage):
+                cost_usd = msg.total_cost_usd or 0.0
+                sdk_duration_ms = float(msg.duration_ms or 0)
+                usage = msg.usage or {}
+                input_tokens = usage.get("input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
 
-    logger.info(f"[POOL] {agent_name} complete: {len(response_text)} chars")
-    return response_text
+    elapsed_ms = (time.monotonic() - start) * 1000
+
+    logger.info(
+        f"[POOL] {agent_name} complete: {len(response_text)} chars, "
+        f"{input_tokens}+{output_tokens} tokens, ${cost_usd:.4f}, "
+        f"{elapsed_ms:.0f}ms"
+    )
+    return LLMQueryResult(
+        text=response_text,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost_usd,
+        duration_ms=sdk_duration_ms if sdk_duration_ms > 0 else elapsed_ms,
+        model=model,
+    )

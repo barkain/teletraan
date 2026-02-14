@@ -441,7 +441,7 @@ export const chatApi = {
 };
 
 // Import types
-import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, LLMProviderStatus, LLMProviderConfig, LLMTestRequest, LLMTestResult } from '@/types';
+import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, LLMProviderStatus, LLMProviderConfig, LLMTestRequest, LLMTestResult, RunListResponse, RunsAggregateStats, RunSummary } from '@/types';
 import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, PatternsSummary, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
 import type { FollowUpResearch, ResearchListResponse, ResearchListParams, ResearchCreateRequest } from '@/lib/types/research';
 import type { ReportListResponse, ReportDetail, PublishResponse } from '@/lib/types/report';
@@ -520,4 +520,19 @@ export const knowledgeApi = {
 export const outcomesApi = {
   summary: () =>
     fetchApi<OutcomeSummary>('/api/v1/outcomes/summary'),
+};
+
+// ============================================
+// Runs API
+// ============================================
+
+export const runsApi = {
+  list: (params?: { page?: number; page_size?: number; status?: string; search?: string }) =>
+    fetchApi<RunListResponse>('/api/v1/runs', {
+      params: params as Record<string, string | number | boolean | undefined>,
+    }),
+  stats: () =>
+    fetchApi<RunsAggregateStats>('/api/v1/runs/stats'),
+  get: (id: string) =>
+    fetchApi<RunSummary>(`/api/v1/runs/${id}`),
 };

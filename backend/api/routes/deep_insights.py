@@ -495,6 +495,18 @@ async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_co
                         for s in sorted_sectors[:6]
                     ]
 
+                # Persist LLM usage metrics from the analysis run
+                if analysis_result.run_metrics:
+                    try:
+                        metrics_fields = analysis_result.run_metrics.to_task_fields()
+                        for field_name, value in metrics_fields.items():
+                            setattr(task, field_name, value)
+                    except Exception as metrics_err:
+                        logger.warning(
+                            "Failed to persist run metrics for task %s: %s",
+                            task_id, metrics_err,
+                        )
+
                 await session.commit()
                 logger.info(f"Background analysis {task_id} completed successfully")
 

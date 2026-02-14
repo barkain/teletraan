@@ -558,14 +558,14 @@ class FollowUpResearchLauncher:
         logger.info(f"Running focused analyst: {focused_type.value}")
 
         try:
-            response_text = await pool_query_llm(
+            response_result = await pool_query_llm(
                 system_prompt=system_prompt,
                 user_prompt=prompt,
                 agent_name=f"followup_{focused_type.value}",
             )
 
             logger.info(
-                f"Focused analyst response: {len(response_text)} chars"
+                f"Focused analyst response: {len(response_result.text)} chars"
             )
 
         except asyncio.TimeoutError:
@@ -575,7 +575,7 @@ class FollowUpResearchLauncher:
             logger.exception(f"Focused analyst failed: {e}")
             raise
 
-        return response_text
+        return response_result.text
 
     async def _synthesize_focused_findings(
         self,

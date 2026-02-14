@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -143,7 +143,13 @@ function ChartSkeleton({ height = 300 }: { height?: number }) {
 // ============================================
 
 function formatRelativeTime(timestamp: string): string {
-  const date = new Date(timestamp);
+  // Backend returns naive UTC datetimes (e.g. "2026-02-14T10:30:00") without
+  // a timezone suffix. Append 'Z' so the browser parses them as UTC rather
+  // than local time, which would make the "ago" text appear hours off.
+  const normalized = timestamp.endsWith('Z') || timestamp.includes('+') || timestamp.includes('-', 10)
+    ? timestamp
+    : timestamp + 'Z';
+  const date = new Date(normalized);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -1227,6 +1233,16 @@ export default function DashboardPage() {
   // Last analysis time from most recent insight
   const lastAnalysisTime = allInsightsData?.items?.[0]?.created_at;
 
+  // Tick every 30s so the "Last analysis: Xm ago" text stays fresh
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Memoize the formatted time; depends on tick so it recalculates periodically
+  const lastAnalysisLabel = lastAnalysisTime ? formatRelativeTime(lastAnalysisTime) : null;
+
   const handleRunAnalysis = () => {
     startAnalysis({ max_insights: 5, deep_dive_count: 7 });
   };
@@ -1243,10 +1259,10 @@ export default function DashboardPage() {
           <p className="text-muted-foreground">
             AI-Powered Market Intelligence -- multi-agent deep analysis
           </p>
-          {lastAnalysisTime && (
+          {lastAnalysisLabel && (
             <p className="text-sm text-muted-foreground flex items-center gap-1">
               <Clock className="h-3 w-3" />
-              Last analysis: {formatRelativeTime(lastAnalysisTime)}
+              Last analysis: {lastAnalysisLabel}
             </p>
           )}
         </div>

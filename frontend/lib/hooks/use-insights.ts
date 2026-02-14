@@ -163,7 +163,13 @@ export function useDeleteAnnotation() {
 
 // Helper to format relative time
 export function formatRelativeTime(timestamp: string): string {
-  const date = new Date(timestamp);
+  // Backend returns naive UTC datetimes (e.g. "2026-02-14T10:30:00") without
+  // a timezone suffix. Append 'Z' so the browser parses them as UTC rather
+  // than local time, which would make the "ago" text appear hours off.
+  const normalized = timestamp.endsWith('Z') || timestamp.includes('+') || timestamp.includes('-', 10)
+    ? timestamp
+    : timestamp + 'Z';
+  const date = new Date(normalized);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffSecs = Math.floor(diffMs / 1000);

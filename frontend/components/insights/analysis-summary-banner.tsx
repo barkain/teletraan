@@ -9,6 +9,18 @@ import {
 } from 'lucide-react';
 import type { AutonomousAnalysisResponse } from '@/types';
 
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}m ${s.toString().padStart(2, '0')}s`;
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m.toString().padStart(2, '0')}m`;
+}
+
 interface AnalysisSummaryBannerProps {
   result: AutonomousAnalysisResponse;
 }
@@ -24,7 +36,7 @@ export function AnalysisSummaryBanner({ result }: AnalysisSummaryBannerProps) {
           <div>
             <h3 className="font-semibold">Autonomous Analysis Complete</h3>
             <p className="text-sm text-muted-foreground">
-              Discovered {result.insights_count} opportunities in {result.elapsed_seconds.toFixed(1)}s
+              Discovered {result.insights_count} opportunities in {formatDuration(result.elapsed_seconds)}
             </p>
           </div>
         </div>

@@ -68,7 +68,13 @@ type SortOption = 'success_rate' | 'occurrences' | 'last_triggered';
  * Format a timestamp into a relative time string (e.g., "2 hours ago")
  */
 function formatRelativeTime(timestamp: string): string {
-  const date = new Date(timestamp);
+  // Backend returns naive UTC datetimes (e.g. "2026-02-14T10:30:00") without
+  // a timezone suffix. Append 'Z' so the browser parses them as UTC rather
+  // than local time, which would make the "ago" text appear hours off.
+  const normalized = timestamp.endsWith('Z') || timestamp.includes('+') || timestamp.includes('-', 10)
+    ? timestamp
+    : timestamp + 'Z';
+  const date = new Date(normalized);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
