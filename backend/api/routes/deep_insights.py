@@ -572,6 +572,13 @@ async def start_autonomous_analysis(
     db.add(task)
     await db.commit()
 
+    # Eagerly clear the activity log and associate it with the new task_id
+    # BEFORE the background task starts. This prevents the status endpoint
+    # from returning stale entries from a previous run during the window
+    # between task creation and background task execution.
+    engine = get_autonomous_engine()
+    engine.clear_activity_log(task_id=task_id)
+
     # Start background task
     background_tasks.add_task(
         _run_background_analysis,
@@ -627,9 +634,11 @@ async def get_analysis_status(
     if is_running and since_activity_seq >= 0:
         try:
             engine = get_autonomous_engine()
-            activity = engine.get_activity_log(since_activity_seq)
-        except Exception as e:
-            logger.debug("Failed to fetch activity log: %s", e)
+            # Pass task_id to ensure we only return activity for THIS run,
+            # not stale entries from a previous analysis run.
+            activity = engine.get_activity_log(since_activity_seq, task_id=task_id)
+        except Exception as act_err:
+            logger.debug("Failed to fetch activity log: %s", act_err)
 
     return AnalysisTaskResponse(
         id=task.id,

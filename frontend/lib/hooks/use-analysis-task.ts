@@ -20,6 +20,7 @@ export interface LLMActivityEntry {
   output_tokens: number;
   duration_ms: number;
   status: 'running' | 'done' | 'error';
+  symbol: string; // stock symbol for deep_dive entries (e.g. "AAPL")
 }
 
 export interface AnalysisTaskStatus {
@@ -87,9 +88,9 @@ async function startBackgroundAnalysis(params?: {
   return postApi<StartAnalysisResponse>('/api/v1/deep-insights/autonomous/start', params);
 }
 
-async function getTaskStatus(taskId: string, sinceActivitySeq: number = 0): Promise<AnalysisTaskStatus> {
+async function getTaskStatus(taskId: string): Promise<AnalysisTaskStatus> {
   return fetchApi<AnalysisTaskStatus>(
-    `/api/v1/deep-insights/autonomous/status/${taskId}?since_activity_seq=${sinceActivitySeq}`
+    `/api/v1/deep-insights/autonomous/status/${taskId}`
   );
 }
 
@@ -125,7 +126,11 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
   const [_startTime, setStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [activityLog, setActivityLog] = useState<LLMActivityEntry[]>([]);
-  const [activitySeqCursor, setActivitySeqCursor] = useState<number>(0);
+
+  // Activity seq cursor ref — no longer used for incremental fetching (the backend
+  // now always returns all entries to avoid a race where "done" entries with token
+  // counts were missed). Kept only so reset calls don't need to be removed everywhere.
+  const activitySeqCursorRef = useRef<number>(0);
 
   // Refs for callbacks to avoid stale closures
   const onCompleteRef = useRef(onComplete);
@@ -177,6 +182,10 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
     stopTimer();
   }, [stopTimer]);
 
+  // Maximum number of activity entries to keep in memory to prevent unbounded growth.
+  // Oldest entries are dropped when this limit is exceeded.
+  const MAX_ACTIVITY_ENTRIES = 150;
+
   // Start polling for task status
   const startPolling = useCallback(
     (id: string, existingStartTime?: number) => {
@@ -187,17 +196,35 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
 
       const poll = async () => {
         try {
-          const status = await getTaskStatus(id, activitySeqCursor);
+          // Backend always returns ALL activity entries (no cursor filtering)
+          // to avoid a race where "done" entries with token counts were missed.
+          const status = await getTaskStatus(id);
           setTask(status);
 
-          // Merge new activity entries incrementally
+          // Replace activity log with the full set from the backend.
+          // The backend always returns all entries (capped at ~150), so we
+          // simply replace state rather than doing incremental merge.
           if (status.activity && status.activity.length > 0) {
+            const entries = status.activity!;
+
             setActivityLog((prev) => {
-              const merged = [...prev, ...status.activity!];
-              // Update cursor to highest seq number
-              const maxSeq = Math.max(...merged.map((e) => e.seq));
-              setActivitySeqCursor(maxSeq);
-              return merged;
+              // Quick identity check: if the last entry's seq and status
+              // haven't changed, the list is likely unchanged — skip re-render.
+              if (
+                prev.length === entries.length &&
+                prev.length > 0 &&
+                prev[prev.length - 1].seq === entries[entries.length - 1].seq &&
+                prev[prev.length - 1].status === entries[entries.length - 1].status &&
+                prev[prev.length - 1].input_tokens === entries[entries.length - 1].input_tokens
+              ) {
+                return prev;
+              }
+
+              // Cap entries to prevent unbounded memory growth
+              if (entries.length > MAX_ACTIVITY_ENTRIES) {
+                return entries.slice(entries.length - MAX_ACTIVITY_ENTRIES);
+              }
+              return entries;
             });
           }
 
@@ -244,7 +271,7 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
         setElapsedSeconds(0);
         setStartTime(null);
         setActivityLog([]);
-        setActivitySeqCursor(0);
+        activitySeqCursorRef.current = 0;
 
         const response = await startBackgroundAnalysis(params);
 
@@ -325,6 +352,11 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
 
         // If task is still running, resume polling
         if (!['completed', 'failed', 'cancelled'].includes(status.status)) {
+          // Reset activity state before resuming to prevent stale entries
+          // from a previous run leaking into the resumed feed
+          setActivityLog([]);
+          activitySeqCursorRef.current = 0;
+
           setTaskId(savedTaskId);
           setTask(status);
           // Calculate start time from task's started_at if available
@@ -359,6 +391,10 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
     if (isStartingRef.current) return null;
 
     if (activeTask) {
+      // Reset activity state before resuming to prevent stale entries
+      setActivityLog([]);
+      activitySeqCursorRef.current = 0;
+
       localStorage.setItem(TASK_ID_STORAGE_KEY, activeTask.id);
       setTaskId(activeTask.id);
       setTask(activeTask);
@@ -387,7 +423,7 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
     setStartTime(null);
     setElapsedSeconds(0);
     setActivityLog([]);
-    setActivitySeqCursor(0);
+    activitySeqCursorRef.current = 0;
     localStorage.removeItem(TASK_ID_STORAGE_KEY);
   }, [stopPolling]);
 

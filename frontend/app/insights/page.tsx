@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { DeepInsightCard } from '@/components/insights/deep-insight-card';
 import { StatisticalSignalsCard } from '@/components/insights/statistical-signals-card';
+import { InsightDetailView } from '@/components/insights/insight-detail-view';
 import { useDeepInsights, DeepInsightParams } from '@/lib/hooks/use-deep-insights';
 import type { DeepInsight, DeepInsightType, InsightAction } from '@/types';
 import { Sparkles, ChevronLeft, ChevronRight, Search, Filter, Activity, PanelRightOpen, Calendar, LayoutGrid, List, TrendingUp, TrendingDown, Minus, Target } from 'lucide-react';
@@ -209,7 +210,74 @@ function InsightListRow({
   );
 }
 
+/**
+ * Read the initial insight ID from the URL search params.
+ * Must live inside a Suspense boundary because useSearchParams
+ * requires it in Next.js static export.
+ */
+function InsightsPageInner() {
+  const searchParams = useSearchParams();
+
+  // Read ?id=<number> from the URL for deep-link / cross-page navigation support.
+  const detailId = searchParams.get('id');
+  const initialInsightId = detailId ? parseInt(detailId, 10) : null;
+  const validInitialId =
+    initialInsightId && !isNaN(initialInsightId) && initialInsightId > 0
+      ? initialInsightId
+      : null;
+
+  // Manage the selected insight via React state rather than router.push().
+  // This avoids Next.js App Router navigation issues in Tauri desktop builds
+  // where router.push with query params can trigger a full-page navigation
+  // instead of a client-side re-render, causing a redirect to the home page.
+  const [selectedInsightId, setSelectedInsightId] = useState<number | null>(validInitialId);
+
+  // Keep the URL in sync so that deep links and browser back/forward work.
+  // pushState adds a history entry (enabling the browser back button to
+  // return from detail to list), but does NOT trigger page navigation.
+  const selectInsight = useCallback((id: number) => {
+    setSelectedInsightId(id);
+    if (typeof window !== 'undefined') {
+      window.history.pushState(null, '', `/insights?id=${id}`);
+    }
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedInsightId(null);
+    if (typeof window !== 'undefined') {
+      window.history.pushState(null, '', '/insights');
+    }
+  }, []);
+
+  // Handle browser back/forward buttons (popstate).
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get('id');
+      const parsed = id ? parseInt(id, 10) : null;
+      setSelectedInsightId(parsed && !isNaN(parsed) && parsed > 0 ? parsed : null);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  if (selectedInsightId) {
+    return <InsightDetailView insightId={selectedInsightId} onBack={clearSelection} />;
+  }
+
+  return <InsightsListView onInsightClick={selectInsight} />;
+}
+
+// Wrap with Suspense because useSearchParams requires it in static export.
 export default function InsightsPage() {
+  return (
+    <Suspense fallback={<InsightsListSkeleton />}>
+      <InsightsPageInner />
+    </Suspense>
+  );
+}
+
+function InsightsListView({ onInsightClick }: { onInsightClick: (id: number) => void }) {
   const router = useRouter();
   const [page, setPage] = useState(1);
   const [actionFilter, setActionFilter] = useState<InsightAction | 'all'>('all');
@@ -273,7 +341,7 @@ export default function InsightsPage() {
   };
 
   const handleInsightClick = (insightId: number) => {
-    router.push(`/insights/${insightId}`);
+    onInsightClick(insightId);
   };
 
   const handleClearFilters = () => {
