@@ -1,6 +1,6 @@
 [package]
 name = "teletraan-desktop"
-version = "0.1.0"
+version = "1.0.0"
 description = "Teletraan Desktop - AI Market Intelligence"
 authors = ["Teletraan"]
 edition = "2021"
