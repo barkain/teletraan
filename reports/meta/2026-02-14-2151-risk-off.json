@@ -1,0 +1,37 @@
+{
+  "filename": "2026-02-14-2151-risk-off.html",
+  "task_id": "500c0280-4f59-45ea-8df7-490e64e6866e",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Risk-Off\n\n**Key Macro Themes:**\n- Trade/Tariff Tensions & Deglobalization: Energy (+13.97%) and Materials (+9.51%) are surging, suggesting supply chain disruptions, tariff-dri...\n- Fed Easing Cycle / Disinflation Progress: Treasury yields collapsing across the curve (5Y -5.72% leading the decline) signals market pricing a...\n- Tech/AI Bubble Deflation & Rotation to Quality: NASDAQ down -4.12%, Technology sector -4.16%, while S&P only -1.50% and Dow nearly flat. This is cla...\n\n**Heatmap Analysis:** The market is exhibiting a classic risk-off rotation with defensive sectors (Utilities +2.76%, Real Estate +1.47%) sharply outperforming while growth-oriented sectors lag or decline (Financials -0.08%, Communication Services -0.05%). The divergence between surging commodities (Energy +13.09% over 20D, Materials +9.35%) and weakening tech (-3.55% over 20D) signals investor concern about stagflation—growth slowing while input costs rise. Safe-haven flows are dominant, consistent with the elevated VIX and gold's surge to $5,022.\n\n**Sectors Scanned:**\n- Technology: +0.3% (1D), breadth 50%\n- Financials: -0.1% (1D), breadth 50%\n- Energy: +0.7% (1D), breadth 50%\n- Healthcare: +1.1% (1D), breadth 50%\n- Industrials: +0.8% (1D), breadth 50%\n- Consumer Staples: +0.3% (1D), breadth 50%\n- Consumer Discretionary: +0.0% (1D), breadth 50%\n- Utilities: +2.8% (1D), breadth 50%\n- Communication Services: -0.1% (1D), breadth 50%\n- Real Estate: +1.5% (1D), breadth 50%\n- Materials: +0.9% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Defensive dividend sectors (Utilities, Real Estate, Consumer Staples) leading with strong 1D gains while maintaining multi-week momentum, contrasting sharply with tech/discretionary weakness\n- Commodities complex showing persistent strength (Energy +13.09% 20D, Materials +9.35% 20D) despite risk-off environment—unusual divergence from typical recession playbook\n- Financials showing severe relative weakness (-4.81% 5D) even as Treasury yields decline sharply, which typically benefits banks via capital gains on bond portfolios",
+  "top_sectors": [
+    "Energy +13.1%",
+    "Materials +9.4%",
+    "Consumer Staples +8.9%",
+    "Utilities +7.7%",
+    "Industrials +6.0%",
+    "Real Estate +5.1%"
+  ],
+  "insights_count": 5,
+  "symbols": [
+    "GOOGL",
+    "JNJ",
+    "LITE",
+    "NVDA",
+    "XOM"
+  ],
+  "action_counts": {
+    "SELL": 1,
+    "STRONG_BUY": 1,
+    "HOLD": 1,
+    "BUY": 2
+  },
+  "avg_confidence": 0.7,
+  "insight_types": [
+    "opportunity",
+    "risk"
+  ],
+  "created_at": "2026-02-14T21:51:27",
+  "started_at": "2026-02-14T21:51:27.257976",
+  "completed_at": "2026-02-14T22:41:50.236375",
+  "elapsed_seconds": 3022.975205
+}

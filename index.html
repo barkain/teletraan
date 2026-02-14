@@ -122,6 +122,100 @@
     white-space: nowrap;
   }
 
+  /* --- View Toggle --- */
+  .view-toggle {
+    display: flex;
+    gap: 2px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 2px;
+  }
+  .view-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    color: #64748B;
+    transition: all 0.2s ease;
+  }
+  .view-toggle-btn:hover {
+    color: #94A3B8;
+    background: rgba(255,255,255,0.06);
+  }
+  .view-toggle-btn.active {
+    background: rgba(99,102,241,0.2);
+    color: #A5B4FC;
+    box-shadow: 0 0 8px rgba(99,102,241,0.15);
+  }
+  .view-toggle-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
+
+  /* --- List View Mode --- */
+  .report-container.list-view .report-grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .report-container.list-view .report-card {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    border-radius: 10px;
+  }
+  .report-container.list-view .report-card:hover {
+    transform: translateY(-1px) scale(1.002);
+  }
+  .report-container.list-view .card-top-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    min-width: 0;
+  }
+  .report-container.list-view .card-date {
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 130px;
+  }
+  .report-container.list-view .card-time {
+    font-size: 11px;
+    margin-top: 0;
+    flex-shrink: 0;
+    min-width: 70px;
+  }
+  .report-container.list-view .card-badges {
+    flex-shrink: 0;
+  }
+  .report-container.list-view .symbol-row {
+    min-height: 0;
+    flex-shrink: 1;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  .report-container.list-view .action-row {
+    display: none;
+  }
+  .report-container.list-view .card-stats-row {
+    flex-shrink: 0;
+    min-width: 160px;
+  }
+  .report-container.list-view .card-summary {
+    display: none;
+  }
+  .report-container.list-view .card-footer-row {
+    display: none;
+  }
+
   /* --- Month Groups --- */
   .month-group {
     margin-bottom: 36px;
@@ -398,6 +492,7 @@
 
   @media (max-width: 1024px) {
     .report-grid { grid-template-columns: repeat(2, 1fr); }
+    .report-container.list-view .report-grid { grid-template-columns: 1fr; }
   }
   @media (max-width: 640px) {
     .container { padding: 24px 16px; }
@@ -416,6 +511,16 @@
       margin-left: 0;
       text-align: center;
     }
+    /* Revert list-view to card layout on mobile */
+    .report-container.list-view .report-card {
+      flex-direction: column;
+      align-items: stretch;
+      padding: 20px;
+    }
+    .report-container.list-view .card-date { font-size: 17px; min-width: 0; }
+    .report-container.list-view .card-summary { display: -webkit-box; }
+    .report-container.list-view .card-footer-row { display: flex; }
+    .report-container.list-view .action-row { display: flex; }
   }
 </style>
 </head>
@@ -438,8 +543,8 @@
   </div>
 
   <div class="stats-bar">
-    <div class="stat-card"><span style="font-size:18px;">&#x1F4CA;</span> <strong>3</strong> Reports</div>
-    <div class="stat-card"><span style="font-size:18px;">&#x1F4A1;</span> <strong>13</strong> Insights</div>
+    <div class="stat-card"><span style="font-size:18px;">&#x1F4CA;</span> <strong>4</strong> Reports</div>
+    <div class="stat-card"><span style="font-size:18px;">&#x1F4A1;</span> <strong>18</strong> Insights</div>
     <div class="stat-card"><span style="font-size:18px;">&#x1F3AF;</span> Avg <strong>1%</strong> Confidence</div>
     <div class="stat-card"><span style="font-size:18px;">&#x1F552;</span> Latest: <strong>1m ago</strong></div>
   </div>
@@ -451,21 +556,61 @@
     <option value="Risk-Off">Risk Off</option>
     <option value="Transitional">Transitional</option>
     </select>
-    <span class="result-count" id="resultCount">3 reports</span>
+    <div class="view-toggle">
+      <button class="view-toggle-btn active" id="gridViewBtn" title="Grid view" aria-label="Grid view">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+      </button>
+      <button class="view-toggle-btn" id="listViewBtn" title="List view" aria-label="List view">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1.5" width="14" height="2.5" rx="1"/><rect x="1" y="6.75" width="14" height="2.5" rx="1"/><rect x="1" y="12" width="14" height="2.5" rx="1"/></svg>
+      </button>
+    </div>
+    <span class="result-count" id="resultCount">4 reports</span>
   </div>
 
-  <div id="reportContainer">
+  <div id="reportContainer" class="report-container">
     
     <div class="month-group" data-month="2026-02">
-      <h2 class="month-header">February 2026 &middot; 3 reports</h2>
+      <h2 class="month-header">February 2026 &middot; 4 reports</h2>
       <div class="report-grid">
         
-        <a href="reports/2026-02-14-0658-risk-off.html" class="report-card" data-date="2026-02-14" data-regime="Risk-Off" data-symbols="CL=F GC=F GOOGL NVDA RGTI XOM"
+        <a href="reports/2026-02-14-2151-risk-off.html" class="report-card" data-date="2026-02-14" data-regime="Risk-Off" data-symbols="GOOGL JNJ LITE NVDA XOM"
            style="border-left: 3px solid #EF4444;">
           <div class="card-top-row">
             <div class="card-date">February 14, 2026</div>
             <div class="card-badges">
               <span class="latest-badge">LATEST</span>
+              <span class="regime-badge" style="background:#EF444418;color:#EF4444;border-color:#EF444433;">
+                Risk Off
+              </span>
+            </div>
+          </div>
+          <div class="card-time">21:51 UTC</div>
+          <div class="symbol-row"><span class="symbol-pill">GOOGL</span><span class="symbol-pill">JNJ</span><span class="symbol-pill">LITE</span><span class="symbol-pill">NVDA</span><span class="symbol-pill">XOM</span></div>
+          <div class="action-row"><span class="action-mini" style="--act-color:#22C55E;">2 Buy</span><span class="action-mini" style="--act-color:#EF4444;">1 Sell</span><span class="action-mini" style="--act-color:#22C55E;">1 Strong Buy</span><span class="action-mini" style="--act-color:#F59E0B;">1 Hold</span></div>
+          <div class="card-stats-row">
+            <span class="card-stat">5 insights</span>
+            <div class="conf-bar-wrap">
+              <div class="conf-bar" style="width:1%;background:#EF4444;"></div>
+            </div>
+            <span class="card-stat conf-label">1%</span>
+          </div>
+          <div class="card-summary">## How These Opportunities Were Discovered
+
+**Market Regime:** Risk-Off
+
+**Key Macro Themes:**
+- Trade/Tariff Tensions &amp; Deglobalization: Energy (+13.97%) an...</div>
+          <div class="card-footer-row">
+            <span class="card-link-indicator">View report &rarr;</span>
+          </div>
+        </a>
+
+        <a href="reports/2026-02-14-0658-risk-off.html" class="report-card" data-date="2026-02-14" data-regime="Risk-Off" data-symbols="CL=F GC=F GOOGL NVDA RGTI XOM"
+           style="border-left: 3px solid #EF4444;">
+          <div class="card-top-row">
+            <div class="card-date">February 14, 2026</div>
+            <div class="card-badges">
+              
               <span class="regime-badge" style="background:#EF444418;color:#EF4444;border-color:#EF444433;">
                 Risk Off
               </span>
@@ -632,6 +777,35 @@
 
   searchEl.addEventListener('input', applyFilters);
   regimeEl.addEventListener('change', applyFilters);
+
+  // --- View Toggle (Grid / List) ---
+  var container = document.getElementById('reportContainer');
+  var gridBtn = document.getElementById('gridViewBtn');
+  var listBtn = document.getElementById('listViewBtn');
+  var VIEW_KEY = 'teletraan-view-mode';
+
+  function setView(mode) {
+    if (mode === 'list') {
+      container.classList.add('list-view');
+      listBtn.classList.add('active');
+      gridBtn.classList.remove('active');
+    } else {
+      container.classList.remove('list-view');
+      gridBtn.classList.add('active');
+      listBtn.classList.remove('active');
+      mode = 'grid';
+    }
+    try { localStorage.setItem(VIEW_KEY, mode); } catch(e) {}
+  }
+
+  gridBtn.addEventListener('click', function() { setView('grid'); });
+  listBtn.addEventListener('click', function() { setView('list'); });
+
+  // Restore saved preference
+  try {
+    var saved = localStorage.getItem(VIEW_KEY);
+    if (saved === 'list') setView('list');
+  } catch(e) {}
 })();
 </script>
 </body>
