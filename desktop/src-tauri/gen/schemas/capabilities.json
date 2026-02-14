@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capabilities for Teletraan desktop app","local":true,"windows":["main"],"permissions":["core:default","opener:default",{"identifier":"shell:allow-execute","allow":[{"args":[{"validator":"\\S+"},{"validator":"\\S+"},{"validator":"\\S+"},{"validator":"\\S+"}],"name":"binaries/teletraan-backend","sidecar":true}]}]}}
+{"default":{"identifier":"default","description":"Default capabilities for Teletraan desktop app","local":true,"windows":["main"],"permissions":["core:default","opener:default"]}}

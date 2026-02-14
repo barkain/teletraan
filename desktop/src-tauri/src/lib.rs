@@ -1,13 +1,13 @@
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, Command as StdCommand, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
-use tauri_plugin_shell::process::CommandChild;
-use tauri_plugin_shell::ShellExt;
 
-/// State container for the backend sidecar process.
+/// State container for the backend child process.
 /// Wrapped in Mutex so it can be safely accessed from multiple async contexts.
-struct BackendProcess(Mutex<Option<CommandChild>>);
+struct BackendProcess(Mutex<Option<Child>>);
 
 /// Subset of the backend health check JSON response.
 #[derive(serde::Deserialize)]
@@ -42,9 +42,14 @@ fn resolve_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(data_dir)
 }
 
-/// Spawn the Python backend sidecar and poll until it reports healthy.
+/// Spawn the Python backend as a child process from the bundled resources.
+///
+/// The window is visible immediately (configured in tauri.conf.json) so
+/// the frontend `BackendReadinessGate` can show a splash screen while the
+/// backend starts up.  A background health-check loop logs when the backend
+/// becomes healthy but does **not** block the window from appearing.
 async fn start_backend(app: &AppHandle) -> Result<(), String> {
-    log::info!("Starting Teletraan backend sidecar...");
+    log::info!("Starting Teletraan backend...");
 
     // Resolve persistent data directory for the bundled app.
     let data_dir = resolve_data_dir(app)?;
@@ -56,107 +61,155 @@ async fn start_backend(app: &AppHandle) -> Result<(), String> {
         db_path.display()
     );
 
-    let shell = app.shell();
+    // Locate the bundled backend binary inside the app's Resources directory.
+    // Tauri bundles files listed in `bundle.resources` into Contents/Resources/ on macOS.
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to resolve resource directory: {e}"))?;
+    let backend_bin = resource_dir
+        .join("resources")
+        .join("teletraan-backend")
+        .join("teletraan-backend");
 
-    // Build and spawn the sidecar command.
-    // "teletraan-backend" resolves to src-tauri/binaries/teletraan-backend-<target_triple>.
-    // We set the working directory to the app data dir so any relative paths
-    // (e.g., ./data/) resolve correctly, and explicitly pass DATABASE_URL as well.
-    let (mut rx, child) = shell
-        .sidecar("teletraan-backend")
-        .map_err(|e| format!("Failed to create sidecar command: {e}"))?
-        .args(["--host", "127.0.0.1", "--port", "8000"])
-        .current_dir(data_dir)
-        .env("DATABASE_URL", &database_url)
-        .spawn()
-        .map_err(|e| format!("Failed to spawn backend sidecar: {e}"))?;
-
+    log::info!("Backend binary: {}", backend_bin.display());
     log::info!("Backend DATABASE_URL: {database_url}");
+
+    // Spawn the backend as a regular child process.
+    let mut child = StdCommand::new(&backend_bin)
+        .args(["--host", "127.0.0.1", "--port", "8000"])
+        .current_dir(&data_dir)
+        .env("DATABASE_URL", &database_url)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn backend process: {e}"))?;
+
+    log::info!("Backend process spawned (pid: {})", child.id());
+
+    // ---- Capture stdout/stderr to backend.log and Tauri console ----
+    let log_path = data_dir.join("backend.log");
+    log::info!("Backend log file: {}", log_path.display());
+
+    // Take the stdout/stderr handles before stashing the child.
+    let child_stdout = child.stdout.take();
+    let child_stderr = child.stderr.take();
+
+    // Helper: spawn a thread that reads lines and writes to the shared log file + Tauri log.
+    fn spawn_output_reader(
+        stream: impl std::io::Read + Send + 'static,
+        log_path: std::path::PathBuf,
+        label: &'static str,
+    ) {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stream);
+            // Open log file in append mode (create if missing).
+            let mut log_file = match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    log::error!("Failed to open backend log file {}: {e}", log_path.display());
+                    return;
+                }
+            };
+
+            for line in reader.lines() {
+                match line {
+                    Ok(text) => {
+                        // Write to Tauri console via log crate.
+                        if label == "stderr" {
+                            log::error!("[backend {label}] {text}");
+                        } else {
+                            log::info!("[backend {label}] {text}");
+                        }
+                        // Append to log file.
+                        let _ = writeln!(log_file, "[{label}] {text}");
+                    }
+                    Err(e) => {
+                        log::warn!("Error reading backend {label}: {e}");
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    if let Some(stdout) = child_stdout {
+        spawn_output_reader(stdout, log_path.clone(), "stdout");
+    }
+    if let Some(stderr) = child_stderr {
+        spawn_output_reader(stderr, log_path, "stderr");
+    }
 
     // Stash the child handle so we can kill it later.
     let state = app.state::<BackendProcess>();
     *state.0.lock().unwrap() = Some(child);
 
-    // Forward stdout / stderr from the sidecar into the host log.
-    let app_for_log = app.clone();
+    // ---- background health-check (non-blocking, for logging only) ----
+    let app_for_health = app.clone();
     tauri::async_runtime::spawn(async move {
-        use tauri_plugin_shell::process::CommandEvent;
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(bytes) => {
-                    let line = String::from_utf8_lossy(&bytes);
-                    log::info!("[backend] {}", line.trim());
-                }
-                CommandEvent::Stderr(bytes) => {
-                    let line = String::from_utf8_lossy(&bytes);
-                    log::warn!("[backend] {}", line.trim());
-                }
-                CommandEvent::Terminated(payload) => {
-                    log::warn!(
-                        "[backend] Process terminated  code={:?}  signal={:?}",
-                        payload.code,
-                        payload.signal,
-                    );
-                    let _ = app_for_log.emit("backend-terminated", ());
-                    break;
-                }
-                CommandEvent::Error(err) => {
-                    log::error!("[backend] Error: {err}");
-                }
-                _ => {}
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("Failed to build HTTP client for health check: {e}");
+                return;
             }
-        }
-    });
+        };
 
-    // ---- health-check polling ----
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+        let health_url = "http://127.0.0.1:8000/api/v1/health";
+        let max_attempts: u32 = 300; // 300 x 500 ms = 150 s
+        let interval = Duration::from_millis(500);
 
-    let health_url = "http://127.0.0.1:8000/api/v1/health";
-    let max_attempts: u32 = 60; // 60 x 500 ms = 30 s
-    let interval = Duration::from_millis(500);
-
-    for attempt in 1..=max_attempts {
-        match client.get(health_url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                if let Ok(body) = resp.json::<HealthResponse>().await {
-                    if body.status == "healthy" {
-                        log::info!(
-                            "Backend healthy after {attempt} attempts ({:.1}s)",
-                            attempt as f64 * 0.5,
-                        );
-                        let _ = app.emit("backend-ready", ());
-                        return Ok(());
+        for attempt in 1..=max_attempts {
+            match client.get(health_url).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(body) = resp.json::<HealthResponse>().await {
+                        if body.status == "healthy" {
+                            log::info!(
+                                "Backend healthy after {attempt} attempts ({:.1}s)",
+                                attempt as f64 * 0.5,
+                            );
+                            let _ = app_for_health.emit("backend-ready", ());
+                            return;
+                        }
                     }
                 }
+                Ok(resp) => {
+                    log::debug!("Health attempt {attempt}/{max_attempts}: HTTP {}", resp.status());
+                }
+                Err(e) => {
+                    log::debug!("Health attempt {attempt}/{max_attempts}: {e}");
+                }
             }
-            Ok(resp) => {
-                log::debug!("Health attempt {attempt}/{max_attempts}: HTTP {}", resp.status());
-            }
-            Err(e) => {
-                log::debug!("Health attempt {attempt}/{max_attempts}: {e}");
-            }
+            tokio::time::sleep(interval).await;
         }
-        tokio::time::sleep(interval).await;
-    }
 
-    Err(format!(
-        "Backend did not become healthy within {:.0}s",
-        max_attempts as f64 * 0.5,
-    ))
+        log::error!("Backend did not become healthy within 150s");
+        let _ = app_for_health.emit("backend-error", "Backend did not become healthy within 150s".to_string());
+    });
+
+    Ok(())
 }
 
-/// Kill the backend sidecar (called on app exit).
+/// Kill the backend child process (called on app exit).
 fn stop_backend(app: &AppHandle) {
     let state = app.state::<BackendProcess>();
     let mut guard = state.0.lock().unwrap();
-    if let Some(child) = guard.take() {
-        log::info!("Shutting down backend sidecar...");
+    if let Some(mut child) = guard.take() {
+        log::info!("Shutting down backend process (pid: {})...", child.id());
         match child.kill() {
-            Ok(()) => log::info!("Backend sidecar terminated."),
-            Err(e) => log::error!("Failed to kill backend sidecar: {e}"),
+            Ok(()) => {
+                // Wait briefly for the process to fully exit
+                let _ = child.wait();
+                log::info!("Backend process terminated.");
+            }
+            Err(e) => log::error!("Failed to kill backend process: {e}"),
         }
     }
 }
@@ -184,29 +237,19 @@ pub fn run() {
     .init();
 
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .manage(BackendProcess(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![check_backend_health])
         .setup(|app| {
             let handle = app.handle().clone();
 
+            // Window is visible immediately (configured in tauri.conf.json).
+            // The frontend BackendReadinessGate shows a splash screen while
+            // the backend starts up.
             tauri::async_runtime::spawn(async move {
-                match start_backend(&handle).await {
-                    Ok(()) => {
-                        log::info!("Backend ready -- showing main window");
-                        if let Some(win) = handle.get_webview_window("main") {
-                            let _ = win.show();
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Backend startup failed: {e}");
-                        // Show window anyway so the user sees an error state.
-                        if let Some(win) = handle.get_webview_window("main") {
-                            let _ = win.show();
-                        }
-                        let _ = handle.emit("backend-error", e);
-                    }
+                if let Err(e) = start_backend(&handle).await {
+                    log::error!("Backend startup failed: {e}");
+                    let _ = handle.emit("backend-error", e);
                 }
             });
 

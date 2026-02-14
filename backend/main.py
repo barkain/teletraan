@@ -10,9 +10,12 @@ from collections.abc import AsyncIterator
 # ThreadPoolExecutor + SQLite connections can exceed macOS default of 256).
 # The `resource` module is Unix-only; skip on Windows.
 if sys.platform != "win32":
-    import resource
-    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 4096), _hard))
+    try:
+        import resource
+        _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 4096), _hard))
+    except (ImportError, ValueError, OSError):
+        pass
 
 from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
@@ -216,10 +219,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS for frontend (allow any localhost port)
+# Configure CORS for frontend (allow any localhost port + Tauri desktop origins)
+# Tauri v2 custom-protocol uses "tauri://localhost" on macOS;
+# the localhost plugin uses "http://tauri.localhost".
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$|^https?://tauri\.localhost$|^tauri://localhost$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -246,3 +251,16 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 # Include API router with version prefix
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+
+    import uvicorn
+
+    uvicorn.run(app, host=args.host, port=args.port)

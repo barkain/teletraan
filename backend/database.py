@@ -1,6 +1,7 @@
 """Async SQLAlchemy database configuration."""
 
 import logging
+import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import inspect as sa_inspect, text
@@ -12,6 +13,39 @@ from config import get_settings
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+
+def _ensure_sqlite_dir(database_url: str) -> None:
+    """Create the parent directory for a SQLite database file if it doesn't exist.
+
+    Parses the DATABASE_URL to extract the file path and calls os.makedirs()
+    on its parent directory.  This prevents ``sqlite3.OperationalError: unable
+    to open database file`` when the data directory hasn't been pre-created
+    (e.g., when the backend runs as a Tauri sidecar for the first time).
+    """
+    # SQLAlchemy SQLite URLs look like:
+    #   sqlite+aiosqlite:///./data/db.sqlite   (relative)
+    #   sqlite+aiosqlite:////abs/path/db.sqlite (absolute)
+    if not database_url.startswith("sqlite"):
+        return
+
+    # Strip the scheme (everything up to and including "///")
+    prefix = ":///"
+    idx = database_url.find(prefix)
+    if idx == -1:
+        return
+    file_path = database_url[idx + len(prefix):]
+
+    if not file_path:
+        return
+
+    parent = os.path.dirname(file_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+        logger.info("Ensured database directory exists: %s", parent)
+
+
+_ensure_sqlite_dir(settings.DATABASE_URL)
 
 # Create async engine
 engine = create_async_engine(

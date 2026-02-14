@@ -5,6 +5,7 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { Providers } from '@/lib/providers';
 import { Header } from '@/components/layout/header';
 import { Sidebar } from '@/components/layout/sidebar';
+import { BackendReadinessGate } from '@/components/backend-readiness-gate';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -38,13 +39,15 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <Providers>
-            <div className="relative flex min-h-screen flex-col">
-              <Header />
-              <div className="flex flex-1">
-                <Sidebar />
-                <main className="flex-1 p-6">{children}</main>
+            <BackendReadinessGate>
+              <div className="relative flex min-h-screen flex-col">
+                <Header />
+                <div className="flex flex-1">
+                  <Sidebar />
+                  <main className="flex-1 p-6">{children}</main>
+                </div>
               </div>
-            </div>
+            </BackendReadinessGate>
           </Providers>
         </ThemeProvider>
       </body>
