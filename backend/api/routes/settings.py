@@ -153,6 +153,20 @@ async def update_llm_settings(
     return LLMProviderStatus(**status)
 
 
+@router.delete("/llm")
+async def reset_llm_settings(
+    service: LLMSettingsService = Depends(get_llm_service),
+) -> dict[str, str]:
+    """Reset LLM settings to defaults.
+
+    Deletes all saved LLM credentials from the database and clears
+    the corresponding runtime environment variables, reverting to
+    Claude Code subscription as the default provider.
+    """
+    await service.reset()
+    return {"status": "reset", "message": "LLM settings reset to defaults"}
+
+
 @router.post("/llm/test", response_model=LLMTestResult)
 async def test_llm_connection(
     body: LLMTestRequest,

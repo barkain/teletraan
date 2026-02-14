@@ -266,6 +266,45 @@ class LLMSettingsService:
 
         logger.info("LLM settings saved and applied")
 
+    async def reset(self) -> None:
+        """Delete all LLM settings from the database and clear runtime env vars.
+
+        Reverts to Claude Code subscription (the default when no credentials
+        are configured).
+        """
+        import config as config_module
+
+        # Delete all LLM-prefixed rows from user_settings
+        for key in LLM_SETTING_KEYS:
+            db_key = _db_key(key)
+            result = await self.db.execute(
+                select(UserSettings).where(UserSettings.key == db_key)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                await self.db.delete(row)
+
+        await self.db.commit()
+
+        # Clear os.environ entries that were injected by save() / startup loader.
+        # Only remove keys that do NOT originate from .env (we check by seeing
+        # if the key was in our LLM_SETTING_KEYS list — save() only sets these).
+        for key in LLM_SETTING_KEYS:
+            if key in os.environ:
+                del os.environ[key]
+
+        # Clear the cached Settings singleton so it re-resolves defaults
+        config_module.get_settings.cache_clear()
+
+        # Reset the LLM env configured flag so pool picks up new config
+        try:
+            import llm.client_pool as pool_mod
+            pool_mod._llm_env_configured = False
+        except ImportError:
+            pass
+
+        logger.info("LLM settings reset to defaults")
+
 
 async def load_llm_settings_on_startup(db: AsyncSession) -> None:
     """Load saved LLM settings from the database into os.environ.

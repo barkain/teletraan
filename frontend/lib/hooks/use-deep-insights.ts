@@ -21,6 +21,8 @@ export interface DeepInsightParams {
   action?: InsightAction;
   insight_type?: DeepInsightType;
   symbol?: string;
+  start_date?: string;
+  end_date?: string;
 }
 
 /**

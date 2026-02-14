@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Plus, X, Loader2, Settings2, Cpu, Zap, AlertTriangle, Check } from 'lucide-react';
+import { Plus, X, Loader2, Settings2, Cpu, Zap, AlertTriangle, Check, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/select';
 import { ConnectionError } from '@/components/ui/empty-state';
 import { useWatchlist, useUpdateWatchlist } from '@/lib/hooks/use-watchlist';
-import { useLLMSettings, useUpdateLLMSettings, useTestLLMConnection } from '@/lib/hooks/use-llm-settings';
+import { useLLMSettings, useUpdateLLMSettings, useTestLLMConnection, useResetLLMSettings } from '@/lib/hooks/use-llm-settings';
 import { toast } from 'sonner';
 import type { LLMProviderConfig } from '@/types';
 
@@ -42,6 +42,7 @@ export default function SettingsPage() {
   const { data: llmStatus, isLoading: llmLoading, error: llmError } = useLLMSettings();
   const { mutate: updateLLM } = useUpdateLLMSettings();
   const { mutate: testConnection, isPending: llmTesting, data: testResult, reset: resetTest } = useTestLLMConnection();
+  const { mutate: resetLLM, isPending: llmResetting } = useResetLLMSettings();
 
   // Form state for LLM settings -- populated from server data via useEffect
   const [llmForm, setLLMForm] = useState<LLMProviderConfig>({ llm_provider: 'auto' });
@@ -189,6 +190,24 @@ export default function SettingsPage() {
         onError: (err) => toast.error(`Test error: ${err.message}`),
       },
     );
+  };
+
+  const handleResetLLM = () => {
+    if (!confirm('Reset LLM settings? This will clear all saved credentials and revert to Claude Code subscription.')) {
+      return;
+    }
+    resetTest();
+    resetLLM(undefined, {
+      onSuccess: () => {
+        // Reset local form state to defaults
+        userHasEdited.current = false;
+        setLLMForm({ llm_provider: 'auto' });
+        setSaveStatus('idle');
+        setSaveError(null);
+        toast.success('LLM settings reset to defaults');
+      },
+      onError: (err) => toast.error(`Reset failed: ${err.message}`),
+    });
   };
 
   // Watchlist handlers
@@ -476,7 +495,7 @@ export default function SettingsPage() {
                   </div>
                 )}
 
-                {/* Test Connection button */}
+                {/* Test Connection + Reset buttons */}
                 <div className="flex gap-3 pt-2">
                   <Button
                     variant="outline"
@@ -489,6 +508,19 @@ export default function SettingsPage() {
                       <Zap className="h-4 w-4 mr-2" />
                     )}
                     Test Connection
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleResetLLM}
+                    disabled={llmResetting}
+                    className="text-destructive border-destructive/50 hover:bg-destructive/10"
+                  >
+                    {llmResetting ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                    )}
+                    Reset to Defaults
                   </Button>
                 </div>
               </>

@@ -338,6 +338,8 @@ export const api = {
         putApi<LLMProviderStatus>('/api/v1/settings/llm', config),
       test: (body: LLMTestRequest) =>
         postApi<LLMTestResult>('/api/v1/settings/llm/test', body),
+      reset: () =>
+        deleteApi<{ status: string; message: string }>('/api/v1/settings/llm'),
     },
   },
 

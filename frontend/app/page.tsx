@@ -48,7 +48,7 @@ import { GradientProgressBar } from '@/components/insights/gradient-progress-bar
 import { useRecentDeepInsights } from '@/lib/hooks/use-deep-insights';
 import { useAnalysisTask } from '@/lib/hooks/use-analysis-task';
 import { knowledgeApi, outcomesApi } from '@/lib/api';
-import type { InsightAction, AutonomousAnalysisResponse } from '@/types';
+import type { DeepInsight, InsightAction, AutonomousAnalysisResponse } from '@/types';
 import type { TrackRecordStats, MonthlyTrendResponse, OutcomeSummary } from '@/lib/types/track-record';
 import type { PatternsSummary } from '@/lib/types/knowledge';
 
@@ -401,16 +401,33 @@ function MarketStatusBadge() {
 // Custom Tooltip for Charts
 // ============================================
 
+const tooltipStyle = {
+  background: 'rgba(15, 15, 15, 0.92)',
+  backdropFilter: 'blur(12px)',
+  border: '1px solid rgba(255, 255, 255, 0.08)',
+  borderRadius: '12px',
+  padding: '10px 16px',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+} as const;
+
+const tooltipWrapperStyle = {
+  background: 'transparent',
+  border: 'none',
+  boxShadow: 'none',
+  outline: 'none',
+  borderRadius: '12px',
+} as const;
+
 function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border bg-popover/95 backdrop-blur-sm px-3 py-2 text-sm shadow-xl">
-      <p className="font-medium text-foreground mb-1">{label}</p>
+    <div className="text-sm" style={tooltipStyle}>
+      <p className="font-medium text-white/90 mb-1">{label}</p>
       {payload.map((entry, i) => (
-        <div key={i} className="flex items-center gap-2 text-muted-foreground">
+        <div key={i} className="flex items-center gap-2 text-white/60">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
           <span>{entry.name}:</span>
-          <span className="font-medium text-foreground">
+          <span className="font-medium text-white/90">
             {entry.name.toLowerCase().includes('rate') ? `${(entry.value * 100).toFixed(1)}%` : entry.value}
           </span>
         </div>
@@ -423,16 +440,38 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 // Monthly Trend Chart
 // ============================================
 
-function MonthlyTrendChart({ data, isLoading }: { data?: MonthlyTrendResponse; isLoading: boolean }) {
+function MonthlyTrendChart({ data, insights, isLoading }: { data?: MonthlyTrendResponse; insights?: DeepInsight[]; isLoading: boolean }) {
+  const hasBackendData = data?.data && data.data.length > 0;
+
   const chartData = useMemo(() => {
-    if (!data?.data?.length) return [];
-    return data.data.map(d => ({
-      month: d.month,
-      rate: d.rate,
-      total: d.total ?? 0,
-      successful: d.successful ?? 0,
-    }));
-  }, [data]);
+    // Primary: use backend data if available
+    if (hasBackendData) {
+      return data!.data.map(d => ({
+        month: d.month,
+        rate: d.rate,
+        total: d.total ?? 0,
+        successful: d.successful ?? 0,
+      }));
+    }
+    // Fallback: compute from insight creation dates
+    if (insights && insights.length > 0) {
+      const monthlyCounts: Record<string, number> = {};
+      for (const insight of insights) {
+        const date = new Date(insight.created_at);
+        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        monthlyCounts[key] = (monthlyCounts[key] || 0) + 1;
+      }
+      return Object.entries(monthlyCounts)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, total]) => ({
+          month,
+          rate: 0,
+          total,
+          successful: 0,
+        }));
+    }
+    return [];
+  }, [data, hasBackendData, insights]);
 
   return (
     <Card className="bg-card/80 backdrop-blur-sm border-border/50">
@@ -441,7 +480,7 @@ function MonthlyTrendChart({ data, isLoading }: { data?: MonthlyTrendResponse; i
           <Activity className="h-4 w-4 text-primary" />
           <CardTitle className="text-base">Monthly Performance Trend</CardTitle>
         </div>
-        <CardDescription>Success rate and insight volume over time</CardDescription>
+        <CardDescription>{hasBackendData ? 'Success rate and insight volume over time' : 'Insight volume over time'}</CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -468,21 +507,24 @@ function MonthlyTrendChart({ data, isLoading }: { data?: MonthlyTrendResponse; i
                   return months[parseInt(m, 10) - 1] || v;
                 }}
               />
-              <YAxis
-                yAxisId="rate"
-                orientation="left"
-                tick={{ fontSize: 12 }}
-                className="fill-muted-foreground"
-                tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
-                domain={[0, 1]}
-              />
+              {hasBackendData && (
+                <YAxis
+                  yAxisId="rate"
+                  orientation="left"
+                  tick={{ fontSize: 12 }}
+                  className="fill-muted-foreground"
+                  tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
+                  domain={[0, 1]}
+                />
+              )}
               <YAxis
                 yAxisId="count"
-                orientation="right"
+                orientation={hasBackendData ? 'right' : 'left'}
                 tick={{ fontSize: 12 }}
                 className="fill-muted-foreground"
+                allowDecimals={false}
               />
-              <Tooltip content={<ChartTooltip />} />
+              <Tooltip content={<ChartTooltip />} wrapperStyle={tooltipWrapperStyle} cursor={{ stroke: 'rgba(255, 255, 255, 0.15)', strokeWidth: 1 }} />
               <Legend
                 wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
               />
@@ -491,20 +533,22 @@ function MonthlyTrendChart({ data, isLoading }: { data?: MonthlyTrendResponse; i
                 dataKey="total"
                 name="Total Insights"
                 fill="#3b82f6"
-                opacity={0.3}
+                opacity={hasBackendData ? 0.3 : 0.7}
                 radius={[4, 4, 0, 0]}
               />
-              <Area
-                yAxisId="rate"
-                type="monotone"
-                dataKey="rate"
-                name="Success Rate"
-                stroke="#22c55e"
-                strokeWidth={2.5}
-                fill="url(#successGradient)"
-                dot={{ fill: '#22c55e', r: 4, strokeWidth: 0 }}
-                activeDot={{ r: 6, fill: '#22c55e', stroke: '#fff', strokeWidth: 2 }}
-              />
+              {hasBackendData && (
+                <Area
+                  yAxisId="rate"
+                  type="monotone"
+                  dataKey="rate"
+                  name="Success Rate"
+                  stroke="#22c55e"
+                  strokeWidth={2.5}
+                  fill="url(#successGradient)"
+                  dot={{ fill: '#22c55e', r: 4, strokeWidth: 0 }}
+                  activeDot={{ r: 6, fill: '#22c55e', stroke: '#fff', strokeWidth: 2 }}
+                />
+              )}
             </ComposedChart>
           </ResponsiveContainer>
         )}
@@ -517,17 +561,34 @@ function MonthlyTrendChart({ data, isLoading }: { data?: MonthlyTrendResponse; i
 // Action Distribution Donut Chart
 // ============================================
 
-function ActionDistributionChart({ data, isLoading }: { data?: TrackRecordStats; isLoading: boolean }) {
+function ActionDistributionChart({ insights, trackRecord, isLoading }: { insights?: DeepInsight[]; trackRecord?: TrackRecordStats; isLoading: boolean }) {
   const chartData = useMemo(() => {
-    if (!data?.by_action) return [];
-    return Object.entries(data.by_action)
-      .map(([action, stats]) => ({
-        name: action.replace('_', ' '),
-        value: stats.total,
-        fill: ACTION_COLORS[action] || '#6b7280',
-      }))
-      .filter(d => d.value > 0);
-  }, [data]);
+    // Primary source: compute from insights
+    if (insights && insights.length > 0) {
+      const counts: Record<string, number> = {};
+      for (const insight of insights) {
+        counts[insight.action] = (counts[insight.action] || 0) + 1;
+      }
+      return Object.entries(counts)
+        .map(([action, count]) => ({
+          name: action.replace('_', ' '),
+          value: count,
+          fill: ACTION_COLORS[action] || '#6b7280',
+        }))
+        .filter(d => d.value > 0);
+    }
+    // Fallback: use trackRecord if available
+    if (trackRecord?.by_action) {
+      return Object.entries(trackRecord.by_action)
+        .map(([action, stats]) => ({
+          name: action.replace('_', ' '),
+          value: stats.total,
+          fill: ACTION_COLORS[action] || '#6b7280',
+        }))
+        .filter(d => d.value > 0);
+    }
+    return [];
+  }, [insights, trackRecord]);
 
   const totalCount = useMemo(() => chartData.reduce((s, d) => s + d.value, 0), [chartData]);
 
@@ -563,16 +624,18 @@ function ActionDistributionChart({ data, isLoading }: { data?: TrackRecordStats;
                 ))}
               </Pie>
               <Tooltip
+                wrapperStyle={tooltipWrapperStyle}
+                cursor={false}
                 content={({ active, payload }) => {
                   if (!active || !payload?.length) return null;
                   const d = payload[0].payload;
                   return (
-                    <div className="rounded-lg border bg-popover/95 backdrop-blur-sm px-3 py-2 text-sm shadow-xl">
+                    <div className="text-sm" style={tooltipStyle}>
                       <div className="flex items-center gap-2">
                         <span className="h-2 w-2 rounded-full" style={{ backgroundColor: d.fill }} />
-                        <span className="font-medium">{d.name}</span>
+                        <span className="font-medium text-white/90">{d.name}</span>
                       </div>
-                      <p className="text-muted-foreground mt-1">
+                      <p className="text-white/60 mt-1">
                         {d.value} insights ({((d.value / totalCount) * 100).toFixed(1)}%)
                       </p>
                     </div>
@@ -677,12 +740,14 @@ function ConfidenceDistributionChart({ insights, isLoading }: { insights?: { con
                 allowDecimals={false}
               />
               <Tooltip
+                wrapperStyle={tooltipWrapperStyle}
+                cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }}
                 content={({ active, payload, label }) => {
                   if (!active || !payload?.length) return null;
                   return (
-                    <div className="rounded-lg border bg-popover/95 backdrop-blur-sm px-3 py-2 text-sm shadow-xl">
-                      <p className="font-medium">{label}</p>
-                      <p className="text-muted-foreground">{payload[0].value} insights</p>
+                    <div className="text-sm" style={tooltipStyle}>
+                      <p className="font-medium text-white/90">{label}</p>
+                      <p className="text-white/60">{payload[0].value} insights</p>
                     </div>
                   );
                 }}
@@ -704,19 +769,42 @@ function ConfidenceDistributionChart({ insights, isLoading }: { insights?: { con
 // Performance by Insight Type (Horizontal Bar)
 // ============================================
 
-function PerformanceByTypeChart({ data, isLoading }: { data?: TrackRecordStats; isLoading: boolean }) {
+function PerformanceByTypeChart({ insights, trackRecord, isLoading }: { insights?: DeepInsight[]; trackRecord?: TrackRecordStats; isLoading: boolean }) {
+  const hasTrackRecord = trackRecord?.by_type && Object.keys(trackRecord.by_type).length > 0;
+
   const chartData = useMemo(() => {
-    if (!data?.by_type) return [];
-    return Object.entries(data.by_type)
-      .map(([type, stats]) => ({
-        type: type.charAt(0).toUpperCase() + type.slice(1),
-        success_rate: stats.success_rate,
-        total: stats.total,
-        fill: TYPE_COLORS[type] || '#6b7280',
-      }))
-      .filter(d => d.total > 0)
-      .sort((a, b) => b.success_rate - a.success_rate);
-  }, [data]);
+    // Primary: use trackRecord if it has data (includes success rates)
+    if (hasTrackRecord) {
+      return Object.entries(trackRecord!.by_type)
+        .map(([type, stats]) => ({
+          type: type.charAt(0).toUpperCase() + type.slice(1),
+          value: stats.success_rate,
+          total: stats.total,
+          fill: TYPE_COLORS[type] || '#6b7280',
+          isRate: true,
+        }))
+        .filter(d => d.total > 0)
+        .sort((a, b) => b.value - a.value);
+    }
+    // Fallback: compute counts from insights
+    if (insights && insights.length > 0) {
+      const counts: Record<string, number> = {};
+      for (const insight of insights) {
+        const type = insight.insight_type || 'other';
+        counts[type] = (counts[type] || 0) + 1;
+      }
+      return Object.entries(counts)
+        .map(([type, count]) => ({
+          type: type.charAt(0).toUpperCase() + type.slice(1),
+          value: count,
+          total: count,
+          fill: TYPE_COLORS[type] || '#6b7280',
+          isRate: false,
+        }))
+        .sort((a, b) => b.value - a.value);
+    }
+    return [];
+  }, [insights, trackRecord, hasTrackRecord]);
 
   return (
     <Card className="bg-card/80 backdrop-blur-sm border-border/50">
@@ -725,13 +813,13 @@ function PerformanceByTypeChart({ data, isLoading }: { data?: TrackRecordStats; 
           <Layers className="h-4 w-4 text-primary" />
           <CardTitle className="text-base">Performance by Insight Type</CardTitle>
         </div>
-        <CardDescription>Success rate per category</CardDescription>
+        <CardDescription>{hasTrackRecord ? 'Success rate per category' : 'Insight count per category'}</CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading ? (
           <ChartSkeleton />
         ) : chartData.length === 0 ? (
-          <EmptyChartState message="No performance data yet" />
+          <EmptyChartState message="No insight type data yet" />
         ) : (
           <ResponsiveContainer width="100%" height={300}>
             <BarChart
@@ -744,8 +832,9 @@ function PerformanceByTypeChart({ data, isLoading }: { data?: TrackRecordStats; 
                 type="number"
                 tick={{ fontSize: 12 }}
                 className="fill-muted-foreground"
-                tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
-                domain={[0, 1]}
+                tickFormatter={hasTrackRecord ? (v: number) => `${(v * 100).toFixed(0)}%` : undefined}
+                domain={hasTrackRecord ? [0, 1] : undefined}
+                allowDecimals={!hasTrackRecord ? false : undefined}
               />
               <YAxis
                 type="category"
@@ -755,21 +844,29 @@ function PerformanceByTypeChart({ data, isLoading }: { data?: TrackRecordStats; 
                 width={90}
               />
               <Tooltip
+                wrapperStyle={tooltipWrapperStyle}
+                cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }}
                 content={({ active, payload }) => {
                   if (!active || !payload?.length) return null;
                   const d = payload[0].payload;
                   return (
-                    <div className="rounded-lg border bg-popover/95 backdrop-blur-sm px-3 py-2 text-sm shadow-xl">
-                      <p className="font-medium">{d.type}</p>
-                      <p className="text-muted-foreground">
-                        Success Rate: {(d.success_rate * 100).toFixed(1)}%
-                      </p>
-                      <p className="text-muted-foreground">{d.total} insights</p>
+                    <div className="text-sm" style={tooltipStyle}>
+                      <p className="font-medium text-white/90">{d.type}</p>
+                      {d.isRate ? (
+                        <p className="text-white/60">
+                          Success Rate: {(d.value * 100).toFixed(1)}%
+                        </p>
+                      ) : (
+                        <p className="text-white/60">
+                          {d.value} insights
+                        </p>
+                      )}
+                      <p className="text-white/60">{d.total} total</p>
                     </div>
                   );
                 }}
               />
-              <Bar dataKey="success_rate" radius={[0, 6, 6, 0]}>
+              <Bar dataKey="value" radius={[0, 6, 6, 0]}>
                 {chartData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.fill} />
                 ))}
@@ -844,8 +941,23 @@ function OutcomeTrackingStats({ data, isLoading }: { data?: OutcomeSummary; isLo
               </div>
             ))}
           </div>
-        ) : !data ? (
-          <EmptyChartState message="No outcome data yet" height={180} />
+        ) : !data || (data.total_tracked === 0 && data.completed === 0 && data.currently_tracking === 0) ? (
+          <div className="flex items-center justify-center" style={{ height: 180 }}>
+            <div className="text-center space-y-3">
+              <Activity className="h-8 w-8 mx-auto opacity-30 text-muted-foreground" />
+              <div>
+                <p className="text-sm text-muted-foreground">Start tracking outcomes to see performance metrics</p>
+                <p className="text-xs text-muted-foreground/60 mt-1">Outcomes are tracked automatically for insights with symbols</p>
+              </div>
+              <Link
+                href="/track-record"
+                className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                Go to Track Record
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+          </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
             {miniStats.map((item) => {
@@ -893,7 +1005,49 @@ function OutcomeTrackingStats({ data, isLoading }: { data?: OutcomeSummary; isLo
 // Top Symbols & Sectors
 // ============================================
 
-function TopSymbolsSectors({ data, isLoading }: { data?: PatternsSummary; isLoading: boolean }) {
+function TopSymbolsSectors({ patternsSummary, insights, isLoading }: { patternsSummary?: PatternsSummary; insights?: DeepInsight[]; isLoading: boolean }) {
+  // Compute symbols and sectors from insights as fallback
+  const insightSymbols = useMemo(() => {
+    if (!insights || insights.length === 0) return [];
+    const counts: Record<string, number> = {};
+    for (const insight of insights) {
+      if (insight.primary_symbol) {
+        counts[insight.primary_symbol] = (counts[insight.primary_symbol] || 0) + 2; // weight primary higher
+      }
+      if (insight.related_symbols) {
+        for (const sym of insight.related_symbols) {
+          counts[sym] = (counts[sym] || 0) + 1;
+        }
+      }
+    }
+    return Object.entries(counts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([symbol]) => symbol);
+  }, [insights]);
+
+  const insightSectors = useMemo(() => {
+    if (!insights || insights.length === 0) return [];
+    const counts: Record<string, number> = {};
+    for (const insight of insights) {
+      if (insight.discovery_context?.top_sectors) {
+        for (const sector of insight.discovery_context.top_sectors) {
+          counts[sector] = (counts[sector] || 0) + 1;
+        }
+      }
+    }
+    return Object.entries(counts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([sector]) => sector);
+  }, [insights]);
+
+  // Use patterns summary if available, otherwise use insight-derived data
+  const hasPatternData = patternsSummary && (patternsSummary.top_symbols.length > 0 || patternsSummary.top_sectors.length > 0);
+  const topSymbols = hasPatternData ? patternsSummary!.top_symbols : insightSymbols;
+  const topSectors = hasPatternData ? patternsSummary!.top_sectors : insightSectors;
+  const hasAnyData = topSymbols.length > 0 || topSectors.length > 0;
+
   return (
     <Card className="bg-card/80 backdrop-blur-sm border-border/50">
       <CardHeader className="pb-2">
@@ -911,7 +1065,12 @@ function TopSymbolsSectors({ data, isLoading }: { data?: PatternsSummary; isLoad
           </Link>
         </div>
         <CardDescription>
-          {data ? `${data.total} patterns (${data.active} active)` : 'Most referenced in patterns'}
+          {hasPatternData
+            ? `${patternsSummary!.total} patterns (${patternsSummary!.active} active)`
+            : hasAnyData
+              ? 'Most referenced in insights'
+              : 'Most referenced in patterns'
+          }
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -921,15 +1080,15 @@ function TopSymbolsSectors({ data, isLoading }: { data?: PatternsSummary; isLoad
               <Skeleton key={i} className="h-6 w-full" />
             ))}
           </div>
-        ) : !data || (data.top_symbols.length === 0 && data.top_sectors.length === 0) ? (
-          <EmptyChartState message="No pattern data yet" height={180} />
+        ) : !hasAnyData ? (
+          <EmptyChartState message="No symbol or sector data yet" height={180} />
         ) : (
           <div className="grid grid-cols-2 gap-4">
             {/* Top Symbols */}
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Symbols</p>
               <div className="space-y-1.5">
-                {data.top_symbols.slice(0, 5).map((symbol, i) => (
+                {topSymbols.slice(0, 5).map((symbol, i) => (
                   <Link
                     key={symbol}
                     href={`/stocks/${symbol}`}
@@ -944,7 +1103,7 @@ function TopSymbolsSectors({ data, isLoading }: { data?: PatternsSummary; isLoad
                     </Badge>
                   </Link>
                 ))}
-                {data.top_symbols.length === 0 && (
+                {topSymbols.length === 0 && (
                   <p className="text-xs text-muted-foreground">None yet</p>
                 )}
               </div>
@@ -954,7 +1113,7 @@ function TopSymbolsSectors({ data, isLoading }: { data?: PatternsSummary; isLoad
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">Sectors</p>
               <div className="space-y-1.5">
-                {data.top_sectors.slice(0, 5).map((sector, i) => (
+                {topSectors.slice(0, 5).map((sector, i) => (
                   <div key={sector} className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground w-4">{i + 1}.</span>
                     <Badge variant="secondary" className="text-xs">
@@ -962,7 +1121,7 @@ function TopSymbolsSectors({ data, isLoading }: { data?: PatternsSummary; isLoad
                     </Badge>
                   </div>
                 ))}
-                {data.top_sectors.length === 0 && (
+                {topSectors.length === 0 && (
                   <p className="text-xs text-muted-foreground">None yet</p>
                 )}
               </div>
@@ -971,11 +1130,11 @@ function TopSymbolsSectors({ data, isLoading }: { data?: PatternsSummary; isLoad
         )}
 
         {/* Pattern type breakdown */}
-        {data?.by_type && Object.keys(data.by_type).length > 0 && (
+        {patternsSummary?.by_type && Object.keys(patternsSummary.by_type).length > 0 && (
           <div className="mt-3 pt-3 border-t border-border/30">
             <p className="text-xs text-muted-foreground mb-2">Pattern Types</p>
             <div className="flex flex-wrap gap-2">
-              {Object.entries(data.by_type).map(([type, count]) => (
+              {Object.entries(patternsSummary.by_type).map(([type, count]) => (
                 <Badge key={type} variant="outline" className="text-xs gap-1">
                   {type.replace(/_/g, ' ').toLowerCase()}
                   <span className="text-muted-foreground">{count}</span>
@@ -1011,7 +1170,7 @@ function EmptyChartState({ message, height = 300 }: { message: string; height?: 
 
 export default function DashboardPage() {
   // Fetch insights for stats & confidence distribution
-  const { data: allInsightsData, isLoading: isLoadingInsights } = useRecentDeepInsights(9);
+  const { data: allInsightsData, isLoading: isLoadingInsights } = useRecentDeepInsights(100);
 
   // Fetch track record stats
   const { data: trackRecord, isLoading: isLoadingTrackRecord } = useQuery<TrackRecordStats>({
@@ -1140,8 +1299,8 @@ export default function DashboardPage() {
 
       {/* Row 2: Monthly Trend + Action Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <MonthlyTrendChart data={monthlyTrend} isLoading={isLoadingTrend} />
-        <ActionDistributionChart data={trackRecord} isLoading={isLoadingTrackRecord} />
+        <MonthlyTrendChart data={monthlyTrend} insights={allInsightsData?.items} isLoading={isLoadingTrend && isLoadingInsights} />
+        <ActionDistributionChart insights={allInsightsData?.items} trackRecord={trackRecord} isLoading={isLoadingInsights && isLoadingTrackRecord} />
       </div>
 
       {/* Row 3: Confidence Distribution + Performance by Type */}
@@ -1150,13 +1309,13 @@ export default function DashboardPage() {
           insights={allInsightsData?.items}
           isLoading={isLoadingInsights}
         />
-        <PerformanceByTypeChart data={trackRecord} isLoading={isLoadingTrackRecord} />
+        <PerformanceByTypeChart insights={allInsightsData?.items} trackRecord={trackRecord} isLoading={isLoadingInsights && isLoadingTrackRecord} />
       </div>
 
       {/* Row 4: Outcome Tracking + Top Symbols & Sectors */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <OutcomeTrackingStats data={outcomesSummary} isLoading={isLoadingOutcomes} />
-        <TopSymbolsSectors data={patternsSummary} isLoading={isLoadingPatterns} />
+        <TopSymbolsSectors patternsSummary={patternsSummary} insights={allInsightsData?.items} isLoading={isLoadingPatterns && isLoadingInsights} />
       </div>
     </div>
   );

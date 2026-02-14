@@ -108,6 +108,8 @@ async def list_deep_insights(
     action: str | None = None,
     insight_type: str | None = None,
     symbol: str | None = None,
+    start_date: str | None = Query(default=None, description="Filter insights created on or after this date (YYYY-MM-DD)"),
+    end_date: str | None = Query(default=None, description="Filter insights created on or before this date (YYYY-MM-DD)"),
 ):
     """List deep insights with filtering."""
     query = select(DeepInsight).order_by(desc(DeepInsight.created_at))
@@ -128,6 +130,19 @@ async def list_deep_insights(
             (DeepInsight.primary_symbol == symbol)
             | (DeepInsight.related_symbols.contains([symbol]))
         )
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            query = query.where(DeepInsight.created_at >= start_dt)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            # Include the entire end date by setting time to end of day
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            query = query.where(DeepInsight.created_at <= end_dt)
+        except ValueError:
+            pass
 
     # Count total
     count_query = select(func.count()).select_from(query.subquery())

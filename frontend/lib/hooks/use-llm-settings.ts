@@ -53,6 +53,17 @@ export function useUpdateLLMSettings() {
   });
 }
 
+export function useResetLLMSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation<{ status: string; message: string }, Error, void>({
+    mutationFn: () => api.settings.llm.reset(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: llmSettingsKeys.all });
+    },
+  });
+}
+
 export function useTestLLMConnection() {
   return useMutation<LLMTestResult, Error, LLMTestRequest>({
     mutationFn: (body) => api.settings.llm.test(body),
