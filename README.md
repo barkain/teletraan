@@ -46,7 +46,7 @@ Or run from source -- see [Quick Start](#quick-start).
 ### Install and Run
 
 ```bash
-git clone https://github.com/yourusername/teletraan.git
+git clone https://github.com/barkain/teletraan.git
 cd teletraan
 ./start.sh
 ```
@@ -95,6 +95,6 @@ Teletraan is licensed under the **MIT License**. See [LICENSE](LICENSE) for deta
 
 **Built with FastAPI, Next.js, and Claude Agent SDK**
 
-[Report Bug](https://github.com/yourusername/teletraan/issues) · [Request Feature](https://github.com/yourusername/teletraan/issues)
+[Report Bug](https://github.com/barkain/teletraan/issues) · [Request Feature](https://github.com/barkain/teletraan/issues)
 
 </div>
