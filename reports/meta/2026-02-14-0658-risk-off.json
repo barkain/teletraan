@@ -1,0 +1,38 @@
+{
+  "filename": "2026-02-14-0658-risk-off.html",
+  "task_id": "a5c94e7c-1c8c-44f8-8b0e-494f7692dec5",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Risk-Off\n\n**Key Macro Themes:**\n- Geopolitical Risk Premium & Safe Haven Rotation: Gold's explosive +9.45% rally to $5,022/oz signals acute safe haven demand, likely driven by geopoli...\n- Growth-to-Value Rotation & Rate Cut Expectations: Sharply falling yields (5Y -5.72%, 10Y -4.14%) suggest markets pricing in Fed rate cuts, possibly du...\n- Commodity & Energy Complex Strength: Energy sector leading with +13.97% despite oil only +5.80% (note: data shows oil trend as 'down' whi...\n\n**Heatmap Analysis:** The market is exhibiting a classic risk-off defensive rotation, with Utilities (+2.76%), Real Estate (+1.47%), and Healthcare (+1.07%) leading on the day, while growth-sensitive sectors like Financials (-0.08%), Communication Services (-0.05%), and Consumer Discretionary (+0.04%) lag. The 20-day performance confirms a sustained flight to safety: Energy (+13.09%), Materials (+9.35%), and Consumer Staples (+8.85%) dominate, while Technology (-3.55%), Consumer Discretionary (-4.97%), and Financials (-4.62%) suffer from growth derating amid elevated VIX and falling yields.\n\n**Sectors Scanned:**\n- Technology: +0.3% (1D), breadth 50%\n- Financials: -0.1% (1D), breadth 50%\n- Energy: +0.7% (1D), breadth 50%\n- Healthcare: +1.1% (1D), breadth 50%\n- Industrials: +0.8% (1D), breadth 50%\n- Consumer Staples: +0.3% (1D), breadth 50%\n- Consumer Discretionary: +0.0% (1D), breadth 50%\n- Utilities: +2.8% (1D), breadth 50%\n- Communication Services: -0.1% (1D), breadth 50%\n- Real Estate: +1.5% (1D), breadth 50%\n- Materials: +0.9% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Defensive sectors (Utilities, Real Estate, Healthcare) showing coordinated 1-day strength while cyclicals lag, confirming acute risk-off sentiment\n- Multi-week commodity complex dominance: Energy +13.09% and Materials +9.35% over 20 days, vastly outperforming tech-heavy sectors\n- Growth-to-value rotation accelerating: Technology (-3.55% 20D) and Consumer Discretionary (-4.97% 20D) underperforming despite positive 1-day print",
+  "top_sectors": [
+    "Energy +13.1%",
+    "Materials +9.4%",
+    "Consumer Staples +8.9%",
+    "Utilities +7.7%",
+    "Industrials +6.0%",
+    "Real Estate +5.1%"
+  ],
+  "insights_count": 6,
+  "symbols": [
+    "CL=F",
+    "GC=F",
+    "GOOGL",
+    "NVDA",
+    "RGTI",
+    "XOM"
+  ],
+  "action_counts": {
+    "SELL": 2,
+    "STRONG_BUY": 1,
+    "BUY": 2,
+    "HOLD": 1
+  },
+  "avg_confidence": 0.8,
+  "insight_types": [
+    "opportunity",
+    "risk"
+  ],
+  "created_at": "2026-02-14T06:58:03",
+  "started_at": "2026-02-14T06:58:03.806649",
+  "completed_at": "2026-02-14T07:50:08.647879",
+  "elapsed_seconds": 3124.839638
+}
