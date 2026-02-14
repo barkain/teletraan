@@ -88,6 +88,7 @@ class AnalysisTaskResponse(BaseModel):
     elapsed_seconds: float | None = None
     started_at: str | None = None
     completed_at: str | None = None
+    activity: list[dict] | None = None  # LLM activity log entries
 
 
 class StartAnalysisResponse(BaseModel):
@@ -590,6 +591,7 @@ async def start_autonomous_analysis(
 async def get_analysis_status(
     task_id: str,
     db: AsyncSession = Depends(get_db),
+    since_activity_seq: int = Query(default=0, description="Cursor for incremental activity fetch"),
 ):
     """Get the status of a background analysis task.
 
@@ -598,6 +600,7 @@ async def get_analysis_status(
     Args:
         task_id: The task ID returned from /autonomous/start.
         db: Database session.
+        since_activity_seq: Sequence number for incremental activity log fetch.
 
     Returns:
         AnalysisTaskResponse with current status and progress.
@@ -618,6 +621,16 @@ async def get_analysis_status(
     except ValueError:
         phase_name = task.current_phase
 
+    # Fetch activity log if task is running (not in terminal state)
+    activity = None
+    is_running = task.status not in ["completed", "failed", "cancelled"]
+    if is_running and since_activity_seq >= 0:
+        try:
+            engine = get_autonomous_engine()
+            activity = engine.get_activity_log(since_activity_seq)
+        except Exception as e:
+            logger.debug("Failed to fetch activity log: %s", e)
+
     return AnalysisTaskResponse(
         id=task.id,
         status=task.status,
@@ -635,6 +648,7 @@ async def get_analysis_status(
         elapsed_seconds=task.elapsed_seconds,
         started_at=task.started_at.isoformat() if task.started_at else None,
         completed_at=task.completed_at.isoformat() if task.completed_at else None,
+        activity=activity,
     )
 
 

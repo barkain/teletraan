@@ -23,6 +23,8 @@ import {
   PieChart as PieChartIcon,
   Hash,
   Layers,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import {
   ComposedChart,
@@ -43,8 +45,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { AnalysisSummaryBanner } from '@/components/insights/analysis-summary-banner';
 import { GradientProgressBar } from '@/components/insights/gradient-progress-bar';
+import { LLMActivityFeed } from '@/components/insights/llm-activity-feed';
 import { useRecentDeepInsights } from '@/lib/hooks/use-deep-insights';
 import { useAnalysisTask } from '@/lib/hooks/use-analysis-task';
 import { knowledgeApi, outcomesApi } from '@/lib/api';
@@ -269,6 +273,7 @@ interface AnalysisStatusBannerProps {
   isCancelled?: boolean;
   elapsedSeconds?: number;
   onCancel?: () => void;
+  activityLog?: any[];
   task?: {
     market_regime?: string | null;
     top_sectors?: string[] | null;
@@ -288,8 +293,10 @@ function AnalysisStatusBanner({
   isCancelled,
   elapsedSeconds = 0,
   onCancel,
+  activityLog = [],
   task,
 }: AnalysisStatusBannerProps) {
+  const [activityExpanded, setActivityExpanded] = useState(false);
   if (error) {
     return (
       <div className="flex items-center gap-3 px-4 py-3 bg-destructive/10 border border-destructive/20 rounded-lg">
@@ -316,39 +323,54 @@ function AnalysisStatusBanner({
 
   if (isRunning) {
     return (
-      <div className="px-4 py-4 bg-primary/5 border border-primary/20 rounded-lg">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            <p className="font-medium text-sm">Autonomous Analysis in Progress</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <Timer className="h-4 w-4" />
-              <span className="font-mono">{formatElapsedTime(elapsedSeconds)}</span>
+      <Collapsible open={activityExpanded} onOpenChange={setActivityExpanded}>
+        <CollapsibleTrigger asChild>
+          <div className="cursor-pointer px-4 py-4 bg-primary/5 border border-primary/20 rounded-lg hover:bg-primary/10 transition-colors">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <p className="font-medium text-sm">Autonomous Analysis in Progress</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <Timer className="h-4 w-4" />
+                  <span className="font-mono">{formatElapsedTime(elapsedSeconds)}</span>
+                </div>
+                {onCancel && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCancel();
+                    }}
+                    className="h-7 px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <XCircle className="h-4 w-4 mr-1" />
+                    Cancel
+                  </Button>
+                )}
+                <span className="text-xs text-muted-foreground hidden sm:inline">
+                  {Math.round(progress)}%
+                </span>
+                {activityExpanded ? (
+                  <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                )}
+              </div>
             </div>
-            {onCancel && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onCancel}
-                className="h-7 px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-              >
-                <XCircle className="h-4 w-4 mr-1" />
-                Cancel
-              </Button>
-            )}
-            <span className="text-xs text-muted-foreground hidden sm:inline">
-              {Math.round(progress)}%
-            </span>
+            <GradientProgressBar
+              progress={progress}
+              phaseName={phaseName || undefined}
+              phaseDetails={phaseDetails || undefined}
+            />
           </div>
-        </div>
-        <GradientProgressBar
-          progress={progress}
-          phaseName={phaseName || undefined}
-          phaseDetails={phaseDetails || undefined}
-        />
-      </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-3">
+          <LLMActivityFeed entries={activityLog} />
+        </CollapsibleContent>
+      </Collapsible>
     );
   }
 
@@ -1219,6 +1241,7 @@ export default function DashboardPage() {
     isCancelled: isAnalysisCancelled,
     error: analysisError,
     elapsedSeconds,
+    activityLog,
     startAnalysis,
     cancelAnalysis,
   } = useAnalysisTask({
@@ -1306,6 +1329,7 @@ export default function DashboardPage() {
           isCancelled={isAnalysisCancelled}
           elapsedSeconds={elapsedSeconds}
           onCancel={cancelAnalysis}
+          activityLog={activityLog}
           task={task}
         />
       )}

@@ -9,6 +9,19 @@ import { deepInsightKeys } from '@/lib/hooks/use-deep-insights';
 // Types
 // ============================================
 
+export interface LLMActivityEntry {
+  seq: number;
+  timestamp: string;
+  phase: string;
+  agent_name: string;
+  prompt_preview: string;
+  response_preview: string;
+  input_tokens: number;
+  output_tokens: number;
+  duration_ms: number;
+  status: 'running' | 'done' | 'error';
+}
+
 export interface AnalysisTaskStatus {
   id: string;
   status: string;
@@ -26,6 +39,7 @@ export interface AnalysisTaskStatus {
   elapsed_seconds: number | null;
   started_at: string | null;
   completed_at: string | null;
+  activity?: LLMActivityEntry[] | null;
 }
 
 export interface StartAnalysisResponse {
@@ -50,6 +64,7 @@ export interface UseAnalysisTaskResult {
   isCancelled: boolean;
   error: string | null;
   elapsedSeconds: number;
+  activityLog: LLMActivityEntry[];
 
   // Actions
   startAnalysis: (params?: { max_insights?: number; deep_dive_count?: number }) => Promise<void>;
@@ -72,8 +87,10 @@ async function startBackgroundAnalysis(params?: {
   return postApi<StartAnalysisResponse>('/api/v1/deep-insights/autonomous/start', params);
 }
 
-async function getTaskStatus(taskId: string): Promise<AnalysisTaskStatus> {
-  return fetchApi<AnalysisTaskStatus>(`/api/v1/deep-insights/autonomous/status/${taskId}`);
+async function getTaskStatus(taskId: string, sinceActivitySeq: number = 0): Promise<AnalysisTaskStatus> {
+  return fetchApi<AnalysisTaskStatus>(
+    `/api/v1/deep-insights/autonomous/status/${taskId}?since_activity_seq=${sinceActivitySeq}`
+  );
 }
 
 async function getActiveTask(): Promise<AnalysisTaskStatus | null> {
@@ -107,6 +124,8 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
   const [error, setError] = useState<string | null>(null);
   const [_startTime, setStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [activityLog, setActivityLog] = useState<LLMActivityEntry[]>([]);
+  const [activitySeqCursor, setActivitySeqCursor] = useState<number>(0);
 
   // Refs for callbacks to avoid stale closures
   const onCompleteRef = useRef(onComplete);
@@ -168,8 +187,19 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
 
       const poll = async () => {
         try {
-          const status = await getTaskStatus(id);
+          const status = await getTaskStatus(id, activitySeqCursor);
           setTask(status);
+
+          // Merge new activity entries incrementally
+          if (status.activity && status.activity.length > 0) {
+            setActivityLog((prev) => {
+              const merged = [...prev, ...status.activity!];
+              // Update cursor to highest seq number
+              const maxSeq = Math.max(...merged.map((e) => e.seq));
+              setActivitySeqCursor(maxSeq);
+              return merged;
+            });
+          }
 
           if (status.status === 'completed') {
             stopPolling();
@@ -213,6 +243,8 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
         setError(null);
         setElapsedSeconds(0);
         setStartTime(null);
+        setActivityLog([]);
+        setActivitySeqCursor(0);
 
         const response = await startBackgroundAnalysis(params);
 
@@ -354,6 +386,8 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
     setError(null);
     setStartTime(null);
     setElapsedSeconds(0);
+    setActivityLog([]);
+    setActivitySeqCursor(0);
     localStorage.removeItem(TASK_ID_STORAGE_KEY);
   }, [stopPolling]);
 
@@ -381,6 +415,7 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
     isCancelled,
     error,
     elapsedSeconds,
+    activityLog,
     startAnalysis,
     cancelAnalysis,
     checkForActiveTask,

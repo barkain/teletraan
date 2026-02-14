@@ -108,6 +108,37 @@ _HAS_SENTIMENT = importlib.util.find_spec("data.adapters.reddit_sentiment") is n
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class LLMActivityEntry:
+    """Record of a single LLM query during analysis."""
+
+    seq: int  # auto-increment sequence number
+    timestamp: str  # ISO datetime
+    phase: str  # e.g. "macro_scan", "deep_dive"
+    agent_name: str  # e.g. "technical", "synthesis"
+    prompt_preview: str  # first ~300 chars of user_prompt
+    response_preview: str  # first ~500 chars of response (filled after completion)
+    input_tokens: int  # from LLMQueryResult
+    output_tokens: int
+    duration_ms: int
+    status: str  # "running" | "done" | "error"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict for JSON response."""
+        return {
+            "seq": self.seq,
+            "timestamp": self.timestamp,
+            "phase": self.phase,
+            "agent_name": self.agent_name,
+            "prompt_preview": self.prompt_preview,
+            "response_preview": self.response_preview,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "duration_ms": self.duration_ms,
+            "status": self.status,
+        }
+
+
 # Valid insight types and actions for validation
 VALID_INSIGHT_TYPES = {t.value for t in InsightType}
 VALID_ACTIONS = {a.value for a in InsightAction}
@@ -321,6 +352,10 @@ class AutonomousDeepEngine:
         # Per-run metrics accumulator (set at the start of each analysis run)
         self._run_metrics: RunMetrics | None = None
 
+        # Activity log for live LLM tracking
+        self._activity_log: list[LLMActivityEntry] = []
+        self._activity_seq: int = 0
+
         # Phase 1: Macro Scanner
         self.macro_scanner = MacroScanner()
 
@@ -482,6 +517,9 @@ class AutonomousDeepEngine:
         analysis_id = str(uuid4())
         start_time = datetime.utcnow()
         result = AutonomousAnalysisResult(analysis_id=analysis_id)
+
+        # Clear activity log for new run
+        self.clear_activity_log()
 
         # Initialise per-run metrics accumulator
         metrics = RunMetrics()
@@ -909,6 +947,7 @@ class AutonomousDeepEngine:
             formatted_context,
             "Analyze the heatmap data and select stocks for deep dive.",
             "heatmap_analyzer",
+            "heatmap_analysis",
         )
 
         return parse_heatmap_analysis_response(response)
@@ -979,6 +1018,7 @@ class AutonomousDeepEngine:
             COVERAGE_EVALUATOR_PROMPT,
             formatted_context,
             "coverage_evaluator",
+            "coverage_evaluation",
         )
 
         evaluation = parse_coverage_response(response)
@@ -1172,7 +1212,7 @@ class AutonomousDeepEngine:
         full_context = f"{autonomous_context}{portfolio_context}\n\n{synthesis_context}"
 
         # Query LLM
-        response = await self._query_llm(enhanced_prompt, full_context, "synthesis")
+        response = await self._query_llm(enhanced_prompt, full_context, "synthesis", "synthesis")
 
         return parse_synthesis_response(response)
 
@@ -1788,6 +1828,7 @@ class AutonomousDeepEngine:
             SECTOR_ROTATOR_PROMPT,
             formatted_context,
             "sector_rotator",
+            "sector_rotation",
         )
 
         return parse_sector_rotator_response(response)
@@ -1854,6 +1895,7 @@ class AutonomousDeepEngine:
             OPPORTUNITY_HUNTER_PROMPT,
             formatted_context,
             "opportunity_hunter",
+            "opportunity_hunt",
         )
 
         return parse_opportunity_response(response)
@@ -2062,7 +2104,7 @@ class AutonomousDeepEngine:
         for attempt in range(self.max_retries + 1):
             try:
                 async with self._llm_semaphore:
-                    response = await self._query_llm(prompt, full_context, analyst_name)
+                    response = await self._query_llm(prompt, full_context, analyst_name, "deep_dive")
                 parsed = parse_func(response)
 
                 if hasattr(parsed, "to_dict"):
@@ -2145,7 +2187,7 @@ class AutonomousDeepEngine:
         full_context = f"{autonomous_context}{portfolio_context}\n\n{synthesis_context}"
 
         # Query LLM
-        response = await self._query_llm(enhanced_prompt, full_context, "synthesis")
+        response = await self._query_llm(enhanced_prompt, full_context, "synthesis", "synthesis")
 
         return parse_synthesis_response(response)
 
@@ -2482,11 +2524,65 @@ class AutonomousDeepEngine:
 
         return "\n".join(lines)
 
+    def _record_activity_start(
+        self,
+        agent_name: str,
+        user_prompt: str,
+        phase: str = "unknown",
+    ) -> int:
+        """Record the start of an LLM query. Returns the activity entry index."""
+        self._activity_seq += 1
+        entry = LLMActivityEntry(
+            seq=self._activity_seq,
+            timestamp=datetime.utcnow().isoformat(),
+            phase=phase,
+            agent_name=agent_name,
+            prompt_preview=user_prompt[:300],
+            response_preview="",
+            input_tokens=0,
+            output_tokens=0,
+            duration_ms=0,
+            status="running",
+        )
+        self._activity_log.append(entry)
+        return len(self._activity_log) - 1
+
+    def _record_activity_end(
+        self,
+        entry_idx: int,
+        result: LLMQueryResult,
+        duration_ms: int,
+    ) -> None:
+        """Update activity log entry with response and metrics."""
+        if entry_idx < len(self._activity_log):
+            entry = self._activity_log[entry_idx]
+            entry.response_preview = result.text[:500]
+            entry.input_tokens = result.input_tokens
+            entry.output_tokens = result.output_tokens
+            entry.duration_ms = duration_ms
+            entry.status = "done"
+
+    def _record_activity_error(self, entry_idx: int) -> None:
+        """Mark activity log entry as errored."""
+        if entry_idx < len(self._activity_log):
+            entry = self._activity_log[entry_idx]
+            entry.status = "error"
+
+    def get_activity_log(self, since_seq: int = 0) -> list[dict]:
+        """Get activity log entries since a given sequence number."""
+        return [e.to_dict() for e in self._activity_log if e.seq > since_seq]
+
+    def clear_activity_log(self) -> None:
+        """Clear the activity log for a new run."""
+        self._activity_log = []
+        self._activity_seq = 0
+
     async def _query_llm(
         self,
         system_prompt: str,
         user_prompt: str,
         agent_name: str = "unknown",
+        phase: str = "unknown",
     ) -> str:
         """Query the LLM using the shared client pool.
 
@@ -2494,17 +2590,29 @@ class AutonomousDeepEngine:
             system_prompt: System prompt for the agent.
             user_prompt: User prompt with context.
             agent_name: Name of the agent (for logging).
+            phase: Phase name for activity tracking.
 
         Returns:
             LLM response text.
         """
-        result = await pool_query_llm(system_prompt, user_prompt, agent_name)
+        entry_idx = self._record_activity_start(agent_name, user_prompt, phase)
+        start_time = datetime.utcnow()
+
         try:
-            if self._run_metrics is not None:
-                self._run_metrics.record_llm_call(result)
-        except Exception as metrics_err:
-            logger.debug("Metrics recording failed (non-fatal): %s", metrics_err)
-        return result.text
+            result = await pool_query_llm(system_prompt, user_prompt, agent_name)
+            duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+            self._record_activity_end(entry_idx, result, duration_ms)
+
+            try:
+                if self._run_metrics is not None:
+                    self._run_metrics.record_llm_call(result)
+            except Exception as metrics_err:
+                logger.debug("Metrics recording failed (non-fatal): %s", metrics_err)
+
+            return result.text
+        except Exception as e:
+            self._record_activity_error(entry_idx)
+            raise
 
     async def get_more_insights(
         self,
