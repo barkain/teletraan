@@ -23,6 +23,7 @@
 - **Prediction Track Record** -- Outcome tracking, monthly trend analysis, and pattern success rate feedback loops
 - **Research Hub** -- Spawn follow-up research from conversations with background execution and provenance linking
 - **Published Reports** -- Self-contained HTML reports auto-published to GitHub Pages
+- **Runs Analytics Dashboard** -- View past analysis runs with per-phase metrics: token usage, cost tracking, timing, and success rates
 - **Real-Time Chat** -- WebSocket-based conversational analysis with 10 market data tools
 - **7 LLM Providers** -- Anthropic, Bedrock, Vertex, Azure, z.ai, Ollama, Claude Code subscription
 - **Desktop App** -- Native packaging via Tauri v2 with CI builds for macOS and Windows
