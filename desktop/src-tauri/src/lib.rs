@@ -76,10 +76,15 @@ async fn start_backend(app: &AppHandle) -> Result<(), String> {
     log::info!("Backend DATABASE_URL: {database_url}");
 
     // Spawn the backend as a regular child process.
+    // Remove CLAUDECODE / CLAUDE_CODE_ENTRYPOINT so the backend's
+    // claude-agent-sdk doesn't think it's running inside Claude Code
+    // (which would cause "cannot be launched inside another session" errors).
     let mut child = StdCommand::new(&backend_bin)
         .args(["--host", "127.0.0.1", "--port", "8000"])
         .current_dir(&data_dir)
         .env("DATABASE_URL", &database_url)
+        .env_remove("CLAUDECODE")
+        .env_remove("CLAUDE_CODE_ENTRYPOINT")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

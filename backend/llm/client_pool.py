@@ -10,6 +10,14 @@ import os
 # Skip version check subprocess before importing SDK
 os.environ.setdefault("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
 
+# Clear Claude Code session markers so claude-agent-sdk doesn't refuse to
+# start with "cannot be launched inside another Claude Code session".
+# This is defense-in-depth: the Tauri sidecar already strips these vars,
+# but if they leak through (e.g. running the backend manually from a
+# Claude Code terminal), we still want the SDK to work.
+os.environ.pop("CLAUDECODE", None)
+os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
+
 import asyncio
 import logging
 import time
