@@ -1,0 +1,2088 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teletraan Intelligence &mdash; February 15, 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
+<style>
+/* === RESET & BASE === */
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0;
+  background: #0B0F19;
+  background-image: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.08) 0%, transparent 60%);
+  color: #CBD5E1;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* === HEADER BAR (slim, fixed) === */
+.header-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(11,15,25,0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header-bar-brand {
+  font-size: 15px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.3px;
+}
+.header-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  color: #64748B;
+}
+.header-bar-regime {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 32px 24px 60px;
+}
+
+/* === KPI ROW === */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.kpi-card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 20px;
+  text-align: center;
+  transition: all 0.25s ease;
+}
+.kpi-card:hover {
+  background: rgba(255,255,255,0.05);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+}
+.kpi-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #64748B;
+  margin-bottom: 8px;
+}
+.kpi-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 28px;
+  font-weight: 700;
+  color: #F1F5F9;
+  line-height: 1.2;
+}
+.kpi-sub {
+  font-size: 12px;
+  color: #475569;
+  margin-top: 4px;
+}
+
+/* === CARDS (glassmorphism) === */
+.card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.card-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #6366F1;
+  margin-bottom: 12px;
+}
+
+/* === SUMMARY / EXECUTIVE BRIEFING === */
+.summary-card {
+  margin-bottom: 28px;
+}
+.summary-text {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #CBD5E1;
+}
+.summary-text .md-heading {
+  font-size: 16px;
+  font-weight: 700;
+  color: #E2E8F0;
+  margin: 20px 0 8px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.summary-text .md-para {
+  margin: 8px 0;
+}
+.summary-text .md-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  color: #CBD5E1;
+  line-height: 1.8;
+}
+.summary-text .md-list li {
+  margin-bottom: 4px;
+}
+.summary-text .md-kv {
+  margin: 4px 0;
+  font-size: 14px;
+}
+.summary-text .md-kv-key {
+  font-weight: 700;
+  color: #A5B4FC;
+}
+.summary-text .md-kv-value {
+  color: #E2E8F0;
+}
+.summary-text strong { color: #F1F5F9; }
+.summary-text .num-positive {
+  color: #10B981;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.summary-text .num-negative {
+  color: #EF4444;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+
+/* === TL;DR ACTION BOX === */
+.tldr-box {
+  margin-bottom: 24px;
+  padding: 20px 24px;
+  background: rgba(245,158,11,0.05);
+  border: 1px solid rgba(245,158,11,0.18);
+  border-left: 4px solid #F59E0B;
+  border-radius: 12px;
+  position: relative;
+}
+.tldr-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.tldr-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+.tldr-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #F59E0B;
+  letter-spacing: -0.2px;
+}
+.tldr-list {
+  margin: 0;
+  padding-left: 20px;
+  list-style: none;
+}
+.tldr-list li {
+  position: relative;
+  padding-left: 8px;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #E2E8F0;
+}
+.tldr-list li::before {
+  content: "→";
+  position: absolute;
+  left: -18px;
+  color: #F59E0B;
+  font-weight: 700;
+}
+.tldr-list li strong {
+  color: #FCD34D;
+}
+.tldr-list li:last-child {
+  margin-bottom: 0;
+}
+
+/* === TWO-COL GRID === */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+/* === SECTOR BARS === */
+.sector-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sector-bars-subtitle {
+  font-size: 12px;
+  color: #8888aa;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+.sector-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sector-bar-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94A3B8;
+  min-width: 90px;
+  flex-shrink: 0;
+}
+.sector-bar-track {
+  flex: 1;
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  position: relative;
+}
+.sector-bar-zero {
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: rgba(255,255,255,0.25);
+  border-left: 1px dashed rgba(255,255,255,0.25);
+  z-index: 2;
+}
+.sector-bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  transition: width 0.6s ease;
+}
+.sector-bar-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 56px;
+  text-align: right;
+}
+.sector-bar-axis {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+.sector-bar-axis-track {
+  flex: 1;
+  position: relative;
+  height: 14px;
+}
+.sector-bar-axis-label {
+  position: absolute;
+  top: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #64748B;
+}
+.num-positive { color: #10B981; }
+.num-negative { color: #EF4444; }
+
+/* === PHASE ACCORDION === */
+.phase-timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.phase-count-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #10B981;
+  background: rgba(16,185,129,0.12);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.phase-expand-all-btn {
+  font-size: 12px;
+  color: #64748B;
+  background: none;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.phase-expand-all-btn:hover {
+  color: #CBD5E1;
+  border-color: rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.04);
+}
+.phase-accordion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.phase-accordion {
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+.phase-accordion:hover {
+  border-color: rgba(255,255,255,0.12);
+}
+.phase-accordion.open {
+  border-color: rgba(16,185,129,0.25);
+}
+.phase-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.02);
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  text-align: left;
+  color: inherit;
+  font-family: inherit;
+}
+.phase-header:hover {
+  background: rgba(255,255,255,0.04);
+}
+.phase-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.phase-step-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  background: rgba(255,255,255,0.06);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+}
+.phase-accordion.open .phase-step-num {
+  background: rgba(16,185,129,0.15);
+  color: #10B981;
+}
+.phase-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.phase-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #E2E8F0;
+}
+.phase-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.phase-status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #10B981;
+  background: rgba(16,185,129,0.10);
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.phase-chevron {
+  color: #475569;
+  transition: transform 0.25s ease;
+  flex-shrink: 0;
+}
+.phase-accordion.open .phase-chevron {
+  transform: rotate(180deg);
+  color: #10B981;
+}
+.phase-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease, padding 0.3s ease;
+  padding: 0 14px;
+}
+.phase-accordion.open .phase-content {
+  max-height: 200px;
+  padding: 0 14px 14px;
+}
+.phase-desc {
+  font-size: 13px;
+  color: #94A3B8;
+  line-height: 1.6;
+  margin: 0;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+/* === DIVIDER === */
+.section-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.06);
+  margin: 8px 0 28px;
+}
+
+/* === FILTER BAR === */
+.insights-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #94A3B8;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+.filter-btn:hover {
+  background: rgba(255,255,255,0.08);
+  color: #E2E8F0;
+}
+.filter-btn.active {
+  background: rgba(99,102,241,0.15);
+  border-color: rgba(99,102,241,0.3);
+  color: #A5B4FC;
+}
+.sort-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #64748B;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sort-btn:hover {
+  color: #E2E8F0;
+  background: rgba(255,255,255,0.08);
+}
+.sort-btn.active {
+  color: #A5B4FC;
+  border-color: rgba(99,102,241,0.3);
+}
+
+/* === INSIGHT CARDS === */
+.insight-card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+.insight-card:hover {
+  border-color: rgba(255,255,255,0.10);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+}
+.insight-card.expanded {
+  border-color: rgba(99,102,241,0.20);
+  background: rgba(255,255,255,0.04);
+  transform: none;
+  box-shadow: 0 4px 32px rgba(99,102,241,0.08);
+}
+.insight-header {
+  padding: 20px 24px 16px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.insight-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.insight-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.action-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.symbol-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94A3B8;
+  background: rgba(255,255,255,0.05);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.symbol-tag.primary {
+  color: #E2E8F0;
+  background: rgba(255,255,255,0.08);
+  font-size: 13px;
+}
+.timeframe-badge {
+  font-size: 11px;
+  color: #64748B;
+  background: rgba(255,255,255,0.04);
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* Confidence progress bar (inline in insight cards) */
+.confidence-bar-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 100px;
+}
+.confidence-bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 60px;
+}
+.confidence-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+.confidence-bar-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Layman explanation text */
+.layman-explanation {
+  font-style: italic;
+  color: #94A3B8;
+  font-size: 13px;
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(255,255,255,0.1);
+  line-height: 1.6;
+}
+
+/* Analyst section cards (per-analyst evidence) */
+.analyst-section {
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.analyst-section:last-child {
+  margin-bottom: 0;
+}
+.analyst-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.analyst-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.analyst-finding {
+  margin-bottom: 10px;
+}
+.analyst-finding:last-child {
+  margin-bottom: 0;
+}
+.analyst-finding-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #CBD5E1;
+}
+.analyst-conf-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.analyst-conf-track {
+  flex: 1;
+  max-width: 120px;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.analyst-conf-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.analyst-conf-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Charts row */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+.chart-container {
+  min-height: 220px;
+}
+
+.insight-title {
+  margin: 0 0 6px 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #F1F5F9;
+  line-height: 1.4;
+}
+.insight-thesis-preview {
+  margin: 0;
+  font-size: 14px;
+  color: #94A3B8;
+  line-height: 1.6;
+}
+.expand-indicator {
+  text-align: center;
+  padding-top: 8px;
+}
+.chevron {
+  width: 20px;
+  height: 20px;
+  color: #475569;
+  transition: transform 0.3s ease;
+}
+.insight-card.expanded .chevron {
+  transform: rotate(180deg);
+}
+
+/* Expanded details */
+.insight-details {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s ease;
+  padding: 0 24px;
+}
+.insight-card.expanded .insight-details {
+  max-height: 3000px;
+  padding: 0 24px 24px;
+}
+.detail-section {
+  margin-bottom: 16px;
+}
+.detail-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #6366F1;
+  margin-bottom: 8px;
+}
+.detail-content {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #CBD5E1;
+}
+.detail-content strong { color: #F1F5F9; }
+.detail-content .md-heading {
+  font-size: 15px;
+  font-weight: 700;
+  color: #E2E8F0;
+  margin: 16px 0 8px 0;
+}
+.detail-content .md-para {
+  margin: 8px 0;
+}
+.detail-content .md-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  line-height: 1.8;
+}
+.detail-content .md-list li {
+  margin-bottom: 4px;
+}
+.detail-content .md-kv {
+  margin: 4px 0;
+}
+.detail-content .md-kv-key {
+  font-weight: 700;
+  color: #A5B4FC;
+}
+.detail-content .md-kv-value {
+  color: #E2E8F0;
+}
+.detail-content .num-positive {
+  color: #10B981;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.detail-content .num-negative {
+  color: #EF4444;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.detail-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #94A3B8;
+  line-height: 1.8;
+}
+.detail-list li { margin-bottom: 4px; }
+.detail-list strong { color: #CBD5E1; }
+
+/* Trading levels */
+.trading-levels {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 16px 0;
+}
+.level-box {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 10px 16px;
+  min-width: 100px;
+}
+.level-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #64748B;
+  margin-bottom: 2px;
+}
+.level-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: #E2E8F0;
+}
+
+/* Risk box */
+.risk-box {
+  background: rgba(245,158,11,0.06);
+  border: 1px solid rgba(245,158,11,0.12);
+  border-radius: 10px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.risk-box .detail-list {
+  color: #FCD34D;
+}
+
+/* Invalidation */
+.invalidation-box {
+  background: rgba(239,68,68,0.06);
+  border-left: 3px solid #EF4444;
+  border-radius: 0 10px 10px 0;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 13px;
+  color: #FCA5A5;
+}
+.invalidation-box strong { color: #F87171; }
+
+/* === SECTION TITLE === */
+.section-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #F1F5F9;
+  margin: 0 0 4px 0;
+}
+.section-subtitle {
+  font-size: 13px;
+  color: #64748B;
+  margin: 0 0 20px 0;
+}
+
+/* === EMPTY STATE === */
+.empty-state {
+  text-align: center;
+  padding: 60px 24px;
+  color: #475569;
+  font-size: 15px;
+}
+
+/* === FOOTER === */
+.report-footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.report-footer p {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+}
+.report-footer strong {
+  color: #475569;
+}
+.report-footer a {
+  color: #6366F1;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+.report-footer a:hover {
+  text-decoration: underline;
+}
+
+/* === RESPONSIVE === */
+@media (max-width: 768px) {
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .charts-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .container { padding: 20px 16px 40px; }
+  .header-bar { padding: 10px 16px; flex-wrap: wrap; gap: 8px; }
+  .kpi-row { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .kpi-value { font-size: 22px; }
+  .two-col { grid-template-columns: 1fr; }
+  .charts-row { grid-template-columns: 1fr; }
+  .insight-header { padding: 16px; }
+  .insight-details { padding: 0 16px; }
+  .insight-card.expanded .insight-details { padding: 0 16px 16px; }
+  .insights-toolbar { flex-direction: column; align-items: flex-start; }
+  .trading-levels { flex-direction: column; }
+  .src-pred-grid { grid-template-columns: 1fr; }
+  .src-breakdown-row { grid-template-columns: 70px 1fr 44px; gap: 6px; }
+  .src-key-levels { flex-direction: column; gap: 8px; }
+}
+
+/* === ANIMATIONS === */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.kpi-card {
+  animation: fadeInUp 0.4s ease both;
+}
+.kpi-card:nth-child(2) { animation-delay: 0.05s; }
+.kpi-card:nth-child(3) { animation-delay: 0.1s; }
+.kpi-card:nth-child(4) { animation-delay: 0.15s; }
+.insight-card {
+  animation: fadeInUp 0.4s ease both;
+}
+.insight-card:nth-child(2) { animation-delay: 0.05s; }
+.insight-card:nth-child(3) { animation-delay: 0.1s; }
+.insight-card:nth-child(4) { animation-delay: 0.15s; }
+.insight-card:nth-child(5) { animation-delay: 0.2s; }
+.insight-card:nth-child(6) { animation-delay: 0.25s; }
+.insight-card:nth-child(7) { animation-delay: 0.3s; }
+.insight-card:nth-child(8) { animation-delay: 0.35s; }
+
+/* === TOOLTIP ON CARD TITLES === */
+.card-title-tooltip {
+  position: relative;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.card-title-tooltip .tooltip-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748B;
+  border: 1px solid #475569;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.card-title-tooltip:hover .tooltip-icon {
+  color: #A5B4FC;
+  border-color: #6366F1;
+}
+.card-title-tooltip .tooltip-text {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  top: 100%;
+  z-index: 200;
+  width: 280px;
+  padding: 10px 14px;
+  background: #1a1a2e;
+  color: #CBD5E1;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: 0;
+  text-transform: none;
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s ease;
+}
+.card-title-tooltip:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* === ANALYSIS SOURCES SECTION === */
+.analysis-sources {
+  margin-top: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.02);
+}
+.sources-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.04);
+  border: none;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sources-toggle:hover {
+  background: rgba(255,255,255,0.08);
+}
+.toggle-chevron {
+  margin-left: auto;
+  transition: transform 0.3s;
+  font-size: 10px;
+}
+.analysis-sources.open .toggle-chevron {
+  transform: rotate(180deg);
+}
+.sources-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s;
+  padding: 0 16px;
+}
+.analysis-sources.open .sources-content {
+  max-height: 800px;
+  padding: 16px;
+}
+.src-section {
+  padding: 14px;
+  margin-bottom: 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.src-section:last-child {
+  margin-bottom: 0;
+}
+.src-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #64748b;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Technical Analysis */
+.src-ta-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.src-ta-score {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+.src-ta-rating {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+}
+.src-ta-conf {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.src-ta-explain {
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.src-breakdown {
+  display: grid;
+  gap: 8px;
+}
+.src-breakdown-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 50px;
+  align-items: center;
+  gap: 10px;
+}
+.src-breakdown-label {
+  font-size: 12px;
+  color: #94a3b8;
+  text-transform: capitalize;
+}
+.src-breakdown-track {
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.src-breakdown-center {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255,255,255,0.15);
+}
+.src-breakdown-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+.src-breakdown-val {
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  text-align: right;
+}
+.src-breakdown-meaning {
+  font-size: 11px;
+  color: #64748b;
+  grid-column: 1 / -1;
+  margin-top: -4px;
+}
+.src-key-levels {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  flex-wrap: wrap;
+}
+.src-level {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.src-level-label {
+  color: #64748b;
+}
+.src-level-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+
+/* Prediction Markets */
+.src-pred-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.src-pred-card {
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.src-pred-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+.src-pred-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+.src-pred-bar {
+  height: 4px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.src-pred-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: #3b82f6;
+}
+.src-pred-explain {
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-top: 4px;
+}
+.src-source-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+
+/* Sentiment */
+.src-sent-mood {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.src-sent-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.src-sent-explain {
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-bottom: 10px;
+}
+.src-sent-tickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.src-sent-ticker {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.src-sent-mentions {
+  font-size: 12px;
+  color: #cbd5e1;
+  margin-bottom: 4px;
+}
+
+/* === DISCLAIMER BANNER === */
+.disclaimer-banner {
+  background: rgba(255,165,0,0.08);
+  border: 1px solid rgba(255,165,0,0.2);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  line-height: 1.5;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.disclaimer-banner strong {
+  color: #d1d5db;
+}
+.disclaimer-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+.disclaimer-footer {
+  font-size: 0.7rem;
+  margin-top: 32px;
+  opacity: 0.8;
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER BAR (slim, fixed) -->
+<div class="header-bar">
+  <div class="header-bar-brand">Teletraan Intelligence</div>
+  <div class="header-bar-right">
+    <span>February 15, 2026 at 20:53 UTC</span>
+    <span class="header-bar-regime" style="background:rgba(255,255,255,0.04);color:#EF4444;border:1px solid #EF444433;">
+      <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#EF4444;box-shadow:0 0 6px #EF4444;"></span>
+      Risk-Off
+    </span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- DISCLAIMER (top) -->
+  <div class="disclaimer-banner">
+    <span class="disclaimer-icon">&#x26A0;&#xFE0F;</span>
+    <span>
+      <strong>DISCLAIMER:</strong> This report is generated by an AI system for informational and educational purposes only.
+      It does not constitute financial advice, investment recommendations, or solicitation to buy or sell any securities.
+      The information provided may be inaccurate, incomplete, or outdated. Past performance does not guarantee future results.
+      Always consult a qualified financial advisor before making investment decisions. The authors and contributors of this
+      tool accept no liability for any financial losses or damages arising from the use of this information.
+    </span>
+  </div>
+
+  <!-- KPI ROW -->
+  <div class="kpi-row">
+    <div class="kpi-card">
+      <div class="kpi-label">Insights</div>
+      <div class="kpi-value">7</div>
+      <div class="kpi-sub">findings</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label"><span class="card-title-tooltip">Regime<span class="tooltip-icon">?</span><span class="tooltip-text">Market regime indicates the current overall market behavior pattern (Bullish, Bearish, Transitional, or Volatile). It&#39;s determined by analyzing macro indicators, sector rotation, and price trends across the market.</span></span></div>
+      <div class="kpi-value" style="font-size:20px;color:#EF4444;">Risk-Off</div>
+      <div class="kpi-sub" style="margin-top:6px;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#EF4444;box-shadow:0 0 6px #EF4444;vertical-align:middle;"></span>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Duration</div>
+      <div class="kpi-value" style="font-size:22px;">48m 17s</div>
+      <div class="kpi-sub">analysis time</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Top Action</div>
+      <div class="kpi-value" style="font-size:20px;color:#22C55E;">Buy</div>
+      <div class="kpi-sub" style="font-family:'JetBrains Mono',monospace;">(3)</div>
+    </div>
+  </div>
+
+  <!-- CHARTS ROW -->
+  <div class="charts-row">
+    <div class="card">
+      <div class="card-label"><span class="card-title-tooltip">Confidence Distribution<span class="tooltip-icon">?</span><span class="tooltip-text">Shows how analysis confidence is distributed across insights. Higher confidence (80-100%) means stronger supporting data. The bands are: Low (0-40%), Medium-Low (40-60%), Medium (60-80%), and High (80-100%).</span></span></div>
+      <div class="chart-container" id="chart-confidence"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Action Breakdown</div>
+      <div class="chart-container" id="chart-actions"></div>
+    </div>
+  </div>
+
+  <!-- EXECUTIVE BRIEFING -->
+  
+    <section class="card summary-card">
+      <div class="card-label">Executive Briefing</div>
+      
+    <div class="tldr-box">
+      <div class="tldr-header">
+        <span class="tldr-icon">&#9889;</span>
+        <span class="tldr-title">TL;DR &mdash; What Should You Do?</span>
+      </div>
+      <ul class="tldr-list">
+      <li>Market is <strong>bearish</strong> &mdash; consider defensive positioning, raising cash, or hedging.</li>
+      <li><strong>Look into:</strong> GC=F (Strong Buy), JPM (Strong Sell), LITE (Strong Sell).</li>
+      <li><strong>Sectors favoring:</strong> Energy, Materials, Consumer Staples.</li>
+      <li>Analysis confidence is <strong>high</strong> &mdash; 4 of 7 insights above 80% confidence.</li>
+      </ul>
+    </div>
+
+      <div class="summary-text"><h3 class="md-heading">How These Opportunities Were Discovered</h3>
+<p class="md-para"><strong>Market Regime:</strong> Risk-Off</p>
+<p class="md-para"><strong>Key Macro Themes:</strong></p>
+<ul class="md-list">
+<li>Safe Haven Rotation &amp; Geopolitical Risk Premium: Gold's parabolic rise to $5,046 (<span class="num-positive">+9.98%</span>) combined with falling yields and elevated VIX signals major...</li>
+<li>Energy &amp; Commodity Reflation Amid Supply Concerns: Energy sector leading with <span class="num-positive">+13.97%</span> gain despite oil futures mixed signals. Materials sector up +9.51...</li>
+<li>Tech Sector Repricing &amp; Growth Rotation Reversal: NASDAQ down <span class="num-negative">-4.12%</span> while Russell 2000 holds up better (<span class="num-negative">-1.16%</span>) shows sharp rotation out of mega-cap ...</li>
+</ul>
+<p class="md-para"><strong>Heatmap Analysis:</strong> The market is exhibiting a classic risk-off defensive rotation with clear sector bifurcation. Utilities (<span class="num-positive">+2.76%</span>), Real Estate (<span class="num-positive">+1.47%</span>), and Healthcare (<span class="num-positive">+1.07%</span>) are leading as safe havens, while Financials (<span class="num-negative">-0.08%</span>, <span class="num-negative">-4.81%</span> 5D), Technology (<span class="num-positive">+0.25%</span>, <span class="num-negative">-1.11%</span> 5D), and Consumer Discretionary (<span class="num-positive">+0.04%</span>, <span class="num-negative">-1.53%</span> 5D) show sustained weakness. The uniformly flat 50% breadth across all sectors is unusual and suggests internal churn with winners and losers offsetting within each sector—this creates rich stock-picking opportunities.</p>
+<p class="md-para"><strong>Sectors Scanned:</strong></p>
+<ul class="md-list">
+<li>Technology: <span class="num-positive">+0.3%</span> (1D), breadth 50%</li>
+<li>Financials: <span class="num-negative">-0.1%</span> (1D), breadth 50%</li>
+<li>Energy: <span class="num-positive">+0.7%</span> (1D), breadth 50%</li>
+<li>Healthcare: <span class="num-positive">+1.1%</span> (1D), breadth 50%</li>
+<li>Industrials: <span class="num-positive">+0.8%</span> (1D), breadth 50%</li>
+<li>Consumer Staples: <span class="num-positive">+0.3%</span> (1D), breadth 50%</li>
+<li>Consumer Discretionary: <span class="num-positive">+0.0%</span> (1D), breadth 50%</li>
+<li>Utilities: <span class="num-positive">+2.8%</span> (1D), breadth 50%</li>
+<li>Communication Services: <span class="num-negative">-0.1%</span> (1D), breadth 50%</li>
+<li>Real Estate: <span class="num-positive">+1.5%</span> (1D), breadth 50%</li>
+<li>Materials: <span class="num-positive">+0.9%</span> (1D), breadth 50%</li>
+</ul>
+<p class="md-para"><strong>Stocks in Universe:</strong> 0</p>
+<p class="md-para"><strong>Stocks Selected for Deep Dive:</strong> 15</p>
+<p class="md-para"><strong>Key Patterns Identified:</strong></p>
+<ul class="md-list">
+<li>Defensive sector surge with 20-day momentum confirmation: Utilities, Real Estate, Healthcare, and Consumer Staples all showing positive 1D, 5D, and 20D returns</li>
+<li>Commodity-linked sectors (Energy <span class="num-positive">+13.09%</span> 20D, Materials <span class="num-positive">+9.35%</span> 20D) outperforming dramatically on intermediate timeframes despite modest 1D gains</li>
+<li>Growth sector capitulation: Technology (<span class="num-negative">-3.55%</span> 20D), Consumer Discretionary (<span class="num-negative">-4.97%</span> 20D), and Communication Services (<span class="num-negative">-1.77%</span> 20D) all negative on 20D basis with continued 5D weakness</li>
+</ul></div>
+    </section>
+
+
+  <!-- SECTORS -->
+  <div style="margin-bottom:20px;">
+    <div class="card">
+      <div class="card-label">Sectors</div>
+      <div class="sector-bars">
+      <div class="sector-bars-subtitle">
+        1-Day Price Change&nbsp;&mdash;&nbsp;
+        <span style="color:#10B981;">&#9632;</span> positive&nbsp;&nbsp;
+        <span style="color:#EF4444;">&#9632;</span> negative
+      </div>
+      
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Energy</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="left:50%;width:50%;background:#10B981;border-radius:0 4px 4px 0;"></div>
+              </div>
+              <span class="sector-bar-val num-positive">+13.1%</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Materials</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="left:50%;width:35%;background:#10B981;border-radius:0 4px 4px 0;"></div>
+              </div>
+              <span class="sector-bar-val num-positive">+9.4%</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Consumer Staples</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="left:50%;width:33%;background:#10B981;border-radius:0 4px 4px 0;"></div>
+              </div>
+              <span class="sector-bar-val num-positive">+8.9%</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Utilities</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="left:50%;width:29%;background:#10B981;border-radius:0 4px 4px 0;"></div>
+              </div>
+              <span class="sector-bar-val num-positive">+7.7%</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Industrials</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="left:50%;width:22%;background:#10B981;border-radius:0 4px 4px 0;"></div>
+              </div>
+              <span class="sector-bar-val num-positive">+6.0%</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Real Estate</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="left:50%;width:19%;background:#10B981;border-radius:0 4px 4px 0;"></div>
+              </div>
+              <span class="sector-bar-val num-positive">+5.1%</span>
+            </div>
+      <div class="sector-bar-axis">
+        <span class="sector-bar-name"></span>
+        <div class="sector-bar-axis-track">
+          <span class="sector-bar-axis-label" style="left:0;">-13.1%</span>
+          <span class="sector-bar-axis-label" style="left:50%;transform:translateX(-50%);">0%</span>
+          <span class="sector-bar-axis-label" style="right:0;">+13.1%</span>
+        </div>
+        <span class="sector-bar-val"></span>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <!-- ANALYSIS PIPELINE -->
+  <div style="margin-bottom:28px;">
+    <div class="card">
+      <div class="card-label">Analysis Pipeline</div>
+      
+    <div class="phase-timeline-header">
+      <span class="phase-count-badge">6 / 6 phases</span>
+      <button class="phase-expand-all-btn" onclick="toggleAllPhases()">Expand All</button>
+    </div>
+    <div class="phase-accordion-list">
+        <div class="phase-accordion" data-phase="macro_scan">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">1</span>
+              <span class="phase-icon">&#127758;</span>
+              <span class="phase-name">Macro Scan</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Detected Risk-Off regime (80% confidence). Key themes: Safe Haven Rotation &amp; Geopolitical Risk Premium, Energy &amp; Commodity Reflation Amid Supply Concerns, Tech Sector Repricing &amp; Growth Rotation Reversal. Top risks: Unidentified macro shock or geopolitical crisis driving simultaneous gold rally, VIX spike, and tech selloff, Stagflationary scenario: growth slowing (tech weakness) while inflation re-accelerates (commodity strength).</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="heatmap_fetch">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">2</span>
+              <span class="phase-icon">&#128229;</span>
+              <span class="phase-name">Heatmap Fetch</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Fetched 11 sectors and 0 stocks (closed). Strongest: Utilities (+2.8%), weakest: Financials (-0.1%).</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="heatmap_analysis">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">3</span>
+              <span class="phase-icon">&#128202;</span>
+              <span class="phase-name">Heatmap Analysis</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Selected 15 stocks (7 high priority) at 82% confidence. Sectors to watch: Financials, Technology, Energy, Utilities. Key patterns: Defensive sector surge with 20-day momentum confirmation: Ut; Commodity-linked sectors (Energy +13.09% 20D, Materials +9.3.</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="deep_dive">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">4</span>
+              <span class="phase-icon">&#128269;</span>
+              <span class="phase-name">Deep Dive</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Analyzed 17 stocks successfully. Symbols: NVDA, GC=F, LLY, CL=F, JPM, FCX, NEE, UGL....</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="coverage_evaluation">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">5</span>
+              <span class="phase-icon">&#9989;</span>
+              <span class="phase-name">Coverage Evaluation</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Coverage sufficient with 17 stocks. No additional symbols needed.</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="synthesis">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">6</span>
+              <span class="phase-icon">&#129520;</span>
+              <span class="phase-name">Synthesis</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Generated 7 insights (avg confidence: 81%). Actions: 3 BUY, 2 STRONG_SELL, 1 STRONG_BUY. Top: LITE Parabolic Blowoff Risk - Take Profi; Gold Futures (GC=F) - Parabolic Macro He; GOOGL Oversold Reversal - Quality Growth.</p>
+          </div>
+        </div>
+</div>
+    </div>
+  </div>
+
+  <div class="section-divider"></div>
+
+  <!-- ACTIONABLE INSIGHTS -->
+  <div>
+    <h2 class="section-title">Actionable Insights</h2>
+    <p class="section-subtitle">Click any insight to expand full analysis, risks, and trading levels.</p>
+
+    <div class="insights-toolbar">
+      <div class="filter-bar">
+        <button class="filter-btn active" data-action="ALL" onclick="filterInsights('ALL')">All</button><button class="filter-btn" data-action="BUY" onclick="filterInsights('BUY')" style="--btn-color:#22C55E;">Buy</button><button class="filter-btn" data-action="HOLD" onclick="filterInsights('HOLD')" style="--btn-color:#EAB308;">Hold</button><button class="filter-btn" data-action="STRONG_BUY" onclick="filterInsights('STRONG_BUY')" style="--btn-color:#22C55E;">Strong Buy</button><button class="filter-btn" data-action="STRONG_SELL" onclick="filterInsights('STRONG_SELL')" style="--btn-color:#EF4444;">Strong Sell</button>
+      </div>
+      <button class="sort-btn" onclick="toggleSort()" id="sort-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <polyline points="19 12 12 19 5 12"></polyline>
+        </svg>
+        Sort by confidence
+      </button>
+    </div>
+
+    <div id="insights-container">
+      
+    <div class="insight-card" data-index="0" data-action="STRONG_SELL"
+         data-confidence="0.88"
+         style="border-left:4px solid #EF4444;">
+      <div class="insight-header" onclick="toggleInsight(0)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(239,68,68,0.12);color:#EF4444;box-shadow:0 0 12px rgba(239,68,68,0.4);">
+              Strong Sell
+            </span>
+            <span class="symbol-tag primary">LITE</span><span class="symbol-tag">COHR</span><span class="symbol-tag">IPGP</span><span class="symbol-tag">VIAV</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="confidence-bar-inline">
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill" style="width:88%;background:#10B981;"></div>
+            </div>
+            <span class="confidence-bar-label" style="color:#10B981;">88%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">LITE Parabolic Blowoff Risk - Take Profits on 50-75% of Position</h3>
+        <p class="insight-thesis-preview">Lumentum (LITE) at $565 shows extreme parabolic exhaustion across ALL momentum indicators (RSI 72.3, Stochastic 89.2, CCI 202, MFI 82.9). While Technical Analyst shows 78% confiden...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-0">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Lumentum (LITE) at $565 shows extreme parabolic exhaustion across ALL momentum indicators (RSI 72.3, Stochastic 89.2, CCI 202, MFI 82.9). While Technical Analyst shows 78% confidence HOLD based on trend continuation, Risk Analyst flags catastrophic risk/reward deterioration. P/E of 164x (forward 40x) with 66% revenue growth doesn't justify current valuation vs peers. User holds 24 shares at $431 cost basis (31% gain) representing 7.0% of portfolio - this is EXCESSIVE concentration in a parabolic setup. Similar setups in semiconductor equipment stocks (ASML Jan 2024, KLAC Mar 2023) resulted in 25<span class="num-negative">-35%</span> corrections within 4-8 weeks.</p></div><div class="layman-explanation">The stock's momentum gauge reads 72/100 — it's been running hot and may be due for a pullback.</div></div><div class="analyst-section" style="border-left:3px solid #3B82F6;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#3B82F618;color:#3B82F6;border:1px solid #3B82F633;">&#128200; Technical Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">ALL momentum indicators extreme: RSI 72.3, Stochastic 89.2, CCI 202, MFI 82.9</div><div class="layman-explanation">The stock's momentum gauge reads 72/100 — it's been running hot and may be due for a pullback.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:78%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">78%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #F43F5E;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#F43F5E18;color:#F43F5E;border:1px solid #F43F5E33;">&#128737; Risk Assessment</span></div><div class="analyst-finding"><div class="analyst-finding-text">Position sizing excessive at 7% for high-volatility parabolic stock</div><div class="layman-explanation">The price has been rising at an unsustainable pace. Like a ball thrown in the air, it will eventually come back down.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:85%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">85%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #A855F7;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#A855F718;color:#A855F7;border:1px solid #A855F733;">&#127758; Macro Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">Technology sector weak (-3.92% monthly) - sector headwind for optical equipment</div><div class="layman-explanation">Looking at the broader economy, conditions are shifting in a way that could affect your investments. Key numbers: 3.92%.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:75%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">75%</span></div></div></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Immediate 25-35% correction risk</li><li>Sector rotation away from growth/tech</li><li>Valuation unsustainable at 164x P/E</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Break above $600 with sector rotation reversing to tech leadership (very low probability)</div>
+        <div class="analysis-sources"><button class="sources-toggle" onclick="this.parentElement.classList.toggle('open')">&#128202; Analysis Sources <span class="toggle-chevron">&#9660;</span></button><div class="sources-content"><div class="src-section"><div class="src-section-title">Technical Analysis</div><div class="src-ta-header"><span class="src-ta-score" style="color:#10B981;">+0.25</span><span class="src-ta-rating">Buy</span><span class="src-ta-conf">58% confidence</span></div><div class="src-ta-explain">Composite score +0.25 — mildly bullish. Driven by trend at +1.00, momentum at -0.67. Trend is positive but momentum is fading — potential reversal risk.</div><div class="src-breakdown"><div class="src-breakdown-row"><span class="src-breakdown-label">Trend</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:100%;background:#10B981;"></div></div><span class="src-breakdown-val" style="color:#10B981;">+1.00</span></div><div class="src-breakdown-meaning">Strong upward price trend</div><div class="src-breakdown-row"><span class="src-breakdown-label">Momentum</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:16%;background:#EF4444;"></div></div><span class="src-breakdown-val" style="color:#EF4444;">-0.67</span></div><div class="src-breakdown-meaning">Strong selling pressure</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volatility</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:75%;background:#10B981;"></div></div><span class="src-breakdown-val" style="color:#10B981;">+0.50</span></div><div class="src-breakdown-meaning">Moderate price swings</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volume</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:50%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">+0.00</span></div><div class="src-breakdown-meaning">Below-average trading activity</div></div><div class="src-key-levels"><span class="src-level"><span class="src-level-label">Support (floor):</span><span class="src-level-val" style="color:#10B981;">$250.69, $380.54</span></span><span class="src-level"><span class="src-level-label">Resistance (ceiling):</span><span class="src-level-val" style="color:#EF4444;">$565.07, $633.08</span></span><span class="src-level"><span class="src-level-label">Pivot:</span><span class="src-level-val">$390.61</span></span></div><div class="src-ta-explain" style="margin-top:6px;">Nearest support at $380.54 — a break below could accelerate selling. Nearest resistance at $565.07 — needs a break above for continuation. Trading range: $184.53 between key support and resistance.</div></div><div class="src-section"><div class="src-section-title">Prediction Markets</div><div class="src-pred-grid"><div class="src-pred-card"><div class="src-pred-label">cut_25bp (polymarket)</div><div class="src-pred-value" style="color:#10B981;">0%</div><div class="src-pred-explain">Markets see almost no chance of a rate cut (0%)</div></div></div><div class="src-source-label">Kalshi / Polymarket</div><div class="src-source-label" style="opacity:0.6;font-style:italic;">Limited data — missing: recession risk, inflation expectations, GDP outlook, S&amp;P 500 targets</div></div><div class="src-section"><div class="src-section-title">Reddit Sentiment</div><div class="src-sent-mood"><span class="src-sent-dot" style="background:#10B981;box-shadow:0 0 6px #10B981;"></span><span style="color:#10B981;">Very Bullish</span></div><div class="src-sent-explain">Social sentiment skews bullish across monitored subreddits. 787 total mentions across 50 trending tickers.</div><div class="src-sent-tickers"><span class="src-sent-ticker">EU (72)</span><span class="src-sent-ticker">SPY (58)</span><span class="src-sent-ticker">NVDA (48)</span><span class="src-sent-ticker">MSFT (47)</span><span class="src-sent-ticker">VOO (24)</span><span class="src-sent-ticker">HOOD (24)</span><span class="src-sent-ticker">DOW (23)</span><span class="src-sent-ticker">DTE (20)</span></div><div class="src-source-label">r/wallstreetbets, r/stocks, r/investing. Sentiment can lag institutional positioning by hours to days.</div></div></div></div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="1" data-action="STRONG_BUY"
+         data-confidence="0.92"
+         style="border-left:4px solid #22C55E;">
+      <div class="insight-header" onclick="toggleInsight(1)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(34,197,94,0.12);color:#22C55E;box-shadow:0 0 12px rgba(34,197,94,0.4);">
+              Strong Buy
+            </span>
+            <span class="symbol-tag primary">GC=F</span><span class="symbol-tag">SLV</span><span class="symbol-tag">NEM</span><span class="symbol-tag">GLD</span><span class="symbol-tag">GDXJ</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="confidence-bar-inline">
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill" style="width:92%;background:#10B981;"></div>
+            </div>
+            <span class="confidence-bar-label" style="color:#10B981;">92%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">Gold Futures (GC=F) - Parabolic Macro Hedge with Momentum Continuation</h3>
+        <p class="insight-thesis-preview">Gold futures at $5,046 (+9.98% monthly) represent THE dominant macro signal across all analyst inputs. This is not just a safe haven trade - it's a multi-catalyst convergence: (1) ...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-1">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Gold futures at $5,046 (<span class="num-positive">+9.98%</span> monthly) represent THE dominant macro signal across all analyst inputs. This is not just a safe haven trade - it's a multi-catalyst convergence: (1) Stagflation hedge (commodity reflation + recession fears), (2) Geopolitical crisis premium (VIX 20.60 elevated), (3) Fed dovish pivot (yields falling 5Y <span class="num-negative">-5.72%</span>, 10Y <span class="num-negative">-4.14%</span>), (4) Currency debasement/dollar weakness, (5) Financial sector crisis (<span class="num-negative">-4.81%</span> weekly) driving systemic fear. Technical Analyst shows breakout continuation with 8.45x volume confirmation. Risk Analyst validates 3.5x risk/reward (best in coverage universe) with only 4.9% max drawdown risk. Macro Economist identifies gold surge as key indicator of stagflation regime. Sector Strategist confirms commodity complex leadership. This is superior to gold miners (NEM, GDX) due to no operational risk, and better than GLD ETF due to futures leverage and tax efficiency.</p></div><div class="layman-explanation">There's a risk of stagflation — prices keep rising while the economy stalls. It's tough for most investments.</div></div><div class="analyst-section" style="border-left:3px solid #3B82F6;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#3B82F618;color:#3B82F6;border:1px solid #3B82F633;">&#128200; Technical Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">Breakout continuation with 8.45x volume confirmation, technical score 0.16</div><div class="layman-explanation">The chart patterns and price trends are showing a notable signal. This is worth watching as it may indicate where the price is headed next.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:88%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">88%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #A855F7;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#A855F718;color:#A855F7;border:1px solid #A855F733;">&#127758; Macro Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">Parabolic gold surge signals stagflation, geopolitical crisis, currency debasement fears</div><div class="layman-explanation">The price has been rising at an unsustainable pace. Like a ball thrown in the air, it will eventually come back down.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:90%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">90%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #F43F5E;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#F43F5E18;color:#F43F5E;border:1px solid #F43F5E33;">&#128737; Risk Assessment</span></div><div class="analyst-finding"><div class="analyst-finding-text">Best risk/reward in universe at 3.5x with only 4.9% max drawdown</div><div class="layman-explanation">From a risk perspective, there are signals that warrant attention. Key numbers: 4.9%. This doesn't mean something bad will happen, but it's worth being prepared.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:85%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">85%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #6366F1;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#6366F118;color:#6366F1;border:1px solid #6366F133;">&#9679; Sector</span></div><div class="analyst-finding"><div class="analyst-finding-text">Commodity complex leading (Energy +8.59%, Materials +7.37%) confirms gold thesis</div><div class="layman-explanation">Industry-level trends are signaling a shift. Key numbers: 8.59%, 7.37%. Some sectors are gaining favor while others are falling out.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:85%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">85%</span></div></div></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Geopolitical resolution could trigger profit-taking</li><li>Unexpected Fed hawkishness (low probability)</li><li>Strong dollar reversal (DXY breakout above 106)</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Close below $4,850 on high volume OR geopolitical catalyst resolves with VIX collapse below 15</div>
+        <div class="analysis-sources"><button class="sources-toggle" onclick="this.parentElement.classList.toggle('open')">&#128202; Analysis Sources <span class="toggle-chevron">&#9660;</span></button><div class="sources-content"><div class="src-section"><div class="src-section-title">Technical Analysis</div><div class="src-ta-header"><span class="src-ta-score" style="color:#F59E0B;">+0.16</span><span class="src-ta-rating">Buy</span><span class="src-ta-conf">41% confidence</span></div><div class="src-ta-explain">Composite score +0.16 — mildly bullish. Driven by momentum at -0.67, volume at +1.00. Trend is positive but momentum is fading — potential reversal risk.</div><div class="src-breakdown"><div class="src-breakdown-row"><span class="src-breakdown-label">Trend</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:62%;background:#10B981;"></div></div><span class="src-breakdown-val" style="color:#10B981;">+0.25</span></div><div class="src-breakdown-meaning">Mild upward trend</div><div class="src-breakdown-row"><span class="src-breakdown-label">Momentum</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:16%;background:#EF4444;"></div></div><span class="src-breakdown-val" style="color:#EF4444;">-0.67</span></div><div class="src-breakdown-meaning">Strong selling pressure</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volatility</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:75%;background:#10B981;"></div></div><span class="src-breakdown-val" style="color:#10B981;">+0.50</span></div><div class="src-breakdown-meaning">Moderate price swings</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volume</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:100%;background:#10B981;"></div></div><span class="src-breakdown-val" style="color:#10B981;">+1.00</span></div><div class="src-breakdown-meaning">Very high trading activity</div></div><div class="src-key-levels"><span class="src-level"><span class="src-level-label">Support (floor):</span><span class="src-level-val" style="color:#10B981;">$4,520.26, $4,565.18</span></span><span class="src-level"><span class="src-level-label">Resistance (ceiling):</span><span class="src-level-val" style="color:#EF4444;">$5,276.55, $5,326.20</span></span><span class="src-level"><span class="src-level-label">Pivot:</span><span class="src-level-val">$4,607.80</span></span></div><div class="src-ta-explain" style="margin-top:6px;">Nearest support at $4,565.18 — a break below could accelerate selling. Nearest resistance at $5,276.55 — needs a break above for continuation. Trading range: $711.37 between key support and resistance.</div></div><div class="src-section"><div class="src-section-title">Prediction Markets</div><div class="src-pred-grid"><div class="src-pred-card"><div class="src-pred-label">cut_25bp (polymarket)</div><div class="src-pred-value" style="color:#10B981;">0%</div><div class="src-pred-explain">Markets see almost no chance of a rate cut (0%)</div></div></div><div class="src-source-label">Kalshi / Polymarket</div><div class="src-source-label" style="opacity:0.6;font-style:italic;">Limited data — missing: recession risk, inflation expectations, GDP outlook, S&amp;P 500 targets</div></div><div class="src-section"><div class="src-section-title">Reddit Sentiment</div><div class="src-sent-mood"><span class="src-sent-dot" style="background:#10B981;box-shadow:0 0 6px #10B981;"></span><span style="color:#10B981;">Very Bullish</span></div><div class="src-sent-explain">Social sentiment skews bullish across monitored subreddits. 787 total mentions across 50 trending tickers.</div><div class="src-sent-tickers"><span class="src-sent-ticker">EU (72)</span><span class="src-sent-ticker">SPY (58)</span><span class="src-sent-ticker">NVDA (48)</span><span class="src-sent-ticker">MSFT (47)</span><span class="src-sent-ticker">VOO (24)</span><span class="src-sent-ticker">HOOD (24)</span><span class="src-sent-ticker">DOW (23)</span><span class="src-sent-ticker">DTE (20)</span></div><div class="src-source-label">r/wallstreetbets, r/stocks, r/investing. Sentiment can lag institutional positioning by hours to days.</div></div></div></div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="2" data-action="BUY"
+         data-confidence="0.74"
+         style="border-left:4px solid #22C55E;">
+      <div class="insight-header" onclick="toggleInsight(2)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(34,197,94,0.10);color:#22C55E;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">GOOGL</span><span class="symbol-tag">META</span><span class="symbol-tag">MSFT</span><span class="symbol-tag">AMZN</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="confidence-bar-inline">
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill" style="width:74%;background:#F59E0B;"></div>
+            </div>
+            <span class="confidence-bar-label" style="color:#F59E0B;">74%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">GOOGL Oversold Reversal - Quality Growth at Capitulation Prices</h3>
+        <p class="insight-thesis-preview">Alphabet (GOOGL) at $314 represents a rare oversold reversal setup in a quality mega-cap. Technical Analyst identifies capitulation low with Stochastic 7.0 (extreme oversold), RSI ...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-2">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Alphabet (GOOGL) at $314 represents a rare oversold reversal setup in a quality mega-cap. Technical Analyst identifies capitulation low with Stochastic 7.0 (extreme oversold), RSI 33.6, and Bollinger %B -0.03 (below lower band) - textbook mean reversion setup. User holds 35 shares at $253 cost basis (24% gain, 6.0% of portfolio) but position is UNDER-allocated given risk/reward. While Communication Services sector is weak (<span class="num-negative">-4.25%</span> monthly), GOOGL is diverging due to: (1) Search/cloud revenue resilience vs ad-dependent peers, (2) 59.7% gross margin with 32.8% net margin = pricing power, (3) $38B annual FCF funding buybacks, (4) Analyst target $373 implies 19% upside. P/E 28.3x (forward 22.9x) is reasonable for 18% revenue growth and 31% earnings growth. Risk Analyst shows 2.2x risk/reward with $300 stop (4.6% risk) vs $350 target (11% gain). This is superior to META (higher valuation) and significantly cheaper than MSFT (33x P/E). Macro headwind (tech sector rotation) is offset by defensive quality characteristics.</p></div><div class="layman-explanation">The stock's momentum is in a neutral zone at 33/100, with no strong push in either direction.</div></div><div class="analyst-section" style="border-left:3px solid #3B82F6;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#3B82F618;color:#3B82F6;border:1px solid #3B82F633;">&#128200; Technical Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">Extreme oversold: Stochastic 7.0, RSI 33.6, Bollinger %B -0.03 (below band)</div><div class="layman-explanation">The stock's momentum is in a neutral zone at 33/100, with no strong push in either direction.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:72%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">72%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #F43F5E;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#F43F5E18;color:#F43F5E;border:1px solid #F43F5E33;">&#128737; Risk Assessment</span></div><div class="analyst-finding"><div class="analyst-finding-text">Favorable 2.2x risk/reward with only 12.2% max drawdown vs 26% upside potential</div><div class="layman-explanation">From a risk perspective, there are signals that warrant attention. Key numbers: 12.2%, 26%. This doesn't mean something bad will happen, but it's worth being prepared.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:70%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">70%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #6366F1;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#6366F118;color:#6366F1;border:1px solid #6366F133;">&#9679; Sector</span></div><div class="analyst-finding"><div class="analyst-finding-text">Communication Services weak (-4.25%) but GOOGL has quality divergence potential</div><div class="layman-explanation">Industry-level trends are signaling a shift for GOOGL. Key numbers: 4.25%. Some sectors are gaining favor while others are falling out.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:65%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">65%</span></div></div></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Tech sector rotation continues (growth-to-value)</li><li>Ad spending recession pressure</li><li>Regulatory overhang (antitrust)</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Close below $300 on high volume OR Communication Services sector breadth deteriorates further (XLC breaks February lows)</div>
+        <div class="analysis-sources"><button class="sources-toggle" onclick="this.parentElement.classList.toggle('open')">&#128202; Analysis Sources <span class="toggle-chevron">&#9660;</span></button><div class="sources-content"><div class="src-section"><div class="src-section-title">Technical Analysis</div><div class="src-ta-header"><span class="src-ta-score" style="color:#F59E0B;">-0.08</span><span class="src-ta-rating">Neutral</span><span class="src-ta-conf">47% confidence</span></div><div class="src-ta-explain">Composite score -0.08 — mildly bearish. Driven by trend at -0.75, momentum at +0.33. Momentum building despite weak trend — watch for breakout.</div><div class="src-breakdown"><div class="src-breakdown-row"><span class="src-breakdown-label">Trend</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:12%;background:#EF4444;"></div></div><span class="src-breakdown-val" style="color:#EF4444;">-0.75</span></div><div class="src-breakdown-meaning">Strong downward price trend</div><div class="src-breakdown-row"><span class="src-breakdown-label">Momentum</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:66%;background:#10B981;"></div></div><span class="src-breakdown-val" style="color:#10B981;">+0.33</span></div><div class="src-breakdown-meaning">Mild buying pressure</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volatility</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:75%;background:#10B981;"></div></div><span class="src-breakdown-val" style="color:#10B981;">+0.50</span></div><div class="src-breakdown-meaning">Moderate price swings</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volume</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:50%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">+0.00</span></div><div class="src-breakdown-meaning">Below-average trading activity</div></div><div class="src-key-levels"><span class="src-level"><span class="src-level-label">Support (floor):</span><span class="src-level-val" style="color:#10B981;">$303.27, $306.97</span></span><span class="src-level"><span class="src-level-label">Resistance (ceiling):</span><span class="src-level-val" style="color:#EF4444;">$343.77, $348.84</span></span><span class="src-level"><span class="src-level-label">Pivot:</span><span class="src-level-val">$321.21</span></span></div><div class="src-ta-explain" style="margin-top:6px;">Nearest support at $306.97 — a break below could accelerate selling. Nearest resistance at $343.77 — needs a break above for continuation. Trading range: $36.80 between key support and resistance.</div></div><div class="src-section"><div class="src-section-title">Prediction Markets</div><div class="src-pred-grid"><div class="src-pred-card"><div class="src-pred-label">cut_25bp (polymarket)</div><div class="src-pred-value" style="color:#10B981;">0%</div><div class="src-pred-explain">Markets see almost no chance of a rate cut (0%)</div></div></div><div class="src-source-label">Kalshi / Polymarket</div><div class="src-source-label" style="opacity:0.6;font-style:italic;">Limited data — missing: recession risk, inflation expectations, GDP outlook, S&amp;P 500 targets</div></div><div class="src-section"><div class="src-section-title">Reddit Sentiment</div><div class="src-sent-mood"><span class="src-sent-dot" style="background:#10B981;box-shadow:0 0 6px #10B981;"></span><span style="color:#10B981;">Very Bullish</span></div><div class="src-sent-explain">Social sentiment skews bullish across monitored subreddits. 787 total mentions across 50 trending tickers. Note: Reddit sentiment is bullish but technical trend is negative — retail traders may be lagging a deteriorating setup.</div><div class="src-sent-mentions">GOOGL: 7 mentions, 52 upvotes, ranked #49 trending</div><div class="src-sent-tickers"><span class="src-sent-ticker">EU (72)</span><span class="src-sent-ticker">SPY (58)</span><span class="src-sent-ticker">NVDA (48)</span><span class="src-sent-ticker">MSFT (47)</span><span class="src-sent-ticker">VOO (24)</span><span class="src-sent-ticker">HOOD (24)</span><span class="src-sent-ticker">DOW (23)</span><span class="src-sent-ticker">DTE (20)</span></div><div class="src-source-label">r/wallstreetbets, r/stocks, r/investing. Sentiment can lag institutional positioning by hours to days.</div></div></div></div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="3" data-action="BUY"
+         data-confidence="0.82"
+         style="border-left:4px solid #22C55E;">
+      <div class="insight-header" onclick="toggleInsight(3)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(34,197,94,0.10);color:#22C55E;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">NEE</span><span class="symbol-tag">SO</span><span class="symbol-tag">DUK</span><span class="symbol-tag">AEP</span><span class="symbol-tag">XLU</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="confidence-bar-inline">
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill" style="width:82%;background:#10B981;"></div>
+            </div>
+            <span class="confidence-bar-label" style="color:#10B981;">82%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">NEE Utility Breakout - Defensive Sector Leader with Rate Cut Tailwind</h3>
+        <p class="insight-thesis-preview">NextEra Energy (NEE) at $93.56 is the optimal individual stock expression of the Utilities sector surge (+9.10% monthly, strongest sector). Technical Analyst shows dual Bollinger/K...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-3">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">NextEra Energy (NEE) at $93.56 is the optimal individual stock expression of the Utilities sector surge (<span class="num-positive">+9.10%</span> monthly, strongest sector). Technical Analyst shows dual Bollinger/Keltner breakout with 85% BUY confidence, though flags overbought RSI 80.1 requiring patience for pullback. Sector Strategist recommends 12<span class="num-negative">-15%</span> Utilities allocation (vs typical 3<span class="num-negative">-5%</span>) for recession positioning. NEE is superior to sector ETF (XLU) because: (1) Largest renewable energy producer = secular growth + defensive yield, (2) Regulated utility model provides recession-resistant cash flows, (3) 2.7% dividend yield + rate cut beneficiary (falling cost of capital for projects), (4) P/E 28.6x (forward 21.4x) reasonable for 20.7% revenue growth. Macro Economist confirms Real Estate (<span class="num-positive">+6.20%</span>) and Utilities (<span class="num-positive">+9.10%</span>) strength signals market pricing 100-150bps Fed cuts. Risk Analyst recommends waiting for $90-91 pullback for better entry (currently $93.56 is extended). This is preferable to other utility plays (SO, DUK, AEP) due to renewable energy growth kicker.</p></div><div class="layman-explanation">The stock's momentum gauge reads 80/100 — it's been running hot and may be due for a pullback.</div></div><div class="analyst-section" style="border-left:3px solid #3B82F6;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#3B82F618;color:#3B82F6;border:1px solid #3B82F633;">&#128200; Technical Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">Dual Bollinger/Keltner breakout with strong momentum, but overbought RSI 80.1</div><div class="layman-explanation">The stock's momentum gauge reads 80/100 — it's been running hot and may be due for a pullback.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:85%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">85%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #6366F1;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#6366F118;color:#6366F1;border:1px solid #6366F133;">&#9679; Sector</span></div><div class="analyst-finding"><div class="analyst-finding-text">Utilities sector leading (+9.10% monthly) in defensive rotation, recommend 12-15% allocation</div><div class="layman-explanation">Industry-level trends are signaling a shift. Key numbers: 9.10%, 15%. Some sectors are gaining favor while others are falling out.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:90%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">90%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #A855F7;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#A855F718;color:#A855F7;border:1px solid #A855F733;">&#127758; Macro Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">Utilities strength confirms market pricing 100-150bps Fed cuts over 12 months</div><div class="layman-explanation">Looking at the broader economy, conditions are shifting in a way that could affect your investments.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:75%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">75%</span></div></div></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Overbought short-term (RSI 80.1) - timing risk if enter now</li><li>Risk-on reversal could trigger profit-taking</li><li>Rate cut disappointment (Fed holds longer)</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Break below $88 (support failure) OR VIX collapses below 15 with risk-on rotation reversing defensive trade</div>
+        <div class="analysis-sources"><button class="sources-toggle" onclick="this.parentElement.classList.toggle('open')">&#128202; Analysis Sources <span class="toggle-chevron">&#9660;</span></button><div class="sources-content"><div class="src-section"><div class="src-section-title">Technical Analysis</div><div class="src-ta-header"><span class="src-ta-score" style="color:#10B981;">+0.30</span><span class="src-ta-rating">Buy</span><span class="src-ta-conf">64% confidence</span></div><div class="src-ta-explain">Composite score +0.30 — moderately bullish. Driven by trend at +1.00.</div><div class="src-breakdown"><div class="src-breakdown-row"><span class="src-breakdown-label">Trend</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:100%;background:#10B981;"></div></div><span class="src-breakdown-val" style="color:#10B981;">+1.00</span></div><div class="src-breakdown-meaning">Strong upward price trend</div><div class="src-breakdown-row"><span class="src-breakdown-label">Momentum</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:41%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">-0.17</span></div><div class="src-breakdown-meaning">Mild selling pressure</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volatility</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:50%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">+0.00</span></div><div class="src-breakdown-meaning">Below-average price swings</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volume</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:50%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">+0.00</span></div><div class="src-breakdown-meaning">Below-average trading activity</div></div><div class="src-key-levels"><span class="src-level"><span class="src-level-label">Support (floor):</span><span class="src-level-val" style="color:#10B981;">$82.04, $84.01</span></span><span class="src-level"><span class="src-level-label">Resistance (ceiling):</span><span class="src-level-val" style="color:#EF4444;">$92.59, $93.79</span></span><span class="src-level"><span class="src-level-label">Pivot:</span><span class="src-level-val">$83.75</span></span></div><div class="src-ta-explain" style="margin-top:6px;">Nearest support at $84.01 — a break below could accelerate selling. Nearest resistance at $92.59 — needs a break above for continuation. Trading range: $8.58 between key support and resistance.</div></div><div class="src-section"><div class="src-section-title">Prediction Markets</div><div class="src-pred-grid"><div class="src-pred-card"><div class="src-pred-label">cut_25bp (polymarket)</div><div class="src-pred-value" style="color:#10B981;">0%</div><div class="src-pred-explain">Markets see almost no chance of a rate cut (0%)</div></div></div><div class="src-source-label">Kalshi / Polymarket</div><div class="src-source-label" style="opacity:0.6;font-style:italic;">Limited data — missing: recession risk, inflation expectations, GDP outlook, S&amp;P 500 targets</div></div><div class="src-section"><div class="src-section-title">Reddit Sentiment</div><div class="src-sent-mood"><span class="src-sent-dot" style="background:#10B981;box-shadow:0 0 6px #10B981;"></span><span style="color:#10B981;">Very Bullish</span></div><div class="src-sent-explain">Social sentiment skews bullish across monitored subreddits. 787 total mentions across 50 trending tickers.</div><div class="src-sent-tickers"><span class="src-sent-ticker">EU (72)</span><span class="src-sent-ticker">SPY (58)</span><span class="src-sent-ticker">NVDA (48)</span><span class="src-sent-ticker">MSFT (47)</span><span class="src-sent-ticker">VOO (24)</span><span class="src-sent-ticker">HOOD (24)</span><span class="src-sent-ticker">DOW (23)</span><span class="src-sent-ticker">DTE (20)</span></div><div class="src-source-label">r/wallstreetbets, r/stocks, r/investing. Sentiment can lag institutional positioning by hours to days.</div></div></div></div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="4" data-action="STRONG_SELL"
+         data-confidence="0.92"
+         style="border-left:4px solid #EF4444;">
+      <div class="insight-header" onclick="toggleInsight(4)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(239,68,68,0.12);color:#EF4444;box-shadow:0 0 12px rgba(239,68,68,0.4);">
+              Strong Sell
+            </span>
+            <span class="symbol-tag primary">JPM</span><span class="symbol-tag">BAC</span><span class="symbol-tag">WFC</span><span class="symbol-tag">C</span><span class="symbol-tag">XLF</span>
+            <span class="timeframe-badge">short_term</span>
+          </div>
+          <div class="confidence-bar-inline">
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill" style="width:92%;background:#10B981;"></div>
+            </div>
+            <span class="confidence-bar-label" style="color:#10B981;">92%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">JPM Financial Crisis Breakdown - Exit All Banking Exposure</h3>
+        <p class="insight-thesis-preview">JPMorgan Chase (JPM) at $302.55 faces catastrophic sector headwind despite individual quality. Financial sector showing -4.81% weekly breakdown with 56M panic volume matching 2008 ...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-4">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">JPMorgan Chase (JPM) at $302.55 faces catastrophic sector headwind despite individual quality. Financial sector showing <span class="num-negative">-4.81%</span> weekly breakdown with 56M panic volume matching 2008 Lehman and 2023 SVB/First Republic crisis patterns. While JPM has strong fundamentals (33.9% profit margin, 2.5x risk/reward per Risk Analyst), Macro Economist and Sector Strategist both flag SYSTEMIC CRISIS SIGNAL that overrides stock-specific analysis. Technical Analyst shows -0.35 technical score with dual MA breakdown. Sector Strategist recommends STRONG UNDERWEIGHT Financials 2<span class="num-negative">-4%</span> (vs typical 10<span class="num-negative">-15%</span>) with 95% confidence. Even though JPM is best-in-class money center bank, credit cycle is turning and earnings already declining (<span class="num-negative">-7.0%</span> quarterly). XLF sector breakdown suggests contagion risk where even quality names get sold. This is NOT stock-picking failure - it's regime recognition. Historical precedent: Oct 2008 JPM fell from $48→$16 (<span class="num-negative">-67%</span>) despite being 'strongest bank' because sector crisis creates indiscriminate selling. User does NOT currently hold JPM but analysis flags it as AVOID for new capital.</p></div><div class="layman-explanation">This analyst spotted something noteworthy involving JPM, SVB, MA, with key figures of 4.81% and 33.9%.</div></div><div class="analyst-section" style="border-left:3px solid #6366F1;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#6366F118;color:#6366F1;border:1px solid #6366F133;">&#9679; Sector</span></div><div class="analyst-finding"><div class="analyst-finding-text">Financial sector CRISIS BREAKDOWN: -4.81% weekly with 56M panic volume</div><div class="layman-explanation">Industry-level trends are signaling a shift. Key numbers: 4.81%. Some sectors are gaining favor while others are falling out.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:95%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">95%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #A855F7;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#A855F718;color:#A855F7;border:1px solid #A855F733;">&#127758; Macro Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">Credit conditions severely deteriorating, systemic risk building</div><div class="layman-explanation">Looking at the broader economy, conditions are shifting in a way that could affect your investments.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:85%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">85%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #3B82F6;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#3B82F618;color:#3B82F6;border:1px solid #3B82F633;">&#128200; Technical Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">JPM technical score -0.35 with dual MA breakdown</div><div class="layman-explanation">The chart patterns and price trends for JPM, MA are showing a notable signal. This is worth watching as it may indicate where the price is headed next.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:70%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">70%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #F43F5E;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#F43F5E18;color:#F43F5E;border:1px solid #F43F5E33;">&#128737; Risk Assessment</span></div><div class="analyst-finding"><div class="analyst-finding-text">Sector crisis overrides individual stock risk/reward analysis</div><div class="layman-explanation">From a risk perspective, there are signals that warrant attention. This doesn't mean something bad will happen, but it's worth being prepared.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:80%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">80%</span></div></div></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>SYSTEMIC CONTAGION - sector crisis makes all banks toxic</li><li>Credit losses accelerating in recession</li><li>Deposit flight risk if crisis escalates</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> XLF rallies above $53 (breakout reversal) AND Fed announces emergency liquidity support (very low probability near-term)</div>
+        <div class="analysis-sources"><button class="sources-toggle" onclick="this.parentElement.classList.toggle('open')">&#128202; Analysis Sources <span class="toggle-chevron">&#9660;</span></button><div class="sources-content"><div class="src-section"><div class="src-section-title">Technical Analysis</div><div class="src-ta-header"><span class="src-ta-score" style="color:#EF4444;">-0.35</span><span class="src-ta-rating">Sell</span><span class="src-ta-conf">52% confidence</span></div><div class="src-ta-explain">Composite score -0.35 — moderately bearish. Driven by trend at -0.88.</div><div class="src-breakdown"><div class="src-breakdown-row"><span class="src-breakdown-label">Trend</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:6%;background:#EF4444;"></div></div><span class="src-breakdown-val" style="color:#EF4444;">-0.88</span></div><div class="src-breakdown-meaning">Strong downward price trend</div><div class="src-breakdown-row"><span class="src-breakdown-label">Momentum</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:58%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">+0.17</span></div><div class="src-breakdown-meaning">Mild buying pressure</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volatility</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:25%;background:#EF4444;"></div></div><span class="src-breakdown-val" style="color:#EF4444;">-0.50</span></div><div class="src-breakdown-meaning">Very low price swings</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volume</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:50%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">+0.00</span></div><div class="src-breakdown-meaning">Below-average trading activity</div></div><div class="src-key-levels"><span class="src-level"><span class="src-level-label">Support (floor):</span><span class="src-level-val" style="color:#10B981;">$292.96, $293.09</span></span><span class="src-level"><span class="src-level-label">Resistance (ceiling):</span><span class="src-level-val" style="color:#EF4444;">$323.26, $328.77</span></span><span class="src-level"><span class="src-level-label">Pivot:</span><span class="src-level-val">$314.49</span></span></div><div class="src-ta-explain" style="margin-top:6px;">Nearest support at $293.09 — a break below could accelerate selling. Nearest resistance at $323.26 — needs a break above for continuation. Trading range: $30.17 between key support and resistance.</div></div><div class="src-section"><div class="src-section-title">Prediction Markets</div><div class="src-pred-grid"><div class="src-pred-card"><div class="src-pred-label">cut_25bp (polymarket)</div><div class="src-pred-value" style="color:#10B981;">0%</div><div class="src-pred-explain">Markets see almost no chance of a rate cut (0%)</div></div></div><div class="src-source-label">Kalshi / Polymarket</div><div class="src-source-label" style="opacity:0.6;font-style:italic;">Limited data — missing: recession risk, inflation expectations, GDP outlook, S&amp;P 500 targets</div></div><div class="src-section"><div class="src-section-title">Reddit Sentiment</div><div class="src-sent-mood"><span class="src-sent-dot" style="background:#10B981;box-shadow:0 0 6px #10B981;"></span><span style="color:#10B981;">Very Bullish</span></div><div class="src-sent-explain">Social sentiment skews bullish across monitored subreddits. 787 total mentions across 50 trending tickers. Note: Reddit sentiment is bullish but technical trend is negative — retail traders may be lagging a deteriorating setup.</div><div class="src-sent-tickers"><span class="src-sent-ticker">EU (72)</span><span class="src-sent-ticker">SPY (58)</span><span class="src-sent-ticker">NVDA (48)</span><span class="src-sent-ticker">MSFT (47)</span><span class="src-sent-ticker">VOO (24)</span><span class="src-sent-ticker">HOOD (24)</span><span class="src-sent-ticker">DOW (23)</span><span class="src-sent-ticker">DTE (20)</span></div><div class="src-source-label">r/wallstreetbets, r/stocks, r/investing. Sentiment can lag institutional positioning by hours to days.</div></div></div></div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="5" data-action="HOLD"
+         data-confidence="0.7"
+         style="border-left:4px solid #EAB308;">
+      <div class="insight-header" onclick="toggleInsight(5)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(234,179,8,0.10);color:#EAB308;box-shadow:none;">
+              Hold
+            </span>
+            <span class="symbol-tag primary">NVDA</span><span class="symbol-tag">AMD</span><span class="symbol-tag">AVGO</span><span class="symbol-tag">TSM</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="confidence-bar-inline">
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill" style="width:70%;background:#F59E0B;"></div>
+            </div>
+            <span class="confidence-bar-label" style="color:#F59E0B;">70%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">NVDA Support Test - Maintain Reduced Position Through Volatility</h3>
+        <p class="insight-thesis-preview">NVIDIA (NVDA) at $188.96 faces conflicting signals requiring nuanced position management. User holds MASSIVE 32.6% concentration (387 shares at $125 cost basis, +51% profit) which ...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-5">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">NVIDIA (NVDA) at $188.96 faces conflicting signals requiring nuanced position management. User holds MASSIVE 32.6% concentration (387 shares at $125 cost basis, <span class="num-positive">+51%</span> profit) which is EXCESSIVE but profitable. Technical Analyst shows support test at SMA_50 $184.4 with 65% BUY confidence for oversold bounce. Risk Analyst recommends REDUCING to 1.5<span class="num-negative">-2.5%</span> (from 32.6%!) due to Technology sector headwinds (<span class="num-negative">-3.92%</span> monthly). Macro Economist confirms growth-to-value rotation pressuring long-duration tech. However, NVDA has idiosyncratic AI infrastructure catalyst (62.5% revenue growth, 66.7% earnings growth, 70% gross margin) that may allow divergence from sector weakness. Resolution strategy: (1) IMMEDIATELY reduce from 32.6% to 12<span class="num-negative">-15%</span> by selling 200-240 shares (~$37,000-45,000) to lock in profits and rebalance, (2) HOLD remaining 150-180 shares (12<span class="num-negative">-15%</span> weight) through support test as AI infrastructure thesis intact, (3) Stop loss $180 (below SMA_50 $184.4) for remaining position. This balances concentration risk (32.6% is reckless) with opportunity cost (AI thesis still valid).</p></div><div class="layman-explanation">The stock has fallen fast and may have been pushed too low — it could be due for a bounce.</div></div><div class="analyst-section" style="border-left:3px solid #3B82F6;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#3B82F618;color:#3B82F6;border:1px solid #3B82F633;">&#128200; Technical Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">Testing SMA_50 support at $184.4, oversold bounce potential, but weak trend (ADX 12.7)</div><div class="layman-explanation">There's a price floor around $184.4, where buyers have historically stepped in. If it breaks, expect a sharper drop.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:65%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">65%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #F43F5E;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#F43F5E18;color:#F43F5E;border:1px solid #F43F5E33;">&#128737; Risk Assessment</span></div><div class="analyst-finding"><div class="analyst-finding-text">Position size 32.6% is CATASTROPHIC concentration risk - must reduce to 1.5-2.5% per risk framework</div><div class="layman-explanation">From a risk perspective, there are signals that warrant attention. Key numbers: 32.6%, 2.5%. This doesn't mean something bad will happen, but it's worth being prepared.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:85%;background:#10B981;"></div></div><span class="analyst-conf-val" style="color:#10B981;">85%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #6366F1;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#6366F118;color:#6366F1;border:1px solid #6366F133;">&#9679; Sector</span></div><div class="analyst-finding"><div class="analyst-finding-text">Technology sector weak (-3.92% monthly, -1.11% weekly) but NVDA may diverge on AI catalyst</div><div class="layman-explanation">Industry-level trends are signaling a shift for NVDA, AI. Key numbers: 3.92%, 1.11%. Some sectors are gaining favor while others are falling out.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:65%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">65%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #A855F7;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#A855F718;color:#A855F7;border:1px solid #A855F733;">&#127758; Macro Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">Growth stocks under pressure from recession fears and rate uncertainty</div><div class="layman-explanation">Looking at the broader economy, conditions are shifting in a way that could affect your investments.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:75%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">75%</span></div></div></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>CONCENTRATION RISK - 32.6% allocation catastrophic if NVDA corrects 20-30%</li><li>Tech sector rotation continues</li><li>AI capex cycle slows or competition intensifies</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Break below $180 (SMA_50 failure) requires exit of remaining position. Sector rotation accelerates (XLK breaks February lows).</div>
+        <div class="analysis-sources"><button class="sources-toggle" onclick="this.parentElement.classList.toggle('open')">&#128202; Analysis Sources <span class="toggle-chevron">&#9660;</span></button><div class="sources-content"><div class="src-section"><div class="src-section-title">Technical Analysis</div><div class="src-ta-header"><span class="src-ta-score" style="color:#F59E0B;">-0.18</span><span class="src-ta-rating">Sell</span><span class="src-ta-conf">41% confidence</span></div><div class="src-ta-explain">Composite score -0.18 — mildly bearish.</div><div class="src-breakdown"><div class="src-breakdown-row"><span class="src-breakdown-label">Trend</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:43%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">-0.12</span></div><div class="src-breakdown-meaning">Mild downward trend</div><div class="src-breakdown-row"><span class="src-breakdown-label">Momentum</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:41%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">-0.17</span></div><div class="src-breakdown-meaning">Mild selling pressure</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volatility</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:25%;background:#EF4444;"></div></div><span class="src-breakdown-val" style="color:#EF4444;">-0.50</span></div><div class="src-breakdown-meaning">Very low price swings</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volume</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:50%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">+0.00</span></div><div class="src-breakdown-meaning">Below-average trading activity</div></div><div class="src-key-levels"><span class="src-level"><span class="src-level-label">Support (floor):</span><span class="src-level-val" style="color:#10B981;">$172.11, $174.14</span></span><span class="src-level"><span class="src-level-label">Resistance (ceiling):</span><span class="src-level-val" style="color:#EF4444;">$196.47, $198.50</span></span><span class="src-level"><span class="src-level-label">Pivot:</span><span class="src-level-val">$184.41</span></span></div><div class="src-ta-explain" style="margin-top:6px;">Nearest support at $174.14 — a break below could accelerate selling. Nearest resistance at $196.47 — needs a break above for continuation. Trading range: $22.33 between key support and resistance.</div></div><div class="src-section"><div class="src-section-title">Prediction Markets</div><div class="src-pred-grid"><div class="src-pred-card"><div class="src-pred-label">cut_25bp (polymarket)</div><div class="src-pred-value" style="color:#10B981;">0%</div><div class="src-pred-explain">Markets see almost no chance of a rate cut (0%)</div></div></div><div class="src-source-label">Kalshi / Polymarket</div><div class="src-source-label" style="opacity:0.6;font-style:italic;">Limited data — missing: recession risk, inflation expectations, GDP outlook, S&amp;P 500 targets</div></div><div class="src-section"><div class="src-section-title">Reddit Sentiment</div><div class="src-sent-mood"><span class="src-sent-dot" style="background:#10B981;box-shadow:0 0 6px #10B981;"></span><span style="color:#10B981;">Very Bullish</span></div><div class="src-sent-explain">Social sentiment skews bullish across monitored subreddits. 787 total mentions across 50 trending tickers.</div><div class="src-sent-mentions">NVDA: 48 mentions, 433 upvotes, ranked #3 trending</div><div class="src-sent-tickers"><span class="src-sent-ticker">EU (72)</span><span class="src-sent-ticker">SPY (58)</span><span class="src-sent-ticker">NVDA (48)</span><span class="src-sent-ticker">MSFT (47)</span><span class="src-sent-ticker">VOO (24)</span><span class="src-sent-ticker">HOOD (24)</span><span class="src-sent-ticker">DOW (23)</span><span class="src-sent-ticker">DTE (20)</span></div><div class="src-source-label">r/wallstreetbets, r/stocks, r/investing. Sentiment can lag institutional positioning by hours to days.</div></div></div></div>
+      </div>
+    </div>
+
+    <div class="insight-card" data-index="6" data-action="BUY"
+         data-confidence="0.68"
+         style="border-left:4px solid #22C55E;">
+      <div class="insight-header" onclick="toggleInsight(6)">
+        <div class="insight-top-row">
+          <div class="insight-badges">
+            <span class="action-badge" style="background:rgba(34,197,94,0.10);color:#22C55E;box-shadow:none;">
+              Buy
+            </span>
+            <span class="symbol-tag primary">MU</span><span class="symbol-tag">WDC</span><span class="symbol-tag">NVDA</span><span class="symbol-tag">AVGO</span>
+            <span class="timeframe-badge">medium_term</span>
+          </div>
+          <div class="confidence-bar-inline">
+            <div class="confidence-bar-track">
+              <div class="confidence-bar-fill" style="width:68%;background:#F59E0B;"></div>
+            </div>
+            <span class="confidence-bar-label" style="color:#F59E0B;">68%</span>
+          </div>
+        </div>
+        <h3 class="insight-title">MU Bullish Divergence - Memory Cycle Bottom with AI Upside</h3>
+        <p class="insight-thesis-preview">Micron (MU) at $405.77 shows compelling bullish divergence setup while user holds under-allocated 7.7% position (26 shares at $437 cost basis, -7% underwater). Technical Analyst id...</p>
+        <div class="expand-indicator">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+      </div>
+      <div class="insight-details" id="details-6">
+        <div class="detail-section"><div class="detail-label">Analysis</div><div class="detail-content"><p class="md-para">Micron (MU) at $405.77 shows compelling bullish divergence setup while user holds under-allocated 7.7% position (26 shares at $437 cost basis, <span class="num-negative">-7%</span> underwater). Technical Analyst identifies bullish setup despite negative MACD histogram - price above both SMA_20 ($400.3) and SMA_50 ($364.8) with 70% BUY confidence. Forward P/E of 9.5x is EXTREMELY cheap for 56.7% revenue growth and 175% earnings growth - this is memory cycle inflection. Risk Analyst shows 1.8x risk/reward but flags Technology sector headwinds. Key catalyst: AI server demand driving HBM (high-bandwidth memory) ASP expansion - MU is #2 supplier behind Samsung with 25<span class="num-negative">-30%</span> market share. Unlike NAND (commoditized), HBM has pricing power and structural shortage through 2025-2026. Analyst target $389 appears conservative given AI infrastructure buildout. This is superior to WDC (pure NAND exposure) and complementary to NVDA (customer relationship). User should AVERAGE DOWN from $437 to $405 given memory cycle bottom and forward valuation. Position currently <span class="num-negative">-7%</span> but forward P/E 9.5x for 175% earnings growth is 0.05 PEG ratio (extreme value).</p></div><div class="layman-explanation">This analyst spotted something noteworthy involving MU, BUY, AI, with key figures of 7.7% and 7%.</div></div><div class="analyst-section" style="border-left:3px solid #3B82F6;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#3B82F618;color:#3B82F6;border:1px solid #3B82F633;">&#128200; Technical Analysis</span></div><div class="analyst-finding"><div class="analyst-finding-text">Bullish divergence setup - price above SMA_20/50 despite negative MACD histogram</div><div class="layman-explanation">The chart patterns and price trends are showing a notable signal. This is worth watching as it may indicate where the price is headed next.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:70%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">70%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #F43F5E;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#F43F5E18;color:#F43F5E;border:1px solid #F43F5E33;">&#128737; Risk Assessment</span></div><div class="analyst-finding"><div class="analyst-finding-text">Technology sector headwind but individual fundamentals strong, 1.8x risk/reward acceptable</div><div class="layman-explanation">From a risk perspective, there are signals that warrant attention. This doesn't mean something bad will happen, but it's worth being prepared.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:65%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">65%</span></div></div></div><div class="analyst-section" style="border-left:3px solid #6366F1;"><div class="analyst-section-header"><span class="analyst-badge" style="background:#6366F118;color:#6366F1;border:1px solid #6366F133;">&#9679; Sector</span></div><div class="analyst-finding"><div class="analyst-finding-text">Technology sector weak (-3.92%) but memory cycle inflection + AI HBM demand = idiosyncratic catalyst</div><div class="layman-explanation">Industry-level trends are signaling a shift for AI, HBM. Key numbers: 3.92%. Some sectors are gaining favor while others are falling out.</div><div class="analyst-conf-bar"><div class="analyst-conf-track"><div class="analyst-conf-fill" style="width:60%;background:#F59E0B;"></div></div><span class="analyst-conf-val" style="color:#F59E0B;">60%</span></div></div></div><div class="risk-box"><div class="detail-label" style="color:#F59E0B;">Risk Factors</div><ul class="detail-list"><li>Technology sector rotation continues (growth-to-value headwind)</li><li>Memory pricing cycle volatility</li><li>China demand weakness (30% of revenue exposure)</li></ul></div><div class="invalidation-box"><strong>Invalidation:</strong> Break below $380 (key support failure) OR DRAM spot prices decline 10%+ (cycle reversal)</div>
+        <div class="analysis-sources"><button class="sources-toggle" onclick="this.parentElement.classList.toggle('open')">&#128202; Analysis Sources <span class="toggle-chevron">&#9660;</span></button><div class="sources-content"><div class="src-section"><div class="src-section-title">Technical Analysis</div><div class="src-ta-header"><span class="src-ta-score" style="color:#10B981;">+0.23</span><span class="src-ta-rating">Buy</span><span class="src-ta-conf">47% confidence</span></div><div class="src-ta-explain">Composite score +0.23 — mildly bullish.</div><div class="src-breakdown"><div class="src-breakdown-row"><span class="src-breakdown-label">Trend</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:62%;background:#10B981;"></div></div><span class="src-breakdown-val" style="color:#10B981;">+0.25</span></div><div class="src-breakdown-meaning">Mild upward trend</div><div class="src-breakdown-row"><span class="src-breakdown-label">Momentum</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:58%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">+0.17</span></div><div class="src-breakdown-meaning">Mild buying pressure</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volatility</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:75%;background:#10B981;"></div></div><span class="src-breakdown-val" style="color:#10B981;">+0.50</span></div><div class="src-breakdown-meaning">Moderate price swings</div><div class="src-breakdown-row"><span class="src-breakdown-label">Volume</span><div class="src-breakdown-track"><div class="src-breakdown-center"></div><div class="src-breakdown-fill" style="width:50%;background:#F59E0B;"></div></div><span class="src-breakdown-val" style="color:#F59E0B;">+0.00</span></div><div class="src-breakdown-meaning">Below-average trading activity</div></div><div class="src-key-levels"><span class="src-level"><span class="src-level-label">Support (floor):</span><span class="src-level-val" style="color:#10B981;">$333.71, $355.16</span></span><span class="src-level"><span class="src-level-label">Resistance (ceiling):</span><span class="src-level-val" style="color:#EF4444;">$444.86, $445.47</span></span><span class="src-level"><span class="src-level-label">Pivot:</span><span class="src-level-val">$330.17</span></span></div><div class="src-ta-explain" style="margin-top:6px;">Nearest support at $355.16 — a break below could accelerate selling. Nearest resistance at $444.86 — needs a break above for continuation. Trading range: $89.70 between key support and resistance.</div></div><div class="src-section"><div class="src-section-title">Prediction Markets</div><div class="src-pred-grid"><div class="src-pred-card"><div class="src-pred-label">cut_25bp (polymarket)</div><div class="src-pred-value" style="color:#10B981;">0%</div><div class="src-pred-explain">Markets see almost no chance of a rate cut (0%)</div></div></div><div class="src-source-label">Kalshi / Polymarket</div><div class="src-source-label" style="opacity:0.6;font-style:italic;">Limited data — missing: recession risk, inflation expectations, GDP outlook, S&amp;P 500 targets</div></div><div class="src-section"><div class="src-section-title">Reddit Sentiment</div><div class="src-sent-mood"><span class="src-sent-dot" style="background:#10B981;box-shadow:0 0 6px #10B981;"></span><span style="color:#10B981;">Very Bullish</span></div><div class="src-sent-explain">Social sentiment skews bullish across monitored subreddits. 787 total mentions across 50 trending tickers.</div><div class="src-sent-mentions">MU: 11 mentions, 81 upvotes, ranked #28 trending</div><div class="src-sent-tickers"><span class="src-sent-ticker">EU (72)</span><span class="src-sent-ticker">SPY (58)</span><span class="src-sent-ticker">NVDA (48)</span><span class="src-sent-ticker">MSFT (47)</span><span class="src-sent-ticker">VOO (24)</span><span class="src-sent-ticker">HOOD (24)</span><span class="src-sent-ticker">DOW (23)</span><span class="src-sent-ticker">DTE (20)</span></div><div class="src-source-label">r/wallstreetbets, r/stocks, r/investing. Sentiment can lag institutional positioning by hours to days.</div></div></div></div>
+      </div>
+    </div>
+
+    </div>
+  </div>
+
+  <!-- DISCLAIMER (footer) -->
+  <div class="disclaimer-banner disclaimer-footer">
+    <span class="disclaimer-icon">&#x26A0;&#xFE0F;</span>
+    <span>
+      <strong>DISCLAIMER:</strong> This report is generated by an AI system for informational and educational purposes only.
+      It does not constitute financial advice, investment recommendations, or solicitation to buy or sell any securities.
+      Always consult a qualified financial advisor before making investment decisions.
+    </span>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="report-footer">
+    <p>Generated by <strong>Teletraan Intelligence</strong> &middot; February 15, 2026 at 20:53 UTC</p>
+    <a href="../index.html">All Reports</a>
+  </footer>
+
+</div>
+
+<script>
+(function() {
+  // Phase accordion toggle
+  window.togglePhase = function(btn) {
+    var accordion = btn.closest('.phase-accordion');
+    accordion.classList.toggle('open');
+    var isOpen = accordion.classList.contains('open');
+    btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  };
+
+  // Expand / collapse all phases
+  window.toggleAllPhases = function() {
+    var accordions = document.querySelectorAll('.phase-accordion');
+    var btn = document.querySelector('.phase-expand-all-btn');
+    var anyOpen = Array.from(accordions).some(function(a) { return a.classList.contains('open'); });
+    accordions.forEach(function(a) {
+      if (anyOpen) {
+        a.classList.remove('open');
+        a.querySelector('.phase-header').setAttribute('aria-expanded', 'false');
+      } else {
+        a.classList.add('open');
+        a.querySelector('.phase-header').setAttribute('aria-expanded', 'true');
+      }
+    });
+    btn.textContent = anyOpen ? 'Expand All' : 'Collapse All';
+  };
+})();
+</script>
+
+<script>
+(function() {
+  // Insight data for filtering/sorting
+  var insightData = [{"index": 0, "action": "STRONG_SELL", "confidence": 0.88}, {"index": 1, "action": "STRONG_BUY", "confidence": 0.92}, {"index": 2, "action": "BUY", "confidence": 0.74}, {"index": 3, "action": "BUY", "confidence": 0.82}, {"index": 4, "action": "STRONG_SELL", "confidence": 0.92}, {"index": 5, "action": "HOLD", "confidence": 0.7}, {"index": 6, "action": "BUY", "confidence": 0.68}];
+  var currentFilter = 'ALL';
+  var sortDescending = false;
+
+  // Toggle expand/collapse
+  window.toggleInsight = function(index) {
+    var card = document.querySelector('.insight-card[data-index="' + index + '"]');
+    if (card) {
+      card.classList.toggle('expanded');
+    }
+  };
+
+  // Filter insights by action
+  window.filterInsights = function(action) {
+    currentFilter = action;
+    document.querySelectorAll('.filter-btn').forEach(function(btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-action') === action);
+    });
+    applyFiltersAndSort();
+  };
+
+  // Toggle sort by confidence
+  window.toggleSort = function() {
+    sortDescending = !sortDescending;
+    var btn = document.getElementById('sort-btn');
+    btn.classList.toggle('active', sortDescending);
+    applyFiltersAndSort();
+  };
+
+  function applyFiltersAndSort() {
+    var container = document.getElementById('insights-container');
+    var cards = Array.from(container.querySelectorAll('.insight-card'));
+    var order = insightData.slice();
+    if (currentFilter !== 'ALL') {
+      order = order.filter(function(d) { return d.action === currentFilter; });
+    }
+    if (sortDescending) {
+      order.sort(function(a, b) { return b.confidence - a.confidence; });
+    }
+    var visibleIndices = new Set(order.map(function(d) { return d.index; }));
+    cards.forEach(function(card) {
+      var idx = parseInt(card.getAttribute('data-index'));
+      card.style.display = visibleIndices.has(idx) ? '' : 'none';
+    });
+    if (sortDescending) {
+      order.forEach(function(d) {
+        var card = container.querySelector('.insight-card[data-index="' + d.index + '"]');
+        if (card) container.appendChild(card);
+      });
+    }
+  }
+
+  // === ApexCharts === //
+  var darkTheme = {
+    mode: 'dark',
+    palette: 'palette1',
+    monochrome: { enabled: false }
+  };
+
+  // Confidence Distribution (radialBar)
+  var confDist = [4, 3, 0];
+  var confTotal = confDist[0] + confDist[1] + confDist[2];
+  if (confTotal > 0) {
+    var confPcts = confDist.map(function(v) { return Math.round(v / confTotal * 100); });
+    var confHoveredIdx = -1;
+    new ApexCharts(document.querySelector('#chart-confidence'), {
+      chart: { type: 'radialBar', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      plotOptions: {
+        radialBar: {
+          hollow: { size: '30%' },
+          track: { background: 'rgba(255,255,255,0.06)' },
+          dataLabels: {
+            name: { fontSize: '12px', color: '#94A3B8', offsetY: -4,
+                     formatter: function(seriesName, opts) { confHoveredIdx = opts && opts.seriesIndex != null ? opts.seriesIndex : -1; return seriesName; } },
+            value: { fontSize: '14px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,
+                      formatter: function(val) { var count = confHoveredIdx >= 0 && confHoveredIdx < confDist.length ? confDist[confHoveredIdx] : confTotal; return count + ' insight' + (count !== 1 ? 's' : ''); } }
+          }
+        }
+      },
+      series: confPcts,
+      labels: ['High (>80%)', 'Medium (60-80%)', 'Low (<60%)'],
+      colors: ['#10B981', '#F59E0B', '#EF4444'],
+      stroke: { lineCap: 'round' }
+    }).render();
+  } else {
+    document.querySelector('#chart-confidence').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No confidence data</div>';
+  }
+
+  // Action Breakdown (donut)
+  var actionLabels = ["Strong Buy", "Buy", "Hold", "Strong Sell"];
+  var actionValues = [1, 3, 1, 2];
+  var actionColors = ["#22C55E", "#22C55E", "#EAB308", "#EF4444"];
+  if (actionValues.length > 0) {
+    new ApexCharts(document.querySelector('#chart-actions'), {
+      chart: { type: 'donut', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      series: actionValues,
+      labels: actionLabels,
+      colors: actionColors,
+      plotOptions: {
+        pie: {
+          donut: {
+            size: '60%',
+            labels: {
+              show: true,
+              total: {
+                show: true,
+                label: 'Total',
+                fontSize: '13px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 600,
+                color: '#94A3B8',
+                formatter: function(w) { return w.globals.seriesTotals.reduce(function(a,b){ return a+b; }, 0); }
+              },
+              value: {
+                fontSize: '20px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 700,
+                color: '#F1F5F9'
+              }
+            }
+          }
+        }
+      },
+      dataLabels: { enabled: false },
+      legend: {
+        position: 'bottom',
+        fontSize: '12px',
+        fontFamily: 'Inter, sans-serif',
+        fontWeight: 600,
+        labels: { colors: '#94A3B8' },
+        markers: { radius: 3 }
+      },
+      stroke: { width: 2, colors: ['#0B0F19'] }
+    }).render();
+  } else {
+    document.querySelector('#chart-actions').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No action data</div>';
+  }
+
+})();
+</script>
+
+</body>
+</html>

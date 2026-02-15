@@ -1,0 +1,40 @@
+{
+  "filename": "2026-02-15-2005-risk-off.html",
+  "task_id": "a495786f-57e8-41fe-ae24-3aeadc666ca3",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Risk-Off\n\n**Key Macro Themes:**\n- Safe Haven Rotation & Geopolitical Risk Premium: Gold's parabolic rise to $5,046 (+9.98%) combined with falling yields and elevated VIX signals major...\n- Energy & Commodity Reflation Amid Supply Concerns: Energy sector leading with +13.97% gain despite oil futures mixed signals. Materials sector up +9.51...\n- Tech Sector Repricing & Growth Rotation Reversal: NASDAQ down -4.12% while Russell 2000 holds up better (-1.16%) shows sharp rotation out of mega-cap ...\n\n**Heatmap Analysis:** The market is exhibiting a classic risk-off defensive rotation with clear sector bifurcation. Utilities (+2.76%), Real Estate (+1.47%), and Healthcare (+1.07%) are leading as safe havens, while Financials (-0.08%, -4.81% 5D), Technology (+0.25%, -1.11% 5D), and Consumer Discretionary (+0.04%, -1.53% 5D) show sustained weakness. The uniformly flat 50% breadth across all sectors is unusual and suggests internal churn with winners and losers offsetting within each sector—this creates rich stock-picking opportunities.\n\n**Sectors Scanned:**\n- Technology: +0.3% (1D), breadth 50%\n- Financials: -0.1% (1D), breadth 50%\n- Energy: +0.7% (1D), breadth 50%\n- Healthcare: +1.1% (1D), breadth 50%\n- Industrials: +0.8% (1D), breadth 50%\n- Consumer Staples: +0.3% (1D), breadth 50%\n- Consumer Discretionary: +0.0% (1D), breadth 50%\n- Utilities: +2.8% (1D), breadth 50%\n- Communication Services: -0.1% (1D), breadth 50%\n- Real Estate: +1.5% (1D), breadth 50%\n- Materials: +0.9% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Defensive sector surge with 20-day momentum confirmation: Utilities, Real Estate, Healthcare, and Consumer Staples all showing positive 1D, 5D, and 20D returns\n- Commodity-linked sectors (Energy +13.09% 20D, Materials +9.35% 20D) outperforming dramatically on intermediate timeframes despite modest 1D gains\n- Growth sector capitulation: Technology (-3.55% 20D), Consumer Discretionary (-4.97% 20D), and Communication Services (-1.77% 20D) all negative on 20D basis with continued 5D weakness",
+  "top_sectors": [
+    "Energy +13.1%",
+    "Materials +9.4%",
+    "Consumer Staples +8.9%",
+    "Utilities +7.7%",
+    "Industrials +6.0%",
+    "Real Estate +5.1%"
+  ],
+  "insights_count": 7,
+  "symbols": [
+    "GC=F",
+    "GOOGL",
+    "JPM",
+    "LITE",
+    "MU",
+    "NEE",
+    "NVDA"
+  ],
+  "action_counts": {
+    "STRONG_SELL": 2,
+    "STRONG_BUY": 1,
+    "BUY": 3,
+    "HOLD": 1
+  },
+  "avg_confidence": 0.8,
+  "insight_types": [
+    "opportunity",
+    "risk",
+    "rotation"
+  ],
+  "created_at": "2026-02-15T20:05:11",
+  "started_at": "2026-02-15T20:05:11.555869",
+  "completed_at": "2026-02-15T20:53:29.296173",
+  "elapsed_seconds": 2897.737107
+}
