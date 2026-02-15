@@ -18,7 +18,7 @@ import importlib.util
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -106,6 +106,39 @@ _HAS_PREDICTIONS = importlib.util.find_spec("data.adapters.prediction_markets") 
 _HAS_SENTIMENT = importlib.util.find_spec("data.adapters.reddit_sentiment") is not None
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LLMActivityEntry:
+    """Record of a single LLM query during analysis."""
+
+    seq: int  # auto-increment sequence number
+    timestamp: str  # ISO datetime
+    phase: str  # e.g. "macro_scan", "deep_dive"
+    agent_name: str  # e.g. "technical", "synthesis"
+    prompt_preview: str  # first ~300 chars of user_prompt
+    response_preview: str  # first ~500 chars of response (filled after completion)
+    input_tokens: int  # from LLMQueryResult
+    output_tokens: int
+    duration_ms: int
+    status: str  # "running" | "done" | "error"
+    symbol: str = ""  # stock symbol for deep_dive entries (e.g. "AAPL")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict for JSON response."""
+        return {
+            "seq": self.seq,
+            "timestamp": self.timestamp,
+            "phase": self.phase,
+            "agent_name": self.agent_name,
+            "prompt_preview": self.prompt_preview,
+            "response_preview": self.response_preview,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "duration_ms": self.duration_ms,
+            "status": self.status,
+            "symbol": self.symbol,
+        }
 
 
 # Valid insight types and actions for validation
@@ -321,6 +354,11 @@ class AutonomousDeepEngine:
         # Per-run metrics accumulator (set at the start of each analysis run)
         self._run_metrics: RunMetrics | None = None
 
+        # Activity log for live LLM tracking (scoped per task_id)
+        self._activity_log: list[LLMActivityEntry] = []
+        self._activity_seq: int = 0
+        self._current_task_id: str | None = None
+
         # Phase 1: Macro Scanner
         self.macro_scanner = MacroScanner()
 
@@ -482,6 +520,9 @@ class AutonomousDeepEngine:
         analysis_id = str(uuid4())
         start_time = datetime.utcnow()
         result = AutonomousAnalysisResult(analysis_id=analysis_id)
+
+        # Clear activity log for new run, scoped to this task_id
+        self.clear_activity_log(task_id=task_id)
 
         # Initialise per-run metrics accumulator
         metrics = RunMetrics()
@@ -909,6 +950,7 @@ class AutonomousDeepEngine:
             formatted_context,
             "Analyze the heatmap data and select stocks for deep dive.",
             "heatmap_analyzer",
+            "heatmap_analysis",
         )
 
         return parse_heatmap_analysis_response(response)
@@ -979,6 +1021,7 @@ class AutonomousDeepEngine:
             COVERAGE_EVALUATOR_PROMPT,
             formatted_context,
             "coverage_evaluator",
+            "coverage_evaluation",
         )
 
         evaluation = parse_coverage_response(response)
@@ -1172,7 +1215,7 @@ class AutonomousDeepEngine:
         full_context = f"{autonomous_context}{portfolio_context}\n\n{synthesis_context}"
 
         # Query LLM
-        response = await self._query_llm(enhanced_prompt, full_context, "synthesis")
+        response = await self._query_llm(enhanced_prompt, full_context, "synthesis", "synthesis")
 
         return parse_synthesis_response(response)
 
@@ -1733,10 +1776,41 @@ class AutonomousDeepEngine:
     async def _run_macro_scan(self) -> MacroScanResult:
         """Run Phase 1: Macro Scanner.
 
+        The MacroScanner has its own _query_llm that calls pool_query_llm
+        directly. We wrap the call with activity recording so the LLM
+        activity feed shows the macro scan phase.
+
         Returns:
             MacroScanResult with market regime and themes.
         """
-        return await self.macro_scanner.scan()
+        entry_idx = self._record_activity_start(
+            "macro_scanner", "Scanning global macro environment...", "macro_scan"
+        )
+        start_time = datetime.utcnow()
+
+        try:
+            scan_result = await self.macro_scanner.scan()
+            duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+
+            # Read token metadata from the scanner's last LLM result
+            llm_result = getattr(self.macro_scanner, "last_llm_result", None)
+            if llm_result is not None:
+                self._record_activity_end(entry_idx, llm_result, duration_ms)
+                if self._run_metrics is not None:
+                    self._run_metrics.record_llm_call(llm_result)
+            else:
+                # No LLM result metadata available; mark entry as done with timing only
+                if entry_idx < len(self._activity_log):
+                    entry = self._activity_log[entry_idx]
+                    regime = getattr(scan_result, "market_regime", "")
+                    entry.response_preview = f"Macro scan complete. Regime: {regime}"
+                    entry.duration_ms = duration_ms
+                    entry.status = "done"
+
+            return scan_result
+        except Exception:
+            self._record_activity_error(entry_idx)
+            raise
 
     # DEPRECATED — used by legacy fallback pipeline only
     async def _run_sector_rotation(
@@ -1788,6 +1862,7 @@ class AutonomousDeepEngine:
             SECTOR_ROTATOR_PROMPT,
             formatted_context,
             "sector_rotator",
+            "sector_rotation",
         )
 
         return parse_sector_rotator_response(response)
@@ -1854,6 +1929,7 @@ class AutonomousDeepEngine:
             OPPORTUNITY_HUNTER_PROMPT,
             formatted_context,
             "opportunity_hunter",
+            "opportunity_hunt",
         )
 
         return parse_opportunity_response(response)
@@ -2058,11 +2134,19 @@ class AutonomousDeepEngine:
         # Prepend discovery context
         full_context = f"{discovery_context}\n\n{formatted_context}"
 
+        # Build a meaningful preview that distinguishes this entry from other
+        # analysts analyzing the same symbol (the discovery context prefix is
+        # identical for all analysts and would make entries look like duplicates).
+        analyst_preview = f"[{symbol}] {analyst_name}: {formatted_context[:200]}"
+
         # Query LLM (semaphore limits concurrent LLM calls across all analysts)
         for attempt in range(self.max_retries + 1):
             try:
                 async with self._llm_semaphore:
-                    response = await self._query_llm(prompt, full_context, analyst_name)
+                    response = await self._query_llm(
+                        prompt, full_context, analyst_name, "deep_dive",
+                        symbol=symbol, prompt_preview=analyst_preview,
+                    )
                 parsed = parse_func(response)
 
                 if hasattr(parsed, "to_dict"):
@@ -2145,7 +2229,7 @@ class AutonomousDeepEngine:
         full_context = f"{autonomous_context}{portfolio_context}\n\n{synthesis_context}"
 
         # Query LLM
-        response = await self._query_llm(enhanced_prompt, full_context, "synthesis")
+        response = await self._query_llm(enhanced_prompt, full_context, "synthesis", "synthesis")
 
         return parse_synthesis_response(response)
 
@@ -2482,11 +2566,104 @@ class AutonomousDeepEngine:
 
         return "\n".join(lines)
 
+    def _record_activity_start(
+        self,
+        agent_name: str,
+        user_prompt: str,
+        phase: str = "unknown",
+        symbol: str = "",
+        prompt_preview: str | None = None,
+    ) -> int:
+        """Record the start of an LLM query. Returns the activity entry index.
+
+        Args:
+            agent_name: Name of the agent.
+            user_prompt: Full user prompt text.
+            phase: Pipeline phase name.
+            symbol: Stock symbol (for deep_dive entries).
+            prompt_preview: Optional override for the prompt preview text.
+                If not provided, uses first 300 chars of user_prompt.
+        """
+        self._activity_seq += 1
+        entry = LLMActivityEntry(
+            seq=self._activity_seq,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            phase=phase,
+            agent_name=agent_name,
+            prompt_preview=prompt_preview if prompt_preview is not None else user_prompt[:300],
+            response_preview="",
+            input_tokens=0,
+            output_tokens=0,
+            duration_ms=0,
+            status="running",
+            symbol=symbol,
+        )
+        self._activity_log.append(entry)
+        return len(self._activity_log) - 1
+
+    def _record_activity_end(
+        self,
+        entry_idx: int,
+        result: LLMQueryResult,
+        duration_ms: int,
+    ) -> None:
+        """Update activity log entry with response and metrics."""
+        if entry_idx < len(self._activity_log):
+            entry = self._activity_log[entry_idx]
+            entry.response_preview = result.text[:500]
+            entry.input_tokens = result.input_tokens
+            entry.output_tokens = result.output_tokens
+            entry.duration_ms = duration_ms
+            entry.status = "done"
+
+    def _record_activity_error(self, entry_idx: int) -> None:
+        """Mark activity log entry as errored."""
+        if entry_idx < len(self._activity_log):
+            entry = self._activity_log[entry_idx]
+            entry.status = "error"
+
+    def get_activity_log(self, since_seq: int = 0, task_id: str | None = None) -> list[dict]:
+        """Get all activity log entries for the current run.
+
+        Always returns ALL entries (no cursor-based filtering). With a cap of
+        ~150 entries per run, the overhead of returning them all is negligible,
+        and this avoids a race condition where the frontend advances its cursor
+        past a "running" entry before the entry transitions to "done" with
+        populated token counts — causing the "done" version to never be sent.
+
+        Args:
+            since_seq: Deprecated / ignored. Kept for API compatibility.
+            task_id: If provided, only return entries if this matches the
+                current run's task_id. Prevents returning stale entries
+                from a previous run.
+
+        Returns:
+            List of activity entry dicts, or empty list if task_id
+            doesn't match the current run.
+        """
+        if task_id is not None and self._current_task_id != task_id:
+            return []
+        return [e.to_dict() for e in self._activity_log]
+
+    def clear_activity_log(self, task_id: str | None = None) -> None:
+        """Clear the activity log for a new run.
+
+        Args:
+            task_id: The task_id of the new run. Activity entries will
+                only be returned for requests matching this task_id.
+        """
+        self._activity_log = []
+        self._activity_seq = 0
+        self._current_task_id = task_id
+
     async def _query_llm(
         self,
         system_prompt: str,
         user_prompt: str,
         agent_name: str = "unknown",
+        phase: str = "unknown",
+        symbol: str = "",
+        prompt_preview: str | None = None,
     ) -> str:
         """Query the LLM using the shared client pool.
 
@@ -2494,17 +2671,36 @@ class AutonomousDeepEngine:
             system_prompt: System prompt for the agent.
             user_prompt: User prompt with context.
             agent_name: Name of the agent (for logging).
+            phase: Phase name for activity tracking.
+            symbol: Stock symbol for deep_dive entries.
+            prompt_preview: Optional override for the prompt preview shown in
+                the activity feed. If not provided, uses the first 300 chars
+                of user_prompt.
 
         Returns:
             LLM response text.
         """
-        result = await pool_query_llm(system_prompt, user_prompt, agent_name)
+        entry_idx = self._record_activity_start(
+            agent_name, user_prompt, phase,
+            symbol=symbol, prompt_preview=prompt_preview,
+        )
+        start_time = datetime.utcnow()
+
         try:
-            if self._run_metrics is not None:
-                self._run_metrics.record_llm_call(result)
-        except Exception as metrics_err:
-            logger.debug("Metrics recording failed (non-fatal): %s", metrics_err)
-        return result.text
+            result = await pool_query_llm(system_prompt, user_prompt, agent_name)
+            duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+            self._record_activity_end(entry_idx, result, duration_ms)
+
+            try:
+                if self._run_metrics is not None:
+                    self._run_metrics.record_llm_call(result)
+            except Exception as metrics_err:
+                logger.debug("Metrics recording failed (non-fatal): %s", metrics_err)
+
+            return result.text
+        except Exception:
+            self._record_activity_error(entry_idx)
+            raise
 
     async def get_more_insights(
         self,

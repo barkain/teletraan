@@ -57,8 +57,12 @@ export default function SettingsPage() {
   // When server data loads (or changes), populate the form with non-sensitive fields.
   // Sensitive fields (api_key, auth_token) are left empty since the server returns masked values;
   // the form shows placeholder text indicating a value is saved.
+  // Sync form state when server LLM config loads. This is intentionally a setState
+  // inside an effect because we need to merge server values with any user-edited fields
+  // (prev state), which cannot be done with a simple initializer or useMemo.
   useEffect(() => {
     if (!llmStatus) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: syncing form with server data, needs prev state
     setLLMForm(prev => ({
       // Keep any user-edited values that have been explicitly typed into the form,
       // but provide server values as the base for anything not yet overridden.

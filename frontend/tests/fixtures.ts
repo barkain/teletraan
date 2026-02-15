@@ -39,9 +39,37 @@ export const test = base.extend({
     );
     await page.route('**/api/v1/outcomes/**', route =>
       route.fulfill({
-        status: 404,
+        status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ detail: 'Not found' }),
+        body: JSON.stringify({
+          total_tracked: 0,
+          completed: 0,
+          currently_tracking: 0,
+          success_rate: null,
+          avg_return_when_correct: null,
+          by_direction: {},
+        }),
+      })
+    );
+    await page.route('**/api/v1/knowledge/patterns/summary', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ total: 0, active: 0, top_symbols: [], top_sectors: [], by_type: {} }),
+      })
+    );
+    await page.route('**/api/v1/knowledge/track-record/monthly-trend', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: [] }),
+      })
+    );
+    await page.route('**/api/v1/knowledge/track-record', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ by_action: {}, by_type: {} }),
       })
     );
     await page.route('**/api/v1/knowledge/**', route =>

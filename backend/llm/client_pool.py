@@ -328,7 +328,16 @@ async def pool_query_llm(
                 cost_usd = msg.total_cost_usd or 0.0
                 sdk_duration_ms = float(msg.duration_ms or 0)
                 usage = msg.usage or {}
-                input_tokens = usage.get("input_tokens", 0)
+                # The CLI reports input_tokens as only non-cached tokens.
+                # To get the true total input, we must add cached tokens
+                # (cache_creation_input_tokens + cache_read_input_tokens).
+                # Without this, persistent-connection calls report "3 in"
+                # because almost all prompt tokens hit the cache.
+                input_tokens = (
+                    usage.get("input_tokens", 0)
+                    + usage.get("cache_creation_input_tokens", 0)
+                    + usage.get("cache_read_input_tokens", 0)
+                )
                 output_tokens = usage.get("output_tokens", 0)
 
     elapsed_ms = (time.monotonic() - start) * 1000

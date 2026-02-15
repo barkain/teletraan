@@ -420,6 +420,9 @@ class MacroScanner:
         self.role = "Global Macro Analyst"
         self.llm_client = llm_client
         self.data_adapter = data_adapter or YahooFinanceAdapter()
+        # Stores the last LLMQueryResult so callers (e.g. AutonomousDeepEngine)
+        # can read token/cost metadata after scan() completes.
+        self.last_llm_result: Any | None = None
 
     async def scan(self, context: dict[str, Any] | None = None) -> MacroScanResult:
         """
@@ -817,6 +820,7 @@ class MacroScanner:
             user_prompt=prompt,
             agent_name=self.name,
         )
+        self.last_llm_result = result
         return result.text
 
     def _parse_result(self, response: str) -> MacroScanResult:

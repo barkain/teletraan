@@ -195,7 +195,7 @@ export function ResearchDetail({
                 </p>
               )}
               <Button asChild variant="outline" size="sm">
-                <Link href={`/insights/${research.result_insight_id}`}>
+                <Link href={`/insights?id=${research.result_insight_id}`}>
                   <ExternalLink className="h-4 w-4 mr-2" />
                   View Result Insight
                 </Link>
