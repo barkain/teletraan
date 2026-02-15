@@ -16,7 +16,7 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 $DesktopDir  = $ScriptDir
 $BackendDir  = Join-Path $ProjectRoot "backend"
 $FrontendDir = Join-Path $ProjectRoot "frontend"
-$BinariesDir = Join-Path $DesktopDir  "src-tauri\binaries"
+$ResourcesDir = Join-Path $DesktopDir  "src-tauri\resources"
 
 # Detect the Rust host triple
 $TargetTriple = (rustc --print host-tuple).Trim()
@@ -51,7 +51,7 @@ Set-Location $BackendDir
 uv sync
 
 uv run pyinstaller `
-    --onefile `
+    --onedir -y `
     --name teletraan-backend `
     --hidden-import uvicorn.logging `
     --hidden-import uvicorn.loops.auto `
@@ -63,15 +63,22 @@ uv run pyinstaller `
     main.py
 
 # ────────────────────────────────────────────────────────────
-# 3. Copy the backend binary into the Tauri sidecar location
+# 3. Copy the backend directory into Tauri resources
+#    --onedir produces: dist/teletraan-backend/ (directory with
+#    the main binary + all shared libraries / data files).
+#    Tauri's `bundle.resources` will embed the directory inside
+#    Contents/Resources/ on macOS and equivalent on Windows.
 # ────────────────────────────────────────────────────────────
-Write-Host "==> Copying backend binary to sidecar location..."
-if (-not (Test-Path $BinariesDir)) { New-Item -ItemType Directory -Path $BinariesDir | Out-Null }
+Write-Host "==> Copying backend directory to Tauri resources..."
+if (Test-Path (Join-Path $ResourcesDir "teletraan-backend")) {
+    Remove-Item -Recurse -Force (Join-Path $ResourcesDir "teletraan-backend")
+}
+if (-not (Test-Path $ResourcesDir)) { New-Item -ItemType Directory -Path $ResourcesDir | Out-Null }
 
-$SrcBinary  = Join-Path $BackendDir "dist\teletraan-backend.exe"
-$DestBinary = Join-Path $BinariesDir "teletraan-backend-${TargetTriple}.exe"
-Copy-Item -Force -Path $SrcBinary -Destination $DestBinary
-Write-Host "    Sidecar binary: $DestBinary"
+$SrcDir  = Join-Path $BackendDir "dist\teletraan-backend"
+$DestDir = Join-Path $ResourcesDir "teletraan-backend"
+Copy-Item -Recurse -Force -Path $SrcDir -Destination $DestDir
+Write-Host "    Backend directory: $DestDir"
 
 # ────────────────────────────────────────────────────────────
 # 4. Build the Tauri desktop app

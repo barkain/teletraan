@@ -119,7 +119,7 @@ jobs:
         working-directory: backend
         run: |
           uv run pyinstaller \
-            --onefile \
+            --onedir -y \
             --name teletraan-backend \
             --hidden-import uvicorn.logging \
             --hidden-import uvicorn.loops.auto \
@@ -190,7 +190,7 @@ jobs:
         shell: pwsh
         run: |
           uv run pyinstaller `
-            --onefile `
+            --onedir -y `
             --name teletraan-backend `
             --hidden-import uvicorn.logging `
             --hidden-import uvicorn.loops.auto `
@@ -255,23 +255,25 @@ jobs:
             --collect-submodules uvicorn `
             main.py
 
-      # ── Copy sidecar binary with target-triple suffix ────────
+      # ── Copy onedir output to Tauri resources ───────────────
+      # PyInstaller --onedir produces dist/teletraan-backend/ (directory with
+      # the main binary + all shared libraries / data files).
+      # The Rust code (lib.rs) locates the binary via resource_dir/resources/teletraan-backend/teletraan-backend.
 
-      - name: Copy sidecar binary (macOS)
+      - name: Copy backend to Tauri resources (macOS)
         if: runner.os == 'macOS'
         run: |
-          mkdir -p desktop/src-tauri/binaries
-          cp backend/dist/teletraan-backend \
-             desktop/src-tauri/binaries/teletraan-backend-${{ matrix.target }}
-          chmod +x desktop/src-tauri/binaries/teletraan-backend-${{ matrix.target }}
+          mkdir -p desktop/src-tauri/resources
+          cp -r backend/dist/teletraan-backend desktop/src-tauri/resources/teletraan-backend
+          chmod +x desktop/src-tauri/resources/teletraan-backend/teletraan-backend
 
-      - name: Copy sidecar binary (Windows)
+      - name: Copy backend to Tauri resources (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path desktop/src-tauri/binaries | Out-Null
-          Copy-Item backend/dist/teletraan-backend.exe `
-            desktop/src-tauri/binaries/teletraan-backend-${{ matrix.target }}.exe
+          New-Item -ItemType Directory -Force -Path desktop/src-tauri/resources | Out-Null
+          Copy-Item -Recurse -Force backend/dist/teletraan-backend `
+            desktop/src-tauri/resources/teletraan-backend
 
       # ── Tauri build ──────────────────────────────────────────
 
