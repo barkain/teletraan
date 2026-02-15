@@ -83,41 +83,10 @@ const mockInsightsResponse = {
   total: 4,
 };
 
-// Helper to set up standard API mocks for the dashboard
-// Register specific routes BEFORE broad patterns so they take priority
+// Helper to set up standard API mocks for the dashboard.
+// Playwright matches routes in REVERSE registration order (newest first).
+// Register broad patterns FIRST (low priority), specific ones LAST (high priority).
 async function setupDashboardMocks(page: import('@playwright/test').Page) {
-  // Mock autonomous analysis endpoints (register BEFORE broad deep-insights route)
-  await page.route('**/api/v1/deep-insights/autonomous/**', async (route) => {
-    await route.fulfill({
-      status: 404,
-      contentType: 'application/json',
-      body: JSON.stringify({ detail: 'No active analysis task' }),
-    });
-  });
-
-  // Mock the deep-insights list endpoint
-  await page.route('**/api/v1/deep-insights?**', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(mockInsightsResponse),
-    });
-  });
-
-  // Also match without query params
-  await page.route('**/api/v1/deep-insights', async (route) => {
-    if (route.request().url().includes('/autonomous/')) {
-      // Let the autonomous handler above take care of it
-      await route.fallback();
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(mockInsightsResponse),
-    });
-  });
-
   await page.route('**/api/v1/features/signals**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -131,6 +100,32 @@ async function setupDashboardMocks(page: import('@playwright/test').Page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({}),
+    });
+  });
+
+  // Broad deep-insights (registered FIRST = low priority)
+  await page.route('**/api/v1/deep-insights**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(mockInsightsResponse),
+    });
+  });
+
+  // Specific autonomous endpoints (registered AFTER broad = high priority)
+  await page.route('**/api/v1/deep-insights/autonomous/**', async (route) => {
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: 'No active analysis task' }),
+    });
+  });
+
+  await page.route('**/api/v1/deep-insights/autonomous/active', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(null),
     });
   });
 }
@@ -178,17 +173,17 @@ test.describe('Dashboard (Home Page)', () => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    // Wait for stats cards to appear
-    const totalInsightsLabel = page.locator('text=Total Insights');
+    // Wait for stats cards to appear (use .first() because chart legends may duplicate text)
+    const totalInsightsLabel = page.locator('text=Total Insights').first();
     await expect(totalInsightsLabel).toBeVisible({ timeout: 10000 });
 
     // Verify all 5 stat card labels exist
-    await expect(page.locator('text=Total Insights')).toBeVisible();
-    await expect(page.locator('text=Buy Signals')).toBeVisible();
-    await expect(page.locator('text=Sell Signals')).toBeVisible();
+    await expect(page.locator('text=Total Insights').first()).toBeVisible();
+    await expect(page.locator('text=Buy Signals').first()).toBeVisible();
+    await expect(page.locator('text=Sell Signals').first()).toBeVisible();
     // Use .first() for "Hold" which appears in multiple places
     await expect(page.locator('text=Hold').first()).toBeVisible();
-    await expect(page.locator('text=Watch List')).toBeVisible();
+    await expect(page.locator('text=Watch List').first()).toBeVisible();
 
     // Verify the counts match mock data: 4 total, 1 buy, 1 sell, 1 hold, 1 watch
     const statValues = page.locator('.text-2xl.font-bold');
@@ -247,26 +242,10 @@ test.describe('Dashboard (Home Page)', () => {
   });
 
   test('empty chart states shown when no track record data', async ({ page }) => {
-    // Use empty insights for this test
-    await page.route('**/api/v1/deep-insights/autonomous/**', async (route) => {
-      await route.fulfill({
-        status: 404,
-        contentType: 'application/json',
-        body: JSON.stringify({ detail: 'No active analysis task' }),
-      });
-    });
+    // Use empty insights for this test.
+    // Playwright matches routes in REVERSE registration order (newest first).
+    // Register broad patterns FIRST, specific ones LAST.
 
-    await page.route('**/api/v1/deep-insights**', async (route) => {
-      if (route.request().url().includes('/autonomous/')) {
-        await route.fallback();
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ items: [], total: 0 }),
-      });
-    });
     await page.route('**/api/v1/features/signals**', async (route) => {
       await route.fulfill({
         status: 200,
@@ -279,6 +258,30 @@ test.describe('Dashboard (Home Page)', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({}),
+      });
+    });
+
+    // Broad deep-insights (low priority)
+    await page.route('**/api/v1/deep-insights**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [], total: 0 }),
+      });
+    });
+    // Specific autonomous (high priority)
+    await page.route('**/api/v1/deep-insights/autonomous/**', async (route) => {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'No active analysis task' }),
+      });
+    });
+    await page.route('**/api/v1/deep-insights/autonomous/active', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(null),
       });
     });
 

@@ -3,20 +3,57 @@ import { test as base } from '@playwright/test';
 
 export const test = base.extend({
   page: async ({ page }, use) => {
-    // Catch-all for any unhandled API requests - return empty/default responses
-    // Register specific routes BEFORE broad patterns so they take priority
+    // Playwright matches routes in REVERSE registration order (newest first).
+    // Register broad/catch-all patterns FIRST (low priority), then specific
+    // routes LAST (high priority) so they override the broad ones.
 
-    await page.route('**/api/v1/deep-insights/autonomous/active', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(null) })
-    );
-    await page.route('**/api/v1/deep-insights/autonomous/**', route =>
+    // Catch-all for /api/market/ requests (lowest priority)
+    await page.route('**/api/market/**', route =>
       route.fulfill({
-        status: 404,
+        status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ detail: 'No active analysis task' }),
+        body: JSON.stringify({}),
       })
     );
-    await page.route('**/api/v1/deep-insights**', route =>
+    // Catch-all for any remaining /api/v1/ requests
+    await page.route('**/api/v1/**', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({}),
+      })
+    );
+
+    // Broad category mocks (medium priority)
+    await page.route('**/api/v1/health**', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'healthy', version: '1.0.0' }),
+      })
+    );
+    await page.route('**/api/v1/insights**', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [], total: 0 }),
+      })
+    );
+    await page.route('**/api/v1/stocks**', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [], total: 0 }),
+      })
+    );
+    await page.route('**/api/v1/settings**', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({}),
+      })
+    );
+    await page.route('**/api/v1/conversations**', route =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -51,11 +88,21 @@ export const test = base.extend({
         }),
       })
     );
-    await page.route('**/api/v1/knowledge/patterns/summary', route =>
+
+    // Broad knowledge catch-all (register BEFORE specific knowledge routes)
+    await page.route('**/api/v1/knowledge/**', route =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ total: 0, active: 0, top_symbols: [], top_sectors: [], by_type: {} }),
+        body: JSON.stringify({ patterns: [], themes: [], total: 0 }),
+      })
+    );
+    // Specific knowledge routes (registered AFTER broad, so they take priority)
+    await page.route('**/api/v1/knowledge/track-record', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ by_action: {}, by_type: {} }),
       })
     );
     await page.route('**/api/v1/knowledge/track-record/monthly-trend', route =>
@@ -65,70 +112,32 @@ export const test = base.extend({
         body: JSON.stringify({ data: [] }),
       })
     );
-    await page.route('**/api/v1/knowledge/track-record', route =>
+    await page.route('**/api/v1/knowledge/patterns/summary', route =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ by_action: {}, by_type: {} }),
+        body: JSON.stringify({ total: 0, active: 0, top_symbols: [], top_sectors: [], by_type: {} }),
       })
     );
-    await page.route('**/api/v1/knowledge/**', route =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ patterns: [], themes: [], total: 0 }),
-      })
-    );
-    await page.route('**/api/v1/conversations**', route =>
+
+    // Broad deep-insights (register BEFORE specific autonomous routes)
+    await page.route('**/api/v1/deep-insights**', route =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ items: [], total: 0 }),
       })
     );
-    await page.route('**/api/v1/settings**', route =>
+    // Specific autonomous routes (registered AFTER broad, so they take priority)
+    await page.route('**/api/v1/deep-insights/autonomous/**', route =>
       route.fulfill({
-        status: 200,
+        status: 404,
         contentType: 'application/json',
-        body: JSON.stringify({}),
+        body: JSON.stringify({ detail: 'No active analysis task' }),
       })
     );
-    await page.route('**/api/v1/stocks**', route =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ items: [], total: 0 }),
-      })
-    );
-    await page.route('**/api/v1/insights**', route =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ items: [], total: 0 }),
-      })
-    );
-    await page.route('**/api/v1/health**', route =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ status: 'healthy', version: '1.0.0' }),
-      })
-    );
-    // Catch-all for any remaining /api/v1/ requests
-    await page.route('**/api/v1/**', route =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({}),
-      })
-    );
-    // Catch-all for /api/market/ requests
-    await page.route('**/api/market/**', route =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({}),
-      })
+    await page.route('**/api/v1/deep-insights/autonomous/active', route =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(null) })
     );
 
     await use(page);

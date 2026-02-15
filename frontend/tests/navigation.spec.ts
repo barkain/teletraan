@@ -1,38 +1,32 @@
 import { test, expect } from './fixtures';
 
 // Helper to set up standard API mocks so pages render without real backend.
-// IMPORTANT: Register specific routes AFTER broad patterns so the specific ones
-// take priority (Playwright matches routes in reverse registration order — newest first).
+// Playwright matches routes in REVERSE registration order (newest first).
+// Register broad patterns FIRST (low priority), specific ones LAST (high priority).
 async function setupGlobalMocks(page: import('@playwright/test').Page) {
-  // Broad deep-insights mock (registered FIRST so specific routes override it)
-  await page.route('**/api/v1/deep-insights**', async (route) => {
-    // Skip if this is an autonomous sub-path — let the specific handler below deal with it
-    const url = route.request().url();
-    if (url.includes('/autonomous/')) {
-      await route.fallback();
-      return;
-    }
+  // --- Low priority: broad category mocks (registered first) ---
+
+  await page.route('**/api/v1/health**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' }),
+    });
+  });
+
+  await page.route('**/api/v1/stocks**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ stocks: [], total: 0 }),
+    });
+  });
+
+  await page.route('**/api/v1/conversations**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ items: [], total: 0 }),
-    });
-  });
-
-  // Specific autonomous analysis endpoints (registered AFTER so they take priority)
-  await page.route('**/api/v1/deep-insights/autonomous/active', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(null),
-    });
-  });
-
-  await page.route('**/api/v1/deep-insights/autonomous/**', async (route) => {
-    await route.fulfill({
-      status: 404,
-      contentType: 'application/json',
-      body: JSON.stringify({ detail: 'No active analysis task' }),
     });
   });
 
@@ -52,6 +46,8 @@ async function setupGlobalMocks(page: import('@playwright/test').Page) {
     });
   });
 
+  // --- Knowledge routes: broad first, then specific overrides ---
+
   await page.route('**/api/v1/knowledge/**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -60,7 +56,34 @@ async function setupGlobalMocks(page: import('@playwright/test').Page) {
     });
   });
 
-  await page.route('**/api/v1/conversations**', async (route) => {
+  // Specific knowledge endpoints (registered AFTER broad, so they take priority)
+  await page.route('**/api/v1/knowledge/track-record', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ by_action: {}, by_type: {} }),
+    });
+  });
+
+  await page.route('**/api/v1/knowledge/track-record/monthly-trend', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: [] }),
+    });
+  });
+
+  await page.route('**/api/v1/knowledge/patterns/summary', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ total: 0, active: 0, top_symbols: [], top_sectors: [], by_type: {} }),
+    });
+  });
+
+  // --- Deep insights routes: broad first, then specific overrides ---
+
+  await page.route('**/api/v1/deep-insights**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -68,19 +91,20 @@ async function setupGlobalMocks(page: import('@playwright/test').Page) {
     });
   });
 
-  await page.route('**/api/v1/stocks**', async (route) => {
+  // Specific autonomous endpoints (registered AFTER broad, so they take priority)
+  await page.route('**/api/v1/deep-insights/autonomous/**', async (route) => {
     await route.fulfill({
-      status: 200,
+      status: 404,
       contentType: 'application/json',
-      body: JSON.stringify({ stocks: [], total: 0 }),
+      body: JSON.stringify({ detail: 'No active analysis task' }),
     });
   });
 
-  await page.route('**/api/v1/health**', async (route) => {
+  await page.route('**/api/v1/deep-insights/autonomous/active', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' }),
+      body: JSON.stringify(null),
     });
   });
 }

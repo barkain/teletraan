@@ -15,6 +15,22 @@ test.describe('Deep Analysis Enhancement Integration Tests', () => {
   });
 
   test('insights page loads with signals sidebar', async ({ page }) => {
+    // Provide actual signal data so the StatisticalSignalsCard renders
+    // (it returns null / hides when there are no signals)
+    await page.route('**/api/v1/features/signals**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          signals: [
+            { symbol: 'AAPL', feature_type: 'rsi', signal: 'bullish', value: 35.2, strength: 'strong' },
+          ],
+          count: 1,
+          as_of: new Date().toISOString(),
+        }),
+      });
+    });
+
     await page.goto('http://localhost:3000/insights');
     await page.waitForLoadState('domcontentloaded');
 

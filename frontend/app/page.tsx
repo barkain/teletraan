@@ -1072,7 +1072,7 @@ function TopSymbolsSectors({ patternsSummary, insights, isLoading }: { patternsS
   }, [insights]);
 
   // Use patterns summary if available, otherwise use insight-derived data
-  const hasPatternData = patternsSummary && (patternsSummary.top_symbols.length > 0 || patternsSummary.top_sectors.length > 0);
+  const hasPatternData = patternsSummary && ((patternsSummary.top_symbols?.length ?? 0) > 0 || (patternsSummary.top_sectors?.length ?? 0) > 0);
   const topSymbols = hasPatternData ? patternsSummary!.top_symbols : insightSymbols;
   const topSectors = hasPatternData ? patternsSummary!.top_sectors : insightSectors;
   const hasAnyData = topSymbols.length > 0 || topSectors.length > 0;
