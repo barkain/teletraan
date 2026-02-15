@@ -1,5 +1,27 @@
 import { test, expect } from './fixtures';
 
+// Mock signal data for tests that need the Statistical Signals card visible
+const mockSignals = {
+  signals: [
+    { symbol: 'AAPL', feature_type: 'rsi', signal: 'bullish', value: 35.2, strength: 'strong' },
+    { symbol: 'TSLA', feature_type: 'macd', signal: 'bearish', value: -1.5, strength: 'moderate' },
+    { symbol: 'MSFT', feature_type: 'bollinger', signal: 'neutral', value: 0.3, strength: 'weak' },
+  ],
+  count: 3,
+  as_of: new Date().toISOString(),
+};
+
+// Helper to set up mocks with actual signal data so the card is visible
+async function setupSignalsMocks(page: import('@playwright/test').Page) {
+  await page.route('**/api/v1/features/signals**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(mockSignals),
+    });
+  });
+}
+
 test.describe('Statistical Signals Card', () => {
   test.beforeEach(async ({ page }) => {
     // Log console errors for debugging
@@ -12,6 +34,7 @@ test.describe('Statistical Signals Card', () => {
   });
 
   test('signals card renders on insights page', async ({ page }) => {
+    await setupSignalsMocks(page);
     await page.goto('http://localhost:3000/insights');
     await page.waitForLoadState('domcontentloaded');
 
@@ -24,6 +47,7 @@ test.describe('Statistical Signals Card', () => {
   });
 
   test('loading state displays correctly', async ({ page }) => {
+    await setupSignalsMocks(page);
     // Navigate to insights page
     await page.goto('http://localhost:3000/insights');
 
@@ -40,6 +64,7 @@ test.describe('Statistical Signals Card', () => {
   });
 
   test('signals are color-coded by type', async ({ page }) => {
+    await setupSignalsMocks(page);
     await page.goto('http://localhost:3000/insights');
     await page.waitForLoadState('domcontentloaded');
 
@@ -67,6 +92,7 @@ test.describe('Statistical Signals Card', () => {
   });
 
   test('filtering by signal type works', async ({ page }) => {
+    await setupSignalsMocks(page);
     await page.goto('http://localhost:3000/insights');
     await page.waitForLoadState('domcontentloaded');
 
@@ -139,6 +165,7 @@ test.describe('Statistical Signals Card', () => {
   });
 
   test('responsive behavior desktop', async ({ page }) => {
+    await setupSignalsMocks(page);
     // Set desktop viewport
     await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -153,6 +180,7 @@ test.describe('Statistical Signals Card', () => {
   });
 
   test('signal item expansion shows details', async ({ page }) => {
+    await setupSignalsMocks(page);
     await page.goto('http://localhost:3000/insights');
     await page.waitForLoadState('domcontentloaded');
 
@@ -172,6 +200,7 @@ test.describe('Statistical Signals Card', () => {
   });
 
   test('strength indicator displays correctly', async ({ page }) => {
+    await setupSignalsMocks(page);
     await page.goto('http://localhost:3000/insights');
     await page.waitForLoadState('domcontentloaded');
 

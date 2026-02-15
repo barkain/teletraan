@@ -219,7 +219,7 @@ export default function ConversationsPage() {
 
   const handleConversationClick = (conversation: InsightConversation) => {
     // Navigate to the insight detail page with the conversation selected
-    router.push(`/insights/${conversation.deep_insight_id}?conversation=${conversation.id}`);
+    router.push(`/insights?id=${conversation.deep_insight_id}&conversation=${conversation.id}`);
   };
 
   const handleClearFilters = () => {

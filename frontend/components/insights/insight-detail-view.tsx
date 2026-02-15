@@ -68,6 +68,10 @@ import type { DeepInsight, InsightAction, AnalystEvidence } from '@/types';
 
 interface InsightDetailViewProps {
   insightId: number;
+  /** Optional callback for navigating back to the insights list.
+   *  When provided, this is used instead of router.push('/insights'),
+   *  which avoids Next.js router navigation issues in Tauri desktop builds. */
+  onBack?: () => void;
 }
 
 // ============================================
@@ -2041,8 +2045,9 @@ function ConversationsPanel({
 // Main Component
 // ============================================
 
-export function InsightDetailView({ insightId }: InsightDetailViewProps) {
+export function InsightDetailView({ insightId, onBack }: InsightDetailViewProps) {
   const router = useRouter();
+  const navigateBack = onBack ?? (() => router.push('/insights'));
   const queryClient = useQueryClient();
 
   // State
@@ -2113,7 +2118,7 @@ export function InsightDetailView({ insightId }: InsightDetailViewProps) {
   if (error || !insight) {
     return (
       <div className="space-y-6">
-        <Button variant="ghost" onClick={() => router.push('/insights')}>
+        <Button variant="ghost" onClick={navigateBack}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Insights
         </Button>
@@ -2128,7 +2133,7 @@ export function InsightDetailView({ insightId }: InsightDetailViewProps) {
                 {error instanceof Error ? error.message : 'This insight may have been removed or is unavailable.'}
               </CardDescription>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => router.push('/insights')}>
+                <Button variant="outline" onClick={navigateBack}>
                   Back to Insights
                 </Button>
                 <Button onClick={() => refetch()}>
@@ -2164,7 +2169,7 @@ export function InsightDetailView({ insightId }: InsightDetailViewProps) {
   return (
     <div className="space-y-6">
       {/* Back Navigation */}
-      <Button variant="ghost" onClick={() => router.push('/insights')}>
+      <Button variant="ghost" onClick={navigateBack}>
         <ArrowLeft className="h-4 w-4 mr-2" />
         Back to Insights
       </Button>

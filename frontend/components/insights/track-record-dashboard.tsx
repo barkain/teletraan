@@ -678,7 +678,7 @@ function RecentOutcomesList({ outcomes, isLoading }: RecentOutcomesListProps) {
                     {formatPercent(outcome.actual_return_pct)}
                   </span>
                   <Link
-                    href={`/insights/${outcome.insight_id}`}
+                    href={`/insights?id=${outcome.insight_id}`}
                     className="text-xs text-primary hover:underline flex items-center gap-1"
                   >
                     View <ExternalLink className="h-3 w-3" />
@@ -890,7 +890,7 @@ function ActivePredictionsList({ outcomes, isLoading }: ActivePredictionsListPro
                 </TableCell>
                 <TableCell>
                   <Link
-                    href={`/insights/${outcome.insight_id}`}
+                    href={`/insights?id=${outcome.insight_id}`}
                     className="opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <ExternalLink className="h-3.5 w-3.5 text-muted-foreground hover:text-primary" />

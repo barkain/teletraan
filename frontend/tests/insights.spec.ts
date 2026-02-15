@@ -319,7 +319,13 @@ test.describe('Insights Page', () => {
   });
 
   test('error state shows when API fails', async ({ page }) => {
+    // Return 500 for deep-insights list but exclude autonomous sub-paths
     await page.route('**/api/v1/deep-insights**', async (route) => {
+      const url = route.request().url();
+      if (url.includes('/autonomous/')) {
+        await route.fallback();
+        return;
+      }
       await route.fulfill({
         status: 500,
         contentType: 'application/json',
@@ -344,7 +350,8 @@ test.describe('Insights Page', () => {
     await page.goto('/insights');
     await page.waitForLoadState('domcontentloaded');
 
-    const errorMessage = page.locator('text=Error Loading Insights');
+    // The ConnectionError component shows "Something Went Wrong" for non-network errors (e.g. 500)
+    const errorMessage = page.locator('text=Something Went Wrong');
     await expect(errorMessage).toBeVisible({ timeout: 10000 });
   });
 

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
@@ -41,6 +42,9 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { ConnectionError } from '@/components/ui/empty-state';
+import dynamic from 'next/dynamic';
+
+const ReportDetailClient = dynamic(() => import('./[id]/report-detail-client'), { ssr: false });
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -782,10 +786,36 @@ function EmptyFilterState() {
 }
 
 // ---------------------------------------------------------------------------
-// Main page component
+// Query-param routing for desktop/static export compatibility.
+// When ?id=<report_id> is present, render the detail view instead of the list.
 // ---------------------------------------------------------------------------
 
+function ReportsPageInner() {
+  const searchParams = useSearchParams();
+  const detailId = searchParams.get('id');
+
+  if (detailId) {
+    // Wrap the ID in a resolved Promise to match ReportDetailClient's expected interface
+    const paramsPromise = Promise.resolve({ id: detailId });
+    return <ReportDetailClient params={paramsPromise} />;
+  }
+
+  return <ReportsListView />;
+}
+
 export default function ReportsPage() {
+  return (
+    <Suspense fallback={<div className="space-y-6"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>}>
+      <ReportsPageInner />
+    </Suspense>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main list component
+// ---------------------------------------------------------------------------
+
+function ReportsListView() {
   const { data, isLoading, error } = useReportList({ limit: 100 });
 
   // View toggle
@@ -851,7 +881,7 @@ export default function ReportsPage() {
     if (report.published_url) {
       window.open(report.published_url, '_blank', 'noopener,noreferrer');
     } else {
-      window.location.href = `/reports/${report.id}`;
+      window.location.href = `/reports?id=${report.id}`;
     }
   }, []);
 

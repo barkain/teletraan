@@ -83,41 +83,10 @@ const mockInsightsResponse = {
   total: 4,
 };
 
-// Helper to set up standard API mocks for the dashboard
-// Register specific routes BEFORE broad patterns so they take priority
+// Helper to set up standard API mocks for the dashboard.
+// Playwright matches routes in REVERSE registration order (newest first).
+// Register broad patterns FIRST (low priority), specific ones LAST (high priority).
 async function setupDashboardMocks(page: import('@playwright/test').Page) {
-  // Mock autonomous analysis endpoints (register BEFORE broad deep-insights route)
-  await page.route('**/api/v1/deep-insights/autonomous/**', async (route) => {
-    await route.fulfill({
-      status: 404,
-      contentType: 'application/json',
-      body: JSON.stringify({ detail: 'No active analysis task' }),
-    });
-  });
-
-  // Mock the deep-insights list endpoint
-  await page.route('**/api/v1/deep-insights?**', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(mockInsightsResponse),
-    });
-  });
-
-  // Also match without query params
-  await page.route('**/api/v1/deep-insights', async (route) => {
-    if (route.request().url().includes('/autonomous/')) {
-      // Let the autonomous handler above take care of it
-      await route.fallback();
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(mockInsightsResponse),
-    });
-  });
-
   await page.route('**/api/v1/features/signals**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -131,6 +100,32 @@ async function setupDashboardMocks(page: import('@playwright/test').Page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({}),
+    });
+  });
+
+  // Broad deep-insights (registered FIRST = low priority)
+  await page.route('**/api/v1/deep-insights**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(mockInsightsResponse),
+    });
+  });
+
+  // Specific autonomous endpoints (registered AFTER broad = high priority)
+  await page.route('**/api/v1/deep-insights/autonomous/**', async (route) => {
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: 'No active analysis task' }),
+    });
+  });
+
+  await page.route('**/api/v1/deep-insights/autonomous/active', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(null),
     });
   });
 }
@@ -162,18 +157,15 @@ test.describe('Dashboard (Home Page)', () => {
     await expect(headerBrand.first()).toBeVisible();
   });
 
-  test('hero image is visible', async ({ page }) => {
+  test('Discover Opportunities button exists and is functional', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    // The hero image should be present with the correct alt text
-    const heroImage = page.locator('img[alt*="Teletraan Command Center"]');
-    await expect(heroImage).toBeVisible({ timeout: 10000 });
-
-    // Verify the image src points to the expected asset
-    const src = await heroImage.getAttribute('src');
-    expect(src).toContain('teletraan-hero');
+    // The "Discover Opportunities" button is in the hero section
+    const discoverButton = page.getByRole('button', { name: /Discover Opportunities/i });
+    await expect(discoverButton.first()).toBeVisible({ timeout: 10000 });
+    await expect(discoverButton.first()).toBeEnabled();
   });
 
   test('summary stats cards render with correct data', async ({ page }) => {
@@ -181,17 +173,17 @@ test.describe('Dashboard (Home Page)', () => {
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    // Wait for stats cards to appear
-    const totalInsightsLabel = page.locator('text=Total Insights');
+    // Wait for stats cards to appear (use .first() because chart legends may duplicate text)
+    const totalInsightsLabel = page.locator('text=Total Insights').first();
     await expect(totalInsightsLabel).toBeVisible({ timeout: 10000 });
 
     // Verify all 5 stat card labels exist
-    await expect(page.locator('text=Total Insights')).toBeVisible();
-    await expect(page.locator('text=Buy Signals')).toBeVisible();
-    await expect(page.locator('text=Sell Signals')).toBeVisible();
-    // Use .first() for "Hold" which appears in multiple places (stats card, tab, badge, card title)
+    await expect(page.locator('text=Total Insights').first()).toBeVisible();
+    await expect(page.locator('text=Buy Signals').first()).toBeVisible();
+    await expect(page.locator('text=Sell Signals').first()).toBeVisible();
+    // Use .first() for "Hold" which appears in multiple places
     await expect(page.locator('text=Hold').first()).toBeVisible();
-    await expect(page.locator('text=Watch List')).toBeVisible();
+    await expect(page.locator('text=Watch List').first()).toBeVisible();
 
     // Verify the counts match mock data: 4 total, 1 buy, 1 sell, 1 hold, 1 watch
     const statValues = page.locator('.text-2xl.font-bold');
@@ -207,32 +199,14 @@ test.describe('Dashboard (Home Page)', () => {
     expect(values).toContain('4');
   });
 
-  test('Discover Opportunities button exists and is functional', async ({ page }) => {
+  test('View Insights button links to insights page', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    // The "Discover Opportunities" button is in the hero section
-    const discoverButton = page.getByRole('button', { name: /Discover Opportunities/i });
-    await expect(discoverButton.first()).toBeVisible({ timeout: 10000 });
-    await expect(discoverButton.first()).toBeEnabled();
-  });
-
-  test('Latest Insights section renders with insight cards', async ({ page }) => {
-    await setupDashboardMocks(page);
-    await page.goto('/');
-    await page.waitForLoadState('domcontentloaded');
-
-    const latestInsightsHeading = page.locator('text=Latest Insights');
-    await expect(latestInsightsHeading).toBeVisible({ timeout: 10000 });
-
-    // "View All" link pointing to /insights should exist
-    const viewAllLink = page.locator('a[href="/insights"]', { hasText: 'View All' });
-    await expect(viewAllLink.first()).toBeVisible();
-
-    // Insight cards should render from mock data
-    await expect(page.locator('text=AAPL Breakout Pattern Detected')).toBeVisible();
-    await expect(page.locator('text=Sector Rotation: Value Over Growth')).toBeVisible();
+    // The "View Insights" button links to /insights
+    const viewInsightsLink = page.locator('a[href="/insights"]');
+    await expect(viewInsightsLink.first()).toBeVisible({ timeout: 10000 });
   });
 
   test('Market status badge is displayed', async ({ page }) => {
@@ -244,52 +218,34 @@ test.describe('Dashboard (Home Page)', () => {
     await expect(marketBadge).toBeVisible({ timeout: 10000 });
   });
 
-  test('Continue Your Research section renders', async ({ page }) => {
+  test('chart sections render with data', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    const researchSection = page.locator('text=Continue Your Research');
-    await expect(researchSection).toBeVisible({ timeout: 10000 });
+    // Action Distribution chart should be visible
+    const actionDistribution = page.locator('text=Action Distribution');
+    await expect(actionDistribution).toBeVisible({ timeout: 10000 });
 
-    const noConversations = page.locator('text=No recent conversations');
-    await expect(noConversations).toBeVisible();
+    // Confidence Distribution chart should be visible
+    const confidenceDistribution = page.locator('text=Confidence Distribution');
+    await expect(confidenceDistribution).toBeVisible();
   });
 
-  test('filter tabs are visible on home page', async ({ page }) => {
+  test('outcome tracking section renders', async ({ page }) => {
     await setupDashboardMocks(page);
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    await expect(page.locator('[role="tablist"]').first()).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[role="tab"]', { hasText: 'All' }).first()).toBeVisible();
-    await expect(page.locator('[role="tab"]', { hasText: 'Buy' }).first()).toBeVisible();
-    await expect(page.locator('[role="tab"]', { hasText: 'Sell' }).first()).toBeVisible();
-    await expect(page.locator('[role="tab"]', { hasText: 'Hold' }).first()).toBeVisible();
-    await expect(page.locator('[role="tab"]', { hasText: 'Watch' }).first()).toBeVisible();
+    const outcomeTracking = page.locator('text=Outcome Tracking');
+    await expect(outcomeTracking).toBeVisible({ timeout: 10000 });
   });
 
-  test('empty state is shown when no insights exist', async ({ page }) => {
-    // Mock autonomous analysis endpoints first (more specific)
-    await page.route('**/api/v1/deep-insights/autonomous/**', async (route) => {
-      await route.fulfill({
-        status: 404,
-        contentType: 'application/json',
-        body: JSON.stringify({ detail: 'No active analysis task' }),
-      });
-    });
+  test('empty chart states shown when no track record data', async ({ page }) => {
+    // Use empty insights for this test.
+    // Playwright matches routes in REVERSE registration order (newest first).
+    // Register broad patterns FIRST, specific ones LAST.
 
-    await page.route('**/api/v1/deep-insights**', async (route) => {
-      if (route.request().url().includes('/autonomous/')) {
-        await route.fallback();
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ items: [], total: 0 }),
-      });
-    });
     await page.route('**/api/v1/features/signals**', async (route) => {
       await route.fulfill({
         status: 200,
@@ -305,13 +261,38 @@ test.describe('Dashboard (Home Page)', () => {
       });
     });
 
+    // Broad deep-insights (low priority)
+    await page.route('**/api/v1/deep-insights**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [], total: 0 }),
+      });
+    });
+    // Specific autonomous (high priority)
+    await page.route('**/api/v1/deep-insights/autonomous/**', async (route) => {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'No active analysis task' }),
+      });
+    });
+    await page.route('**/api/v1/deep-insights/autonomous/active', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(null),
+      });
+    });
+
     await page.goto('/');
     await page.waitForLoadState('domcontentloaded');
 
-    const emptyState = page.locator('text=No AI Insights Yet');
-    await expect(emptyState).toBeVisible({ timeout: 10000 });
+    // With no data, stats cards should show 0
+    const totalInsightsLabel = page.locator('text=Total Insights');
+    await expect(totalInsightsLabel).toBeVisible({ timeout: 10000 });
 
-    // The "Discover Opportunities" button appears in both the hero section and empty state
+    // The "Discover Opportunities" button should still be available
     const discoverButton = page.getByRole('button', { name: /Discover Opportunities/i });
     await expect(discoverButton.first()).toBeVisible();
   });

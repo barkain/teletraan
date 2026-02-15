@@ -9,6 +9,20 @@ import { deepInsightKeys } from '@/lib/hooks/use-deep-insights';
 // Types
 // ============================================
 
+export interface LLMActivityEntry {
+  seq: number;
+  timestamp: string;
+  phase: string;
+  agent_name: string;
+  prompt_preview: string;
+  response_preview: string;
+  input_tokens: number;
+  output_tokens: number;
+  duration_ms: number;
+  status: 'running' | 'done' | 'error';
+  symbol: string; // stock symbol for deep_dive entries (e.g. "AAPL")
+}
+
 export interface AnalysisTaskStatus {
   id: string;
   status: string;
@@ -26,6 +40,7 @@ export interface AnalysisTaskStatus {
   elapsed_seconds: number | null;
   started_at: string | null;
   completed_at: string | null;
+  activity?: LLMActivityEntry[] | null;
 }
 
 export interface StartAnalysisResponse {
@@ -50,6 +65,7 @@ export interface UseAnalysisTaskResult {
   isCancelled: boolean;
   error: string | null;
   elapsedSeconds: number;
+  activityLog: LLMActivityEntry[];
 
   // Actions
   startAnalysis: (params?: { max_insights?: number; deep_dive_count?: number }) => Promise<void>;
@@ -73,7 +89,9 @@ async function startBackgroundAnalysis(params?: {
 }
 
 async function getTaskStatus(taskId: string): Promise<AnalysisTaskStatus> {
-  return fetchApi<AnalysisTaskStatus>(`/api/v1/deep-insights/autonomous/status/${taskId}`);
+  return fetchApi<AnalysisTaskStatus>(
+    `/api/v1/deep-insights/autonomous/status/${taskId}`
+  );
 }
 
 async function getActiveTask(): Promise<AnalysisTaskStatus | null> {
@@ -107,6 +125,12 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
   const [error, setError] = useState<string | null>(null);
   const [_startTime, setStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [activityLog, setActivityLog] = useState<LLMActivityEntry[]>([]);
+
+  // Activity seq cursor ref — no longer used for incremental fetching (the backend
+  // now always returns all entries to avoid a race where "done" entries with token
+  // counts were missed). Kept only so reset calls don't need to be removed everywhere.
+  const activitySeqCursorRef = useRef<number>(0);
 
   // Refs for callbacks to avoid stale closures
   const onCompleteRef = useRef(onComplete);
@@ -158,6 +182,10 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
     stopTimer();
   }, [stopTimer]);
 
+  // Maximum number of activity entries to keep in memory to prevent unbounded growth.
+  // Oldest entries are dropped when this limit is exceeded.
+  const MAX_ACTIVITY_ENTRIES = 150;
+
   // Start polling for task status
   const startPolling = useCallback(
     (id: string, existingStartTime?: number) => {
@@ -168,8 +196,37 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
 
       const poll = async () => {
         try {
+          // Backend always returns ALL activity entries (no cursor filtering)
+          // to avoid a race where "done" entries with token counts were missed.
           const status = await getTaskStatus(id);
           setTask(status);
+
+          // Replace activity log with the full set from the backend.
+          // The backend always returns all entries (capped at ~150), so we
+          // simply replace state rather than doing incremental merge.
+          if (status.activity && status.activity.length > 0) {
+            const entries = status.activity!;
+
+            setActivityLog((prev) => {
+              // Quick identity check: if the last entry's seq and status
+              // haven't changed, the list is likely unchanged — skip re-render.
+              if (
+                prev.length === entries.length &&
+                prev.length > 0 &&
+                prev[prev.length - 1].seq === entries[entries.length - 1].seq &&
+                prev[prev.length - 1].status === entries[entries.length - 1].status &&
+                prev[prev.length - 1].input_tokens === entries[entries.length - 1].input_tokens
+              ) {
+                return prev;
+              }
+
+              // Cap entries to prevent unbounded memory growth
+              if (entries.length > MAX_ACTIVITY_ENTRIES) {
+                return entries.slice(entries.length - MAX_ACTIVITY_ENTRIES);
+              }
+              return entries;
+            });
+          }
 
           if (status.status === 'completed') {
             stopPolling();
@@ -213,6 +270,8 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
         setError(null);
         setElapsedSeconds(0);
         setStartTime(null);
+        setActivityLog([]);
+        activitySeqCursorRef.current = 0;
 
         const response = await startBackgroundAnalysis(params);
 
@@ -293,6 +352,11 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
 
         // If task is still running, resume polling
         if (!['completed', 'failed', 'cancelled'].includes(status.status)) {
+          // Reset activity state before resuming to prevent stale entries
+          // from a previous run leaking into the resumed feed
+          setActivityLog([]);
+          activitySeqCursorRef.current = 0;
+
           setTaskId(savedTaskId);
           setTask(status);
           // Calculate start time from task's started_at if available
@@ -327,6 +391,10 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
     if (isStartingRef.current) return null;
 
     if (activeTask) {
+      // Reset activity state before resuming to prevent stale entries
+      setActivityLog([]);
+      activitySeqCursorRef.current = 0;
+
       localStorage.setItem(TASK_ID_STORAGE_KEY, activeTask.id);
       setTaskId(activeTask.id);
       setTask(activeTask);
@@ -354,6 +422,8 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
     setError(null);
     setStartTime(null);
     setElapsedSeconds(0);
+    setActivityLog([]);
+    activitySeqCursorRef.current = 0;
     localStorage.removeItem(TASK_ID_STORAGE_KEY);
   }, [stopPolling]);
 
@@ -381,6 +451,7 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
     isCancelled,
     error,
     elapsedSeconds,
+    activityLog,
     startAnalysis,
     cancelAnalysis,
     checkForActiveTask,
