@@ -1306,3 +1306,4 @@ Teletraan is an AI market analysis platform combining:
 - **[CLAUDE.md](CLAUDE.md)** -- Developer guidance: commands, architecture summary, key patterns
 - **[API.md](API.md)** -- Detailed REST API and WebSocket endpoint documentation
 - **[frontend/FRONTEND.md](../frontend/FRONTEND.md)** -- Frontend components, hooks, state management, and styling
+- **[Risk Assessment Pipeline](docs/risk-assessment.md)** -- Detailed risk assessment architecture and data flow
