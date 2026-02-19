@@ -117,7 +117,7 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
 ## Environment Variables
 
 **Backend** (`backend/.env` — auto-created by `start.sh`):
-- `DATABASE_URL` — default: `sqlite+aiosqlite:///./data/market-analyzer.db`
+- `DATABASE_URL` — default: `sqlite+aiosqlite:///./data/teletraan.db`
 - `FRED_API_KEY` — optional, for economic data
 - `FINNHUB_API_KEY` — optional
 - GitHub Pages URL is auto-derived from git remote origin (defaults to `barkain/teletraan`)
@@ -128,7 +128,7 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
 
 ## Database
 
-SQLite at `backend/data/market-analyzer.db`. Auto-created on first startup via `init_db()`. Tables created from SQLAlchemy models. The `data/` directory is created by `start.sh`.
+SQLite at `backend/data/teletraan.db`. Auto-created on first startup via `init_db()`. Tables created from SQLAlchemy models. The `data/` directory is created by `start.sh`.
 
 Missing columns are auto-migrated on startup: `database.py` compares SQLAlchemy model columns against existing SQLite tables and issues `ALTER TABLE ADD COLUMN` for any gaps, eliminating the need for manual schema migrations during development.
 

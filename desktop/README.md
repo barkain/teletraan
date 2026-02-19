@@ -12,7 +12,7 @@ Package Teletraan (FastAPI backend + Next.js frontend) as a native desktop appli
    +-- Python backend sidecar  (spawned on startup, killed on exit)
          |
          +-- FastAPI / uvicorn on 127.0.0.1:8000
-         +-- SQLite DB at <app data>/market-analyzer.db
+         +-- SQLite DB at <app data>/teletraan.db
 ```
 
 On launch the Rust host:
@@ -163,7 +163,7 @@ The desktop app uses the same LLM provider configuration as the web version. See
 - **Icons**: The `icons/` directory is empty. Before a production release, generate icons with `npx @tauri-apps/cli icon <path-to-1024x1024.png>`.
 - **Code signing**: macOS builds are unsigned. For distribution outside the App Store, you need an Apple Developer certificate and notarisation.
 - **Windows Defender**: The PyInstaller-bundled backend may trigger false-positive AV warnings. Signing the `.exe` with an EV certificate resolves this.
-- **Database location**: The sidecar currently writes `market-analyzer.db` relative to its working directory. A future improvement should use Tauri's `app_data_dir` and pass the path as a CLI arg to the backend.
+- **Database location**: The sidecar currently writes `teletraan.db` relative to its working directory. A future improvement should use Tauri's `app_data_dir` and pass the path as a CLI arg to the backend.
 - **Auto-update**: Not configured. Tauri v2 supports the `tauri-plugin-updater` plugin if needed.
 - **Static export caveats**: Any Next.js features that require a Node server (ISR, API routes, middleware) are unavailable in the desktop build. The app must use the FastAPI backend for all server-side logic.
 - **First launch latency**: PyInstaller one-file binaries unpack to a temp directory on first run, adding 3-10 s of startup time. Using `--onedir` instead of `--onefile` would eliminate this but complicates the sidecar setup.

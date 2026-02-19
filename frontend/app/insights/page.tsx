@@ -124,8 +124,8 @@ function Pagination({
   );
 }
 
-const SIGNALS_SIDEBAR_KEY = 'market-analyzer-signals-sidebar-visible';
-const VIEW_MODE_KEY = 'market-analyzer-insights-view-mode';
+const SIGNALS_SIDEBAR_KEY = 'teletraan-signals-sidebar-visible';
+const VIEW_MODE_KEY = 'teletraan-insights-view-mode';
 
 type ViewMode = 'grid' | 'list';
 

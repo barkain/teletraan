@@ -32,7 +32,7 @@ class TestSettingsDefaults:
         settings = Settings(
             _env_file=None,  # type: ignore[call-arg]
         )
-        assert settings.DATABASE_URL == "sqlite+aiosqlite:///./data/market-analyzer.db"
+        assert settings.DATABASE_URL == "sqlite+aiosqlite:///./data/teletraan.db"
 
     def test_debug_default_false(self):
         settings = Settings(_env_file=None)  # type: ignore[call-arg]

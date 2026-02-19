@@ -608,7 +608,7 @@ wheels = [
 ]
 
 [[package]]
-name = "market-analyzer-backend"
+name = "teletraan-backend"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [

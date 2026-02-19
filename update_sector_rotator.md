@@ -1,7 +1,7 @@
 # Sector Rotator Prompt Update Summary
 
 ## File Modified
-`/Users/nadavbarkai/dev/market-analyzer/backend/analysis/agents/sector_rotator.py`
+`/Users/nadavbarkai/dev/teletraan/backend/analysis/agents/sector_rotator.py`
 
 ## Changes Made
 
