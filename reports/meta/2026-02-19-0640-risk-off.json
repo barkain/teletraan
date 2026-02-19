@@ -1,0 +1,38 @@
+{
+  "filename": "2026-02-19-0640-risk-off.html",
+  "task_id": "08cd886f-2373-47a6-9dcd-70caa16a178c",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Risk-Off\n\n**Key Macro Themes:**\n- Flight to Safety & Defensive Rotation: Simultaneous rally in bonds (yields down 3-5%), gold above $5,000, and outperformance of defensive s...\n- Energy & Commodity Supply Shock Premium: Crude oil surging nearly +10% over 20 days alongside Materials outperforming (+7.68%) suggests a sup...\n- Growth & Technology Derating: Technology (-2.02%), Consumer Discretionary (-3.61%), and Financials (-1.63%) are the clear laggards...\n\n**Heatmap Analysis:** Today's heatmap reveals a classic risk-off rotation where cyclical and rate-sensitive sectors (Utilities -1.66%, Real Estate -1.34%) are paradoxically selling off on a day when Energy (+1.92%) and Technology (+1.03%) are leading — suggesting profit-taking in recent defensive winners while growth names stage a tentative dead-cat bounce. The 20-day picture remains unambiguous: Energy (+15.08%), Materials (+10.02%), and Industrials (+7.04%) dominate, while Technology (-0.66%) and Consumer Discretionary (-1.76%) continue to lag. The intraday reversal in Utilities and Real Estate, despite their defensive mandate, hints at bond yield stabilization or position unwinds, not a regime shift.\n\n**Sectors Scanned:**\n- Technology: +1.0% (1D), breadth 50%\n- Financials: +0.7% (1D), breadth 50%\n- Energy: +1.9% (1D), breadth 50%\n- Healthcare: +0.2% (1D), breadth 50%\n- Industrials: -0.0% (1D), breadth 50%\n- Consumer Staples: -0.2% (1D), breadth 50%\n- Consumer Discretionary: +0.8% (1D), breadth 50%\n- Utilities: -1.7% (1D), breadth 50%\n- Communication Services: +0.2% (1D), breadth 50%\n- Real Estate: -1.3% (1D), breadth 50%\n- Materials: +0.6% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Energy sector maintaining dominant 20-day momentum (+15.08%) while adding another +1.92% today — the only sector showing both short-term and medium-term strength simultaneously. This is the clearest trend in the heatmap.\n- Defensive yield-proxy sectors (Utilities -1.66%, Real Estate -1.34%) are the worst performers TODAY despite being macro-aligned with a risk-off regime. Both sectors have strong 20-day gains (Utilities +6.17%, XLRE +4.71%), suggesting this is tactical profit-taking rather than a trend reversal.\n- Technology and Consumer Discretionary staging a 1-day bounce (+1.03%, +0.84%) after sustained 20-day underperformance (-0.66%, -1.76%). However, the 5-day data remains negative for both sectors (-1.15%, -1.11%), suggesting the bounce lacks follow-through conviction.",
+  "top_sectors": [
+    "Energy +15.1%",
+    "Materials +10.0%",
+    "Industrials +7.0%",
+    "Consumer Staples +6.9%",
+    "Utilities +6.2%",
+    "Real Estate +4.7%"
+  ],
+  "insights_count": 6,
+  "symbols": [
+    "GC=F",
+    "LITE",
+    "MU",
+    "NEE",
+    "NVDA",
+    "XOM"
+  ],
+  "action_counts": {
+    "SELL": 2,
+    "STRONG_BUY": 1,
+    "BUY": 3
+  },
+  "avg_confidence": 0.7,
+  "insight_types": [
+    "macro",
+    "opportunity",
+    "risk"
+  ],
+  "created_at": "2026-02-19T06:40:25",
+  "started_at": "2026-02-19T06:40:25.910295",
+  "completed_at": "2026-02-19T06:59:37.210783",
+  "elapsed_seconds": 1151.295767
+}
