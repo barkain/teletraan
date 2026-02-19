@@ -75,7 +75,7 @@ export interface UseAnalysisTaskResult {
 }
 
 // LocalStorage key for persisting task ID
-const TASK_ID_STORAGE_KEY = 'market-analyzer-analysis-task-id';
+const TASK_ID_STORAGE_KEY = 'teletraan-analysis-task-id';
 
 // ============================================
 // API Functions

@@ -121,7 +121,7 @@ class KalshiAdapter:
                 timeout=5.0,
                 headers={
                     "Accept": "application/json",
-                    "User-Agent": "market-analyzer/1.0",
+                    "User-Agent": "teletraan/1.0",
                 },
             )
         return self._client

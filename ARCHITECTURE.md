@@ -1,4 +1,4 @@
-# Teletraan Market Analyzer - System Architecture
+# Teletraan - System Architecture
 
 **AI-Powered Market Intelligence Platform** | FastAPI + Next.js 16 + Claude Agent SDK
 
@@ -44,7 +44,7 @@ graph TB
         subgraph ChatLayer["Chat Agent"]
             Agent["MarketAnalysisAgent"]
             MCPTools["10 MCP Tools<br/>via @tool decorator"]
-            MCPServer["SDK MCP Server<br/>market-analyzer"]
+            MCPServer["SDK MCP Server<br/>teletraan"]
         end
 
         subgraph DB["Database Layer"]
@@ -458,7 +458,7 @@ async def tool_handler(args: dict) -> dict:
 
 # All tools registered into a single MCP server
 _market_tools_server = create_sdk_mcp_server(
-    name="market-analyzer",
+    name="teletraan",
     version="1.0.0",
     tools=[...all 10 tools...],
 )
@@ -512,7 +512,7 @@ sequenceDiagram
 
 ```python
 engine = create_async_engine(
-    "sqlite+aiosqlite:///./data/market-analyzer.db",
+    "sqlite+aiosqlite:///./data/teletraan.db",
     echo=settings.DEBUG,
 )
 
@@ -907,8 +907,8 @@ The chat agent uses a different SDK pattern -- it creates an MCP server with 10 
 ```python
 options = ClaudeAgentOptions(
     system_prompt=SYSTEM_PROMPT,
-    mcp_servers={"market-analyzer": _market_tools_server},
-    allowed_tools=["mcp__market-analyzer__get_stock_data", ...],
+    mcp_servers={"teletraan": _market_tools_server},
+    allowed_tools=["mcp__teletraan__get_stock_data", ...],
     max_turns=10,  # Prevent infinite tool loops
 )
 ```
@@ -1161,7 +1161,7 @@ This prevents the frontend from polling a dead task indefinitely.
 ### Backend (`backend/.env`)
 
 ```bash
-DATABASE_URL=sqlite+aiosqlite:///./data/market-analyzer.db
+DATABASE_URL=sqlite+aiosqlite:///./data/teletraan.db
 FRED_API_KEY=your_fred_key_here     # Optional, for economic data
 FINNHUB_API_KEY=your_finnhub_key    # Optional
 DEBUG=false

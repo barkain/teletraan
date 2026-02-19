@@ -1,5 +1,5 @@
 [project]
-name = "market-analyzer-backend"
+name = "teletraan-backend"
 version = "1.0.0"
 description = "Teletraan Backend API"
 readme = "README.md"

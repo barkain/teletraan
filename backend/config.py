@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     )
 
     # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///./data/market-analyzer.db"
+    DATABASE_URL: str = "sqlite+aiosqlite:///./data/teletraan.db"
 
     # --- LLM Provider Configuration ---
     # The claude-agent-sdk picks up authentication from environment variables.

@@ -361,7 +361,7 @@ Manages the full lifecycle of autonomous market analysis:
 
 **Behavior:**
 - Polls task status every 2 seconds (configurable via `pollInterval`)
-- Persists task ID to `localStorage` under key `market-analyzer-analysis-task-id`
+- Persists task ID to `localStorage` under key `teletraan-analysis-task-id`
 - On page reload, checks localStorage and resumes polling if task is still running
 - On completion, invalidates `deepInsightKeys.all` to refresh insight listing
 - Elapsed timer updates every 1 second for UI display
@@ -584,7 +584,7 @@ For backwards compatibility, the following wrappers are also exported:
 The `useAnalysisTask` hook manages the full autonomous analysis lifecycle:
 
 1. **Start**: `POST /api/v1/deep-insights/autonomous/start` returns a `task_id`
-2. **Persist**: Task ID saved to `localStorage` under `market-analyzer-analysis-task-id`
+2. **Persist**: Task ID saved to `localStorage` under `teletraan-analysis-task-id`
 3. **Poll**: `GET /api/v1/deep-insights/autonomous/status/{taskId}` every 2 seconds
 4. **Progress**: UI displays phase name, phase details, progress percentage (0-100%), and elapsed time
 5. **Complete**: Invalidates deep insight queries, clears localStorage, calls `onComplete` callback

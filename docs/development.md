@@ -57,7 +57,7 @@ Auto-created by `start.sh` with defaults:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `sqlite+aiosqlite:///./data/market-analyzer.db` | SQLite async connection string |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./data/teletraan.db` | SQLite async connection string |
 | `ANTHROPIC_MODEL` | `claude-sonnet-4-20250514` | Override default LLM model |
 | `FRED_API_KEY` | *(optional)* | Federal Reserve Economic Data API key for macro data |
 | `FINNHUB_API_KEY` | *(optional)* | Finnhub API key for enhanced data sources |
@@ -131,11 +131,11 @@ All endpoints prefixed with `/api/v1/`:
 
 ## Database
 
-SQLite at `backend/data/market-analyzer.db`. Auto-created on first startup via `init_db()`. Schema defined via SQLAlchemy models in `backend/models/`. Missing columns are auto-migrated on startup via `ALTER TABLE ADD COLUMN`.
+SQLite at `backend/data/teletraan.db`. Auto-created on first startup via `init_db()`. Schema defined via SQLAlchemy models in `backend/models/`. Missing columns are auto-migrated on startup via `ALTER TABLE ADD COLUMN`.
 
 To reset database:
 ```bash
-rm backend/data/market-analyzer.db
+rm backend/data/teletraan.db
 # Restart backend to recreate
 ```
 

@@ -238,13 +238,13 @@ Each analyst has:
 
 ## Database
 
-SQLite at `backend/data/market-analyzer.db`. Auto-created on first startup via `init_db()`. Schema defined via SQLAlchemy models in `backend/models/`. Missing columns are auto-migrated on startup via `ALTER TABLE ADD COLUMN`.
+SQLite at `backend/data/teletraan.db`. Auto-created on first startup via `init_db()`. Schema defined via SQLAlchemy models in `backend/models/`. Missing columns are auto-migrated on startup via `ALTER TABLE ADD COLUMN`.
 
 Key tables: `deep_insights`, `analysis_tasks`, `portfolios`, `portfolio_holdings`, `knowledge_patterns`, `insight_outcomes`, `insight_conversations`, `follow_up_research`, `conversation_themes`, `stocks`, `price_history`, `economic_indicators`
 
 To reset database:
 ```bash
-rm backend/data/market-analyzer.db
+rm backend/data/teletraan.db
 # Restart backend to recreate
 ```
 

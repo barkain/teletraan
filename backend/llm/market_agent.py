@@ -166,7 +166,7 @@ async def compare_stocks_tool(args: dict[str, Any]) -> dict[str, Any]:
 
 # Create the SDK MCP server with all tools
 _market_tools_server = create_sdk_mcp_server(
-    name="market-analyzer",
+    name="teletraan",
     version="1.0.0",
     tools=[
         get_stock_data_tool,
@@ -232,16 +232,16 @@ When discussing technical indicators:
 
         # Build allowed tools list for the SDK
         self._allowed_tools = [
-            "mcp__market-analyzer__get_stock_data",
-            "mcp__market-analyzer__get_price_history",
-            "mcp__market-analyzer__analyze_technical",
-            "mcp__market-analyzer__get_sector_performance",
-            "mcp__market-analyzer__analyze_sector_rotation",
-            "mcp__market-analyzer__detect_patterns",
-            "mcp__market-analyzer__detect_anomalies",
-            "mcp__market-analyzer__get_economic_indicators",
-            "mcp__market-analyzer__get_yield_curve",
-            "mcp__market-analyzer__compare_stocks",
+            "mcp__teletraan__get_stock_data",
+            "mcp__teletraan__get_price_history",
+            "mcp__teletraan__analyze_technical",
+            "mcp__teletraan__get_sector_performance",
+            "mcp__teletraan__analyze_sector_rotation",
+            "mcp__teletraan__detect_patterns",
+            "mcp__teletraan__detect_anomalies",
+            "mcp__teletraan__get_economic_indicators",
+            "mcp__teletraan__get_yield_curve",
+            "mcp__teletraan__compare_stocks",
         ]
 
     def _get_options(self) -> ClaudeAgentOptions:
@@ -249,7 +249,7 @@ When discussing technical indicators:
         from llm.client_pool import _build_llm_env
         return ClaudeAgentOptions(
             system_prompt=self.SYSTEM_PROMPT,
-            mcp_servers={"market-analyzer": _market_tools_server},
+            mcp_servers={"teletraan": _market_tools_server},
             allowed_tools=self._allowed_tools,
             max_turns=self.max_tool_iterations,
             env=_build_llm_env(),
@@ -330,8 +330,8 @@ When discussing technical indicators:
                             elif isinstance(block, ToolUseBlock):
                                 # Extract tool name (remove MCP prefix)
                                 tool_name = block.name
-                                if tool_name.startswith("mcp__market-analyzer__"):
-                                    tool_name = tool_name[len("mcp__market-analyzer__"):]
+                                if tool_name.startswith("mcp__teletraan__"):
+                                    tool_name = tool_name[len("mcp__teletraan__"):]
 
                                 yield {
                                     "type": "tool_use",

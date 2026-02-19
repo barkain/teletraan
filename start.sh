@@ -85,7 +85,7 @@ mkdir -p data
 # Create .env if it doesn't exist
 if [ ! -f .env ]; then
     cat > .env << 'ENVEOF'
-DATABASE_URL=sqlite+aiosqlite:///./data/market-analyzer.db
+DATABASE_URL=sqlite+aiosqlite:///./data/teletraan.db
 
 # --- LLM Provider Configuration ---
 # The app uses claude-agent-sdk for LLM access. Uncomment ONE authentication method:

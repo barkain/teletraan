@@ -55,7 +55,7 @@ async fn start_backend(app: &AppHandle) -> Result<(), String> {
     let data_dir = resolve_data_dir(app)?;
 
     // Build the DATABASE_URL pointing into the app data directory.
-    let db_path = data_dir.join("data").join("market-analyzer.db");
+    let db_path = data_dir.join("data").join("teletraan.db");
     let database_url = format!(
         "sqlite+aiosqlite:///{}",
         db_path.display()
