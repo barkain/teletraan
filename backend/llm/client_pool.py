@@ -30,7 +30,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient  # type: ignore
 logger = logging.getLogger(__name__)
 
 # Pool configuration
-POOL_SIZE = 5  # Max concurrent LLM sessions (main.py raises FD limit to 4096; 5 clients use ~50-75 FDs)
+POOL_SIZE = 8  # Max concurrent LLM sessions (main.py raises FD limit to 4096; 8 clients use ~80-120 FDs)
 
 
 @dataclass

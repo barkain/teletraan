@@ -27,9 +27,6 @@ const PHASE_COLORS: Record<string, string> = {
   synthesis: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/60 dark:text-cyan-300',
 };
 
-/** Maximum characters to show before truncation in prompt/response previews. */
-const CONTENT_TRUNCATE_LIMIT = 500;
-
 function getPhaseColor(phase: string): string {
   return PHASE_COLORS[phase] ?? 'bg-gray-100 text-gray-800 dark:bg-gray-900/60 dark:text-gray-300';
 }
@@ -46,50 +43,6 @@ function getStatusIcon(status: string, className?: string) {
     default:
       return null;
   }
-}
-
-/** Renders a truncated text block with an expand/collapse toggle. */
-function TruncatedText({
-  text,
-  limit,
-  onCopy,
-}: {
-  text: string;
-  limit: number;
-  onCopy: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const isTruncated = text.length > limit;
-  const displayText = isTruncated && !expanded ? text.slice(0, limit) + '...' : text;
-
-  return (
-    <>
-      <p className="text-xs whitespace-pre-wrap font-mono break-words text-muted-foreground max-h-40 overflow-y-auto">
-        {displayText}
-      </p>
-      <div className="flex items-center gap-1 mt-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs"
-          onClick={onCopy}
-        >
-          <Copy className="h-3 w-3 mr-1" />
-          Copy
-        </Button>
-        {isTruncated && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            onClick={() => setExpanded((prev) => !prev)}
-          >
-            {expanded ? 'Show less' : `Show all (${text.length} chars)`}
-          </Button>
-        )}
-      </div>
-    </>
-  );
 }
 
 interface ActivityEntryCardProps {
@@ -156,11 +109,15 @@ const ActivityEntryCard = React.memo(function ActivityEntryCard({ entry, index }
           Input
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 p-2 bg-muted/30 rounded border border-border/50">
-          <TruncatedText
-            text={entry.prompt_preview}
-            limit={CONTENT_TRUNCATE_LIMIT}
-            onCopy={handleCopyPrompt}
-          />
+          <p className="text-xs whitespace-pre-wrap font-mono break-words text-muted-foreground max-h-40 overflow-y-auto">
+            {entry.prompt_preview}
+          </p>
+          <div className="flex items-center gap-1 mt-1">
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleCopyPrompt}>
+              <Copy className="h-3 w-3 mr-1" />
+              Copy
+            </Button>
+          </div>
         </CollapsibleContent>
       </Collapsible>
 
@@ -176,11 +133,15 @@ const ActivityEntryCard = React.memo(function ActivityEntryCard({ entry, index }
             Output
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2 p-2 bg-muted/30 rounded border border-border/50">
-            <TruncatedText
-              text={entry.response_preview}
-              limit={CONTENT_TRUNCATE_LIMIT}
-              onCopy={handleCopyResponse}
-            />
+            <p className="text-xs whitespace-pre-wrap font-mono break-words text-muted-foreground max-h-40 overflow-y-auto">
+              {entry.response_preview}
+            </p>
+            <div className="flex items-center gap-1 mt-1">
+              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleCopyResponse}>
+                <Copy className="h-3 w-3 mr-1" />
+                Copy
+              </Button>
+            </div>
           </CollapsibleContent>
         </Collapsible>
       )}

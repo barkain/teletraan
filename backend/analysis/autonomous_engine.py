@@ -285,9 +285,12 @@ class AutonomousDeepEngine:
     1. Macro Scan - Identify market regime and themes
     2. Heatmap Fetch - Dynamic sector heatmap data
     3. Heatmap Analysis - LLM pattern detection and stock selection
-    4. Deep Dive - Detailed analysis by specialist analysts
-    4.5. Coverage Evaluation - Adaptive loop to fill gaps (max 2 iterations)
+    4. Deep Dive - 3 core analysts (technical, sector, risk) per symbol
     5. Synthesis - Aggregate and rank insights
+
+    Optimized for speed: uses 3 analysts per symbol (macro context is already
+    embedded via Phase 1, correlation is covered by sector strategist),
+    8 concurrent LLM connections, and fire-and-forget pattern extraction.
 
     Falls back to the legacy sector rotation / opportunity hunt pipeline
     if heatmap fetch fails.
@@ -302,8 +305,8 @@ class AutonomousDeepEngine:
         ```
     """
 
-    # Analyst configurations (same as DeepAnalysisEngine)
-    ANALYSTS = {
+    # All available analyst configurations
+    ALL_ANALYSTS = {
         "technical": {
             "prompt": TECHNICAL_ANALYST_PROMPT,
             "format_context": format_technical_context,
@@ -336,6 +339,16 @@ class AutonomousDeepEngine:
         },
     }
 
+    # Core analysts run per symbol during deep dive (3 instead of 5).
+    # Macro economist is redundant with Phase 1 macro scan (its context is
+    # already prepended to every analyst via discovery_context).
+    # Correlation detective provides marginal per-symbol value; sector
+    # strategist already captures relative strength and rotation signals.
+    ANALYSTS = {
+        k: v for k, v in ALL_ANALYSTS.items()
+        if k in ("technical", "sector", "risk")
+    }
+
     def __init__(
         self,
         max_retries: int = 2,
@@ -362,8 +375,8 @@ class AutonomousDeepEngine:
         # Phase 1: Macro Scanner
         self.macro_scanner = MacroScanner()
 
-        # Limit concurrent LLM calls to avoid overloading the client pool
-        self._llm_semaphore = asyncio.Semaphore(5)
+        # Limit concurrent LLM calls to match client pool size
+        self._llm_semaphore = asyncio.Semaphore(8)
 
         self._last_analysis_time: datetime | None = None
 
@@ -494,7 +507,7 @@ class AutonomousDeepEngine:
     async def run_autonomous_analysis(
         self,
         max_insights: int = 5,
-        deep_dive_count: int = 7,
+        deep_dive_count: int = 5,
         task_id: str | None = None,
     ) -> AutonomousAnalysisResult:
         """Run complete autonomous analysis pipeline.
@@ -503,15 +516,16 @@ class AutonomousDeepEngine:
         1. Macro Scan - Global macro environment
         2. Heatmap Fetch - Dynamic sector/stock heatmap data
         3. Heatmap Analysis - LLM pattern detection and stock selection
-        4. Deep Dive - Detailed analysis per selected stock
-        4.5. Coverage Evaluation - Adaptive coverage loop (max 2 iterations)
+        4. Deep Dive - 3 core analysts (technical, sector, risk) per stock
         5. Synthesis - Rank and produce final insights
+
+        Post-analysis pattern extraction runs in the background (non-blocking).
 
         Falls back to legacy sector rotation / opportunity hunt if heatmap fails.
 
         Args:
             max_insights: Number of final insights to produce (default 5).
-            deep_dive_count: Number of opportunities to analyze in detail (default 7).
+            deep_dive_count: Number of opportunities to analyze in detail (default 5).
             task_id: Optional task ID for progress tracking in database.
 
         Returns:
@@ -734,13 +748,17 @@ class AutonomousDeepEngine:
             s.symbol for s in ordered_selections[:deep_dive_count]
         ]
 
-        # Merge portfolio holdings into deep dive list (max 10 extra)
+        # Merge top portfolio holdings into deep dive list (max 3 extra,
+        # sorted by position size to prioritize the most significant holdings)
         if portfolio_holdings:
             existing_symbols = set(symbols_to_analyze)
-            portfolio_additions = [
-                sym for sym in portfolio_holdings
-                if sym not in existing_symbols
-            ][:10]
+            sorted_holdings = sorted(
+                [(sym, info) for sym, info in portfolio_holdings.items()
+                 if sym not in existing_symbols],
+                key=lambda x: x[1].get("total_cost", 0),
+                reverse=True,
+            )
+            portfolio_additions = [sym for sym, _ in sorted_holdings[:3]]
             if portfolio_additions:
                 symbols_to_analyze.extend(portfolio_additions)
                 logger.info(
@@ -809,43 +827,14 @@ class AutonomousDeepEngine:
         ]
         result.phase_summaries["deep_dive"] = " ".join(dd_parts)
 
-        # ===== PHASE 4.5: Coverage Evaluation (adaptive loop) =====
-        logger.info("Phase 4.5: Evaluating coverage...")
-        await self._update_task_progress(
-            task_id, "coverage_evaluation", 75, "Evaluating coverage..."
-        )
-        if self._run_metrics:
-            self._run_metrics.start_phase("coverage_evaluation")
-
-        analyst_reports = await self._run_coverage_loop(
-            analyst_reports=analyst_reports,
-            heatmap_data=heatmap_data,
-            macro_result=macro_result,
-            discovery_context=discovery_context,
-            task_id=task_id,
-        )
-        result.analyst_reports = analyst_reports
+        # Phase 4.5 (coverage evaluation) skipped — the heatmap analyzer
+        # already selects a diverse set of stocks across sectors.  The
+        # coverage loop added 10-25 extra LLM calls for marginal gain.
         result.phases_completed.append("coverage_evaluation")
-        if self._run_metrics:
-            self._run_metrics.end_phase("coverage_evaluation")
-
-        # Capture coverage evaluation summary
-        pre_coverage_count = len(symbols_to_analyze)
-        post_coverage_count = len(analyst_reports)
-        added_count = post_coverage_count - pre_coverage_count
-        if added_count > 0:
-            added_symbols = [s for s in analyst_reports if s not in symbols_to_analyze]
-            ce_summary = (
-                f"Coverage loop added {added_count} additional stocks: "
-                f"{', '.join(added_symbols[:5])}. "
-                f"Total coverage: {post_coverage_count} stocks."
-            )
-        else:
-            ce_summary = (
-                f"Coverage sufficient with {post_coverage_count} stocks. "
-                f"No additional symbols needed."
-            )
-        result.phase_summaries["coverage_evaluation"] = ce_summary
+        result.phase_summaries["coverage_evaluation"] = (
+            f"Coverage evaluation skipped (optimized pipeline). "
+            f"{len(analyst_reports)} stocks analyzed."
+        )
 
         # ===== PHASE 5: Synthesis =====
         logger.info("Phase 5: Synthesizing insights...")
@@ -1394,37 +1383,46 @@ class AutonomousDeepEngine:
             await session.commit()
             logger.info(f"Stored {len(stored)} insights to database")
 
-            # Extract patterns from each stored insight (in parallel)
-            try:
-                pattern_extractor = PatternExtractor(session)
+            # Fire-and-forget pattern extraction in background (uses LLM calls
+            # per insight, so running in background avoids blocking the pipeline).
+            # Uses a separate DB session since the current session may close.
+            _stored_dicts = [
+                {
+                    "id": ins.id,
+                    "title": ins.title,
+                    "insight_type": ins.insight_type,
+                    "action": ins.action,
+                    "thesis": ins.thesis,
+                    "confidence": ins.confidence,
+                    "time_horizon": ins.time_horizon,
+                    "primary_symbol": ins.primary_symbol,
+                    "risk_factors": ins.risk_factors or [],
+                    "related_symbols": ins.related_symbols or [],
+                    "sector": (ins.discovery_context or {}).get("sector"),
+                }
+                for ins in stored
+            ]
 
-                async def _extract_pattern(insight: DeepInsight) -> None:
-                    try:
-                        insight_dict = {
-                            "id": insight.id,
-                            "title": insight.title,
-                            "insight_type": insight.insight_type,
-                            "action": insight.action,
-                            "thesis": insight.thesis,
-                            "confidence": insight.confidence,
-                            "time_horizon": insight.time_horizon,
-                            "primary_symbol": insight.primary_symbol,
-                            "risk_factors": insight.risk_factors or [],
-                            "related_symbols": insight.related_symbols or [],
-                            "sector": (insight.discovery_context or {}).get("sector"),
-                        }
-                        await pattern_extractor.extract_from_insight(insight_dict)
-                        logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
-                    except Exception as pe:
-                        logger.error(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}", exc_info=True)
+            async def _background_pattern_extraction(
+                insight_dicts: list[dict],
+            ) -> None:
+                """Extract patterns in a background task with its own DB session."""
+                try:
+                    async with async_session_factory() as bg_session:
+                        extractor = PatternExtractor(bg_session)
+                        for d in insight_dicts:
+                            try:
+                                await extractor.extract_from_insight(d)
+                                logger.info(f"[AUTO-BG] Pattern extraction completed for {d.get('primary_symbol')}")
+                            except Exception as pe:
+                                logger.error(f"[AUTO-BG] Pattern extraction failed for {d.get('primary_symbol')}: {pe}")
+                        await bg_session.commit()
+                    logger.info(f"[AUTO-BG] Background pattern extraction finished for {len(insight_dicts)} insights")
+                except Exception as e:
+                    logger.error(f"[AUTO-BG] Background pattern extraction failed: {e}", exc_info=True)
 
-                await asyncio.gather(
-                    *[_extract_pattern(ins) for ins in stored],
-                    return_exceptions=True,
-                )
-                await session.commit()
-            except Exception as e:
-                logger.error(f"[AUTO] Pattern extraction phase failed: {e}", exc_info=True)
+            asyncio.create_task(_background_pattern_extraction(_stored_dicts))
+            logger.info(f"[AUTO] Pattern extraction dispatched to background for {len(stored)} insights")
 
             # Auto-initiate outcome tracking for actionable insights
             try:
@@ -1607,13 +1605,16 @@ class AutonomousDeepEngine:
             top_candidates = candidates.get_top_candidates(deep_dive_count)
             symbols_to_analyze = [c.symbol for c in top_candidates]
 
-            # Merge portfolio holdings into deep dive list (max 10 extra)
+            # Merge top portfolio holdings into deep dive list (max 3 extra)
             if portfolio_holdings:
                 existing_symbols = set(symbols_to_analyze)
-                portfolio_additions = [
-                    sym for sym in portfolio_holdings
-                    if sym not in existing_symbols
-                ][:10]
+                sorted_holdings = sorted(
+                    [(sym, info) for sym, info in portfolio_holdings.items()
+                     if sym not in existing_symbols],
+                    key=lambda x: x[1].get("total_cost", 0),
+                    reverse=True,
+                )
+                portfolio_additions = [sym for sym, _ in sorted_holdings[:3]]
                 if portfolio_additions:
                     symbols_to_analyze.extend(portfolio_additions)
                     logger.info(
@@ -2422,37 +2423,42 @@ class AutonomousDeepEngine:
             await session.commit()
             logger.info(f"Stored {len(stored)} insights to database")
 
-            # Extract patterns from each stored insight (in parallel)
-            try:
-                pattern_extractor = PatternExtractor(session)
+            # Fire-and-forget pattern extraction in background (same as heatmap pipeline)
+            _stored_dicts_legacy = [
+                {
+                    "id": ins.id,
+                    "title": ins.title,
+                    "insight_type": ins.insight_type,
+                    "action": ins.action,
+                    "thesis": ins.thesis,
+                    "confidence": ins.confidence,
+                    "time_horizon": ins.time_horizon,
+                    "primary_symbol": ins.primary_symbol,
+                    "risk_factors": ins.risk_factors or [],
+                    "related_symbols": ins.related_symbols or [],
+                    "sector": (ins.discovery_context or {}).get("sector"),
+                }
+                for ins in stored
+            ]
 
-                async def _extract_pattern_legacy(insight: DeepInsight) -> None:
-                    try:
-                        insight_dict = {
-                            "id": insight.id,
-                            "title": insight.title,
-                            "insight_type": insight.insight_type,
-                            "action": insight.action,
-                            "thesis": insight.thesis,
-                            "confidence": insight.confidence,
-                            "time_horizon": insight.time_horizon,
-                            "primary_symbol": insight.primary_symbol,
-                            "risk_factors": insight.risk_factors or [],
-                            "related_symbols": insight.related_symbols or [],
-                            "sector": (insight.discovery_context or {}).get("sector"),
-                        }
-                        await pattern_extractor.extract_from_insight(insight_dict)
-                        logger.info(f"[AUTO] Pattern extraction completed for {insight.primary_symbol}")
-                    except Exception as pe:
-                        logger.error(f"[AUTO] Pattern extraction failed for {insight.primary_symbol}: {pe}", exc_info=True)
+            async def _background_pattern_extraction_legacy(
+                insight_dicts: list[dict],
+            ) -> None:
+                try:
+                    async with async_session_factory() as bg_session:
+                        extractor = PatternExtractor(bg_session)
+                        for d in insight_dicts:
+                            try:
+                                await extractor.extract_from_insight(d)
+                                logger.info(f"[AUTO-BG] Pattern extraction completed for {d.get('primary_symbol')}")
+                            except Exception as pe:
+                                logger.error(f"[AUTO-BG] Pattern extraction failed for {d.get('primary_symbol')}: {pe}")
+                        await bg_session.commit()
+                except Exception as e:
+                    logger.error(f"[AUTO-BG] Legacy pattern extraction failed: {e}", exc_info=True)
 
-                await asyncio.gather(
-                    *[_extract_pattern_legacy(ins) for ins in stored],
-                    return_exceptions=True,
-                )
-                await session.commit()
-            except Exception as e:
-                logger.error(f"[AUTO] Pattern extraction phase failed: {e}", exc_info=True)
+            asyncio.create_task(_background_pattern_extraction_legacy(_stored_dicts_legacy))
+            logger.info(f"[AUTO] Pattern extraction dispatched to background for {len(stored)} legacy insights")
 
             # Auto-initiate outcome tracking for actionable insights
             try:
