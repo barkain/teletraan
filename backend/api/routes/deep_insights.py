@@ -434,106 +434,22 @@ async def _auto_publish_report(task_id: str) -> None:
 async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_count: int) -> None:
     """Background task to run autonomous analysis with progress updates.
 
+    Delegates to the shared runner in ``analysis.autonomous_runner`` so
+    that the same pipeline can be invoked from both the API endpoint and
+    the ETL scheduler.
+
     Args:
         task_id: The task ID for progress tracking.
         max_insights: Number of insights to generate.
         deep_dive_count: Number of opportunities to deep dive.
     """
-    try:
-        # Update task to started
-        async with async_session_factory() as session:
-            result = await session.execute(
-                select(AnalysisTask).where(AnalysisTask.id == task_id)
-            )
-            task = result.scalar_one_or_none()
-            if task:
-                task.status = AnalysisTaskStatus.MACRO_SCAN.value
-                task.started_at = datetime.utcnow()
-                await session.commit()
+    from analysis.autonomous_runner import run_autonomous_analysis_pipeline
 
-        # Run the autonomous analysis
-        engine = get_autonomous_engine()
-        analysis_result = await engine.run_autonomous_analysis(
-            max_insights=max_insights,
-            deep_dive_count=deep_dive_count,
-            task_id=task_id,
-        )
-
-        # Update task with results
-        async with async_session_factory() as session:
-            result = await session.execute(
-                select(AnalysisTask).where(AnalysisTask.id == task_id)
-            )
-            task = result.scalar_one_or_none()
-            if task:
-                task.status = AnalysisTaskStatus.COMPLETED.value
-                task.progress = 100
-                task.current_phase = "completed"
-                task.phase_details = f"Generated {len(analysis_result.insights)} insights"
-                task.completed_at = datetime.utcnow()
-                task.elapsed_seconds = analysis_result.elapsed_seconds
-                task.result_analysis_id = analysis_result.analysis_id
-                task.result_insight_ids = [i.id for i in analysis_result.insights]
-                task.discovery_summary = analysis_result.discovery_summary
-                task.phases_completed = analysis_result.phases_completed
-                task.phase_summaries = analysis_result.phase_summaries
-
-                # Extract market regime and top sectors
-                if analysis_result.macro_result:
-                    task.market_regime = analysis_result.macro_result.market_regime
-                if analysis_result.sector_result:
-                    task.top_sectors = [
-                        s.sector_name for s in analysis_result.sector_result.top_sectors
-                    ]
-                elif analysis_result.heatmap_data and analysis_result.heatmap_data.sectors:
-                    sorted_sectors = sorted(
-                        analysis_result.heatmap_data.sectors,
-                        key=lambda s: abs(s.change_20d or s.change_5d or s.change_1d or 0),
-                        reverse=True,
-                    )
-                    task.top_sectors = [
-                        f"{s.name} {(s.change_20d or s.change_5d or s.change_1d or 0):+.1f}%"
-                        for s in sorted_sectors[:6]
-                    ]
-
-                # Persist LLM usage metrics from the analysis run
-                if analysis_result.run_metrics:
-                    try:
-                        metrics_fields = analysis_result.run_metrics.to_task_fields()
-                        for field_name, value in metrics_fields.items():
-                            setattr(task, field_name, value)
-                    except Exception as metrics_err:
-                        logger.warning(
-                            "Failed to persist run metrics for task %s: %s",
-                            task_id, metrics_err,
-                        )
-
-                await session.commit()
-                logger.info(f"Background analysis {task_id} completed successfully")
-
-                # Auto-publish to GitHub Pages (best-effort, never breaks pipeline)
-                try:
-                    await _auto_publish_report(task_id)
-                except Exception as pub_err:
-                    logger.warning(f"Auto-publish failed for task {task_id} (non-fatal): {pub_err}")
-
-    except Exception as e:
-        logger.error(f"Background analysis {task_id} failed: {e}")
-        # Update task with error
-        try:
-            async with async_session_factory() as session:
-                result = await session.execute(
-                    select(AnalysisTask).where(AnalysisTask.id == task_id)
-                )
-                task = result.scalar_one_or_none()
-                if task:
-                    task.status = AnalysisTaskStatus.FAILED.value
-                    task.progress = -1
-                    task.error_message = str(e)
-                    task.completed_at = datetime.utcnow()
-                    await session.commit()
-        except Exception as update_error:
-            logger.error(f"Failed to update task {task_id} with error: {update_error}")
+    await run_autonomous_analysis_pipeline(
+        task_id=task_id,
+        max_insights=max_insights,
+        deep_dive_count=deep_dive_count,
+    )
 
 
 @router.post("/autonomous/start", response_model=StartAnalysisResponse)

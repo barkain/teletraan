@@ -783,7 +783,7 @@ erDiagram
 
 **File: `backend/scheduler/etl.py`**
 
-The `ETLOrchestrator` manages 7 scheduled cron jobs via APScheduler's `AsyncIOScheduler`:
+The `ETLOrchestrator` manages 8+ scheduled cron jobs via APScheduler's `AsyncIOScheduler`:
 
 ```mermaid
 gantt
@@ -796,6 +796,7 @@ gantt
 
     section Post-Close
     daily_outcome_check (4:30 PM)          :outcome, 16:30, 15min
+    scheduled_autonomous_analysis (4:30 PM, opt-in) :sched, 16:30, 120min
     daily_price_refresh (6:30 PM)          :price, 18:30, 30min
     daily_analysis (7:00 PM)               :analysis, 19:00, 60min
 
@@ -814,6 +815,7 @@ gantt
 | `daily_theme_decay` | 12:00 AM ET daily | Apply relevance decay to `ConversationTheme` records, deactivate themes below 0.1 |
 | `weekly_economic_refresh` | Sat 10:00 AM ET | Fetch 90 days of FRED data (GDP, CPI, unemployment, yields, VIX, etc.) |
 | `weekly_stock_info_refresh` | Sun 12:00 PM ET | Update stock metadata (name, sector, industry, market_cap) from Yahoo Finance |
+| `scheduled_autonomous_analysis` | Mon-Fri 4:30 PM ET (opt-in) | Run full autonomous analysis pipeline via `autonomous_runner.py`; skips if another analysis is active. Enabled by `SCHEDULED_ANALYSIS_ENABLED=true` |
 
 ### Data Adapter Pattern
 
@@ -1166,6 +1168,11 @@ FRED_API_KEY=your_fred_key_here     # Optional, for economic data
 FINNHUB_API_KEY=your_finnhub_key    # Optional
 DEBUG=false
 API_V1_PREFIX=/api/v1
+SCHEDULED_ANALYSIS_ENABLED=false          # Set true to enable Mon-Fri autonomous analysis
+SCHEDULED_ANALYSIS_HOUR=16                # Hour (ET) to run (default 16)
+SCHEDULED_ANALYSIS_MINUTE=30              # Minute (default 30)
+SCHEDULED_ANALYSIS_MAX_INSIGHTS=5         # Max insights per scheduled run
+SCHEDULED_ANALYSIS_DEEP_DIVE_COUNT=5      # Stocks to deep-dive per scheduled run
 ```
 
 ### Frontend (`frontend/.env.local`)
@@ -1294,7 +1301,7 @@ Teletraan is an AI market analysis platform combining:
 - **Institutional memory** -- KnowledgePattern + ConversationTheme with relevance decay
 - **Outcome tracking** -- Thesis validation over 20 trading days, pattern success rate updates
 - **Robust data infrastructure** -- SQLite + async SQLAlchemy, 13 database tables, yfinance + FRED adapters
-- **Scheduled ETL pipeline** -- 7 cron jobs via APScheduler (features, prices, analysis, outcomes, themes, economic, stock info)
+- **Scheduled ETL pipeline** -- 8+ cron jobs via APScheduler (features, prices, analysis, outcomes, themes, economic, stock info, and optional scheduled autonomous analysis)
 - **Modern frontend** -- Next.js 16 + React 19 + TanStack Query + shadcn/ui + Recharts + Tailwind CSS 4
 - **Concurrency-safe LLM integration** -- Semaphore-limited Claude SDK sessions, async throughout
 

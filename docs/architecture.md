@@ -283,6 +283,7 @@ teletraan/
 │   │   └── schemas/                      # Pydantic request/response models
 │   ├── analysis/
 │   │   ├── autonomous_engine.py          # 6-phase heatmap pipeline (portfolio-aware)
+│   │   ├── autonomous_runner.py          # Shared pipeline runner (HTTP + scheduler)
 │   │   ├── deep_engine.py                # Multi-agent orchestration
 │   │   ├── engine.py                     # Basic technical analysis
 │   │   ├── pattern_extractor.py          # LLM-based pattern extraction
@@ -365,7 +366,7 @@ teletraan/
 
 ## Infrastructure
 
-- **ETL Scheduler** -- Background data ingestion via APScheduler with multi-source adapters (Yahoo Finance, FRED, Finnhub)
+- **ETL Scheduler** -- Background data ingestion via APScheduler with multi-source adapters (Yahoo Finance, FRED, Finnhub) and optional scheduled autonomous analysis (Mon-Fri post-close, opt-in via `SCHEDULED_ANALYSIS_ENABLED`)
 - **ClaudeSDK Client Pool** -- 3 persistent LLM connections replacing per-call subprocess spawns for dramatically lower latency
 - **yfinance TTL Cache** -- 5-minute cache for batch downloads and market caps, eliminating redundant API calls
 - **ThreadPoolExecutor** -- 8-worker thread pool for parallel market cap fetching in heatmap analysis

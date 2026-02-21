@@ -64,6 +64,11 @@ Auto-created by `start.sh` with defaults:
 | `GITHUB_PAGES_ENABLED` | `false` | Enable report publishing to GitHub Pages |
 | `GITHUB_PAGES_REPO` | *(auto-detected)* | Target repo for publishing |
 | `GITHUB_PAGES_BASE_URL` | *(derived from repo)* | Override published report base URL |
+| `SCHEDULED_ANALYSIS_ENABLED` | `false` | Set `true` to run autonomous analysis Mon-Fri after market close |
+| `SCHEDULED_ANALYSIS_HOUR` | `16` | Hour (ET) for scheduled analysis |
+| `SCHEDULED_ANALYSIS_MINUTE` | `30` | Minute for scheduled analysis |
+| `SCHEDULED_ANALYSIS_MAX_INSIGHTS` | `5` | Max insights per scheduled run |
+| `SCHEDULED_ANALYSIS_DEEP_DIVE_COUNT` | `5` | Stocks to deep-dive per scheduled run |
 
 For LLM provider configuration, see [LLM Providers](llm-providers.md).
 
