@@ -50,6 +50,7 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
   - `AnalysisEngine` — basic technical analysis
   - `DeepAnalysisEngine` — multi-agent deep analysis (5 specialist analysts run in parallel via `asyncio.gather()`, then a Synthesis Lead aggregates)
   - `AutonomousDeepEngine` — self-guided 6-phase pipeline: MacroScanner → SectorRotator → OpportunityHunter → DeepDive → CoverageEvaluator → SynthesisLead (portfolio-aware)
+  - `autonomous_runner.py` — shared pipeline runner used by both the HTTP endpoint and the ETL scheduler to avoid duplicating lifecycle logic
 - **Post-analysis pipeline** (runs after synthesis in both engines):
   - `PatternExtractor` — LLM-based pattern extraction from each insight
   - `OutcomeTracker` — starts tracking predictions for insights with primary symbols
@@ -75,7 +76,7 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
   - `insight_conversation.py` — InsightConversation + FollowUpResearch
   - `conversation_theme.py` — ConversationTheme
   - `stock.py`, `price.py`, `economic.py`, `indicator.py`, `settings.py`
-- **ETL scheduler** (APScheduler) for cron-based data ingestion + outcome checking
+- **ETL scheduler** (APScheduler) for cron-based data ingestion, outcome checking, and optional scheduled autonomous analysis
 - **Data adapters**: Yahoo Finance (`yfinance`), FRED (`fredapi`), Finnhub (optional)
 - **Chat agent** (`llm/market_agent.py`): MCP tool calling with 10 market data tools
 - Blocking calls (yfinance) wrapped with `run_in_executor()`
@@ -113,6 +114,7 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
 - **FD limit**: Raised to 4096 in `main.py` to handle concurrent subprocess + connection load
 - **Portfolio-aware discovery**: `AutonomousDeepEngine` loads portfolio holdings and ensures held symbols are included in deep dives
 - **Runs API routes**: `/api/v1/runs` prefix with endpoints `/stats`, `GET /`, `GET /{run_id}` for metrics dashboard
+- **Scheduled autonomous analysis**: Opt-in Mon-Fri post-close job (default 16:30 ET) via APScheduler; uses shared `autonomous_runner.py` pipeline runner (same code path as the HTTP-triggered analysis); concurrency guard skips run if another analysis is already active
 
 ## Environment Variables
 
@@ -120,6 +122,10 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
 - `DATABASE_URL` — default: `sqlite+aiosqlite:///./data/teletraan.db`
 - `FRED_API_KEY` — optional, for economic data
 - `FINNHUB_API_KEY` — optional
+- `SCHEDULED_ANALYSIS_ENABLED` — default `false`; set `true` to enable Mon-Fri autonomous analysis
+- `SCHEDULED_ANALYSIS_HOUR` / `SCHEDULED_ANALYSIS_MINUTE` — schedule time in ET (default `16` / `30`)
+- `SCHEDULED_ANALYSIS_MAX_INSIGHTS` — max insights per run (default `5`)
+- `SCHEDULED_ANALYSIS_DEEP_DIVE_COUNT` — stocks to deep-dive per run (default `5`)
 - GitHub Pages URL is auto-derived from git remote origin (defaults to `barkain/teletraan`)
 
 **Frontend** (`frontend/.env.local` — auto-created by `start.sh`):
