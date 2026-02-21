@@ -1,0 +1,38 @@
+{
+  "filename": "2026-02-21-1421-transitional.html",
+  "task_id": "f5e404e7-151d-4db3-b1e6-9e1b8fd9e1d9",
+  "market_regime": "Transitional",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Transitional\n\n**Key Macro Themes:**\n- Energy & Commodities Reflation: Crude oil surging +8.71% over 20 days to $66.39, driving Energy sector to top performer at +11.57%. ...\n- Fed Dovish Pivot & Rate Cut Expectations: Yield curve compression with 5Y down -4.92%, 10Y down -3.61% suggests market pricing in rate cuts. U...\n- Tech Sector Derating & Growth Concerns: Technology sector down -2.90%, Consumer Discretionary down -4.61%, and NASDAQ underperforming at -2....\n\n**Heatmap Analysis:** The heatmap reveals a bifurcated market with Communication Services and Consumer Discretionary leading (+1.44%, +1.04%) while Healthcare and Energy lag (-0.28%, -0.54%). However, the dramatic 20-day divergence tells the real story: defensive sectors (Energy +12.57%, Utilities +7.69%, Materials +7.55%) have massively outperformed growth sectors (Consumer Discretionary -3.25%, Technology -2.04%), confirming the transitional regime shift. All sectors show exactly 50% breadth, suggesting internal sector divergences worth investigating.\n\n**Sectors Scanned:**\n- Technology: +0.5% (1D), breadth 50%\n- Financials: +0.7% (1D), breadth 50%\n- Energy: -0.5% (1D), breadth 50%\n- Healthcare: -0.3% (1D), breadth 50%\n- Industrials: +0.5% (1D), breadth 50%\n- Consumer Staples: +0.3% (1D), breadth 50%\n- Consumer Discretionary: +1.0% (1D), breadth 50%\n- Utilities: +0.5% (1D), breadth 50%\n- Communication Services: +1.4% (1D), breadth 50%\n- Real Estate: +0.8% (1D), breadth 50%\n- Materials: +0.2% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Defensive Sector Reversal: Energy, Utilities, and Materials dominating 20-day performance despite today's weakness in Energy (-0.54%)\n- Growth Sector Capitulation: Tech and Consumer Discretionary showing 1-day resilience (+0.48%, +1.04%) but deep 20-day wounds (-2.04%, -3.25%)\n- Communication Services Anomaly: Leading 1-day performance (+1.44%) with strong 5-day and 20-day consistency",
+  "top_sectors": [
+    "Energy +12.6%",
+    "Utilities +7.7%",
+    "Materials +7.6%",
+    "Consumer Staples +6.6%",
+    "Industrials +6.5%",
+    "Real Estate +4.8%"
+  ],
+  "insights_count": 6,
+  "symbols": [
+    "CAT",
+    "GC=F",
+    "LITE",
+    "MU",
+    "NVDA",
+    "XOM"
+  ],
+  "action_counts": {
+    "SELL": 2,
+    "BUY": 1,
+    "STRONG_BUY": 1,
+    "HOLD": 2
+  },
+  "avg_confidence": 0.7,
+  "insight_types": [
+    "opportunity",
+    "risk"
+  ],
+  "created_at": "2026-02-21T14:21:38",
+  "started_at": "2026-02-21T14:21:38.224850",
+  "completed_at": "2026-02-21T14:41:29.795605",
+  "elapsed_seconds": 1191.568841
+}
