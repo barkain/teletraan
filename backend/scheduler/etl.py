@@ -20,10 +20,12 @@ from data.adapters.fred import fred_adapter
 from models.stock import Stock
 from models.price import PriceHistory
 from models.economic import EconomicIndicator
+from models.analysis_task import AnalysisTask, AnalysisTaskStatus
 from analysis.engine import AnalysisEngine
 from analysis.outcome_tracker import InsightOutcomeTracker
 from analysis.memory_service import InstitutionalMemoryService
 from analysis.statistical_calculator import StatisticalFeatureCalculator
+from config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -507,6 +509,76 @@ class ETLOrchestrator:
                 "symbols": len(all_symbols),
             }
 
+    async def run_scheduled_autonomous_analysis(self) -> None:
+        """Scheduled job: run the autonomous analysis pipeline.
+
+        Guards against concurrent runs by checking for any AnalysisTask
+        that is still in an active (non-terminal) status.  If one is
+        found, the run is skipped with a log message.
+        """
+        from uuid import uuid4
+
+        from analysis.autonomous_engine import get_autonomous_engine
+        from analysis.autonomous_runner import run_autonomous_analysis_pipeline
+
+        settings = get_settings()
+
+        logger.info("Scheduled autonomous analysis triggered")
+
+        # --- Concurrency guard ---
+        active_statuses = [
+            AnalysisTaskStatus.PENDING.value,
+            AnalysisTaskStatus.MACRO_SCAN.value,
+            AnalysisTaskStatus.SECTOR_ROTATION.value,
+            AnalysisTaskStatus.OPPORTUNITY_HUNT.value,
+            AnalysisTaskStatus.HEATMAP_FETCH.value,
+            AnalysisTaskStatus.HEATMAP_ANALYSIS.value,
+            AnalysisTaskStatus.DEEP_DIVE.value,
+            AnalysisTaskStatus.COVERAGE_EVALUATION.value,
+            AnalysisTaskStatus.SYNTHESIS.value,
+        ]
+
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(AnalysisTask)
+                .where(AnalysisTask.status.in_(active_statuses))
+                .limit(1)
+            )
+            if result.scalar_one_or_none():
+                logger.info(
+                    "Scheduled autonomous analysis skipped — "
+                    "another analysis is already running"
+                )
+                return
+
+        # --- Create task record ---
+        task_id = str(uuid4())
+        async with async_session_factory() as session:
+            task = AnalysisTask(
+                id=task_id,
+                status=AnalysisTaskStatus.PENDING.value,
+                progress=0,
+                current_phase="pending",
+                phase_details="Scheduled autonomous analysis initializing...",
+                max_insights=settings.SCHEDULED_ANALYSIS_MAX_INSIGHTS,
+                deep_dive_count=settings.SCHEDULED_ANALYSIS_DEEP_DIVE_COUNT,
+            )
+            session.add(task)
+            await session.commit()
+
+        # Clear the activity log for this new run
+        engine = get_autonomous_engine()
+        engine.clear_activity_log(task_id=task_id)
+
+        # --- Run the pipeline ---
+        logger.info("Starting scheduled autonomous analysis (task_id=%s)", task_id)
+        await run_autonomous_analysis_pipeline(
+            task_id=task_id,
+            max_insights=settings.SCHEDULED_ANALYSIS_MAX_INSIGHTS,
+            deep_dive_count=settings.SCHEDULED_ANALYSIS_DEEP_DIVE_COUNT,
+        )
+        logger.info("Scheduled autonomous analysis finished (task_id=%s)", task_id)
+
     def start(self) -> None:
         """Start the scheduler with configured jobs."""
         if self._is_running:
@@ -580,14 +652,46 @@ class ETLOrchestrator:
             replace_existing=True,
         )
 
+        # Scheduled autonomous analysis (opt-in, Mon-Fri after market close)
+        settings = get_settings()
+        if settings.SCHEDULED_ANALYSIS_ENABLED:
+            self.scheduler.add_job(
+                self.run_scheduled_autonomous_analysis,
+                CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=settings.SCHEDULED_ANALYSIS_HOUR,
+                    minute=settings.SCHEDULED_ANALYSIS_MINUTE,
+                    timezone="America/New_York",
+                ),
+                id="scheduled_autonomous_analysis",
+                name="Scheduled Autonomous Deep Analysis",
+                replace_existing=True,
+            )
+            logger.info(
+                "Scheduled autonomous analysis ENABLED "
+                "(Mon-Fri %02d:%02d ET, max_insights=%d, deep_dive_count=%d)",
+                settings.SCHEDULED_ANALYSIS_HOUR,
+                settings.SCHEDULED_ANALYSIS_MINUTE,
+                settings.SCHEDULED_ANALYSIS_MAX_INSIGHTS,
+                settings.SCHEDULED_ANALYSIS_DEEP_DIVE_COUNT,
+            )
+
         self.scheduler.start()
         self._is_running = True
-        logger.info(
-            "ETL scheduler started with jobs: daily_price_refresh, "
-            "weekly_economic_refresh, daily_analysis, weekly_stock_info_refresh, "
-            "intraday_outcome_check, daily_outcome_check, daily_theme_decay, "
-            "daily_feature_computation"
-        )
+
+        job_names = [
+            "daily_price_refresh",
+            "weekly_economic_refresh",
+            "daily_analysis",
+            "weekly_stock_info_refresh",
+            "intraday_outcome_check",
+            "daily_outcome_check",
+            "daily_theme_decay",
+            "daily_feature_computation",
+        ]
+        if settings.SCHEDULED_ANALYSIS_ENABLED:
+            job_names.append("scheduled_autonomous_analysis")
+        logger.info("ETL scheduler started with jobs: %s", ", ".join(job_names))
 
     def stop(self) -> None:
         """Stop the scheduler."""

@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     POLYMARKET_RATE_LIMIT: int = 30  # Max requests/minute to Polymarket APIs
     KALSHI_RATE_LIMIT: int = 20  # Max requests/minute to Kalshi API
 
+    # --- Scheduled Autonomous Analysis ---
+    # When enabled, runs the full autonomous pipeline Mon-Fri after market close.
+    SCHEDULED_ANALYSIS_ENABLED: bool = False  # opt-in
+    SCHEDULED_ANALYSIS_HOUR: int = 16
+    SCHEDULED_ANALYSIS_MINUTE: int = 30
+    SCHEDULED_ANALYSIS_MAX_INSIGHTS: int = 5
+    SCHEDULED_ANALYSIS_DEEP_DIVE_COUNT: int = 5
+
     # --- Report Publishing ---
     # Publishing is DISABLED by default for fork safety.
     # If you fork this repo and run discovery, reports will NOT be pushed

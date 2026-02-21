@@ -127,6 +127,14 @@ DATABASE_URL=sqlite+aiosqlite:///./data/teletraan.db
 # FRED_API_KEY=your-fred-key
 # FINNHUB_API_KEY=your-finnhub-key
 
+# --- Scheduled Autonomous Analysis (disabled by default) ---
+# When enabled, runs the full autonomous pipeline Mon-Fri at 16:30 ET.
+# SCHEDULED_ANALYSIS_ENABLED=true
+# SCHEDULED_ANALYSIS_HOUR=16
+# SCHEDULED_ANALYSIS_MINUTE=30
+# SCHEDULED_ANALYSIS_MAX_INSIGHTS=5
+# SCHEDULED_ANALYSIS_DEEP_DIVE_COUNT=5
+
 # --- Report Publishing (disabled by default for fork safety) ---
 # PUBLISH_METHOD controls where reports go: github_pages | static_dir | none
 # PUBLISH_METHOD=github_pages
