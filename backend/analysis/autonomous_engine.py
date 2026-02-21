@@ -24,6 +24,7 @@ from uuid import uuid4
 
 from database import async_session_factory  # type: ignore[import-not-found]
 from models.deep_insight import DeepInsight, InsightType, InsightAction  # type: ignore[import-not-found]
+from models.insight_research_context import InsightResearchContext  # type: ignore[import-not-found]
 
 from analysis.agents.macro_scanner import (  # type: ignore[import-not-found]
     MacroScanner,
@@ -99,6 +100,7 @@ from analysis.context_builder import MarketContextBuilder  # type: ignore[import
 from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
 from analysis.pattern_extractor import PatternExtractor  # type: ignore[import-not-found]
 from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
+from analysis.confidence_adjuster import ConfidenceAdjuster  # type: ignore[import-not-found]
 from llm.client_pool import pool_query_llm, LLMQueryResult  # type: ignore[import-not-found]
 
 # Optional alternative data sources (availability flags)
@@ -841,7 +843,7 @@ class AutonomousDeepEngine:
         await self._update_task_progress(task_id, "synthesis", 90, "Synthesizing insights...")
         if self._run_metrics:
             self._run_metrics.start_phase("synthesis")
-        insights_data = await self._run_synthesis_with_heatmap(
+        insights_data, synthesis_raw_response = await self._run_synthesis_with_heatmap(
             analyst_reports=analyst_reports,
             macro_context=macro_result,
             heatmap_analysis=heatmap_analysis_result,
@@ -860,6 +862,8 @@ class AutonomousDeepEngine:
                 macro_result,
                 heatmap_analysis_result,
                 pre_context=pre_context,
+                analyst_reports=analyst_reports,
+                synthesis_raw_response=synthesis_raw_response,
             )
             result.insights = saved_insights
 
@@ -1149,7 +1153,7 @@ class AutonomousDeepEngine:
         heatmap_analysis: HeatmapAnalysis,
         max_insights: int,
         portfolio_holdings: dict[str, dict[str, float]] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], str]:
         """Run Phase 5: Synthesis Lead with heatmap context.
 
         Args:
@@ -1160,7 +1164,7 @@ class AutonomousDeepEngine:
             portfolio_holdings: Optional dict of user portfolio holdings.
 
         Returns:
-            List of insight dictionaries.
+            Tuple of (list of insight dictionaries, raw LLM response).
         """
         # Build enhanced synthesis context
         async with async_session_factory() as session:
@@ -1168,9 +1172,10 @@ class AutonomousDeepEngine:
 
             # Get patterns and track record
             symbols = list(analyst_reports.keys())[:10]
+            current_conditions = self._extract_conditions_from_analyst_reports(analyst_reports)
             patterns = await memory_service.get_relevant_patterns(
                 symbols=symbols,
-                current_conditions={},
+                current_conditions=current_conditions,
             )
             track_record = await memory_service.get_insight_track_record()
 
@@ -1206,7 +1211,38 @@ class AutonomousDeepEngine:
         # Query LLM
         response = await self._query_llm(enhanced_prompt, full_context, "synthesis", "synthesis")
 
-        return parse_synthesis_response(response)
+        try:
+            insights = parse_synthesis_response(response)
+        except Exception as parse_err:
+            logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:500]}")
+            insights = []
+
+        # Adjust confidence based on historical track record
+        try:
+            async with async_session_factory() as adj_session:
+                memory_service_adj = InstitutionalMemoryService(adj_session)
+                adjuster = ConfidenceAdjuster(adj_session, memory_service_adj)
+                for insight_dict in insights:
+                    try:
+                        result = await adjuster.adjust_confidence(
+                            base_confidence=float(insight_dict.get("confidence", 0.5)),
+                            insight_type=insight_dict.get("insight_type", "opportunity"),
+                            action_type=insight_dict.get("action", "HOLD"),
+                            symbols=[insight_dict["primary_symbol"]] if insight_dict.get("primary_symbol") else None,
+                        )
+                        old_conf = insight_dict.get("confidence", 0.5)
+                        insight_dict["confidence"] = result["adjusted_confidence"]
+                        if result["adjusted_confidence"] != old_conf:
+                            logger.info(
+                                f"[AUTO] Confidence adjusted for {insight_dict.get('primary_symbol')}: "
+                                f"{old_conf:.2f} -> {result['adjusted_confidence']:.2f}"
+                            )
+                    except Exception as adj_err:
+                        logger.warning(f"[AUTO] Confidence adjustment failed: {adj_err}")
+        except Exception as e:
+            logger.warning(f"[AUTO] Confidence adjustment phase failed: {e}")
+
+        return insights, response
 
     def _build_heatmap_autonomous_synthesis_context(
         self,
@@ -1298,6 +1334,142 @@ class AutonomousDeepEngine:
             }
         return None
 
+    def _create_research_context(
+        self,
+        insight: DeepInsight,
+        analyst_reports: dict[str, dict[str, Any]],
+        macro_result: MacroScanResult,
+        synthesis_raw_response: str | None = None,
+        total_insights_count: int = 0,
+        pre_context: dict[str, Any] | None = None,
+        heatmap_analysis: HeatmapAnalysis | None = None,
+        sector_result: SectorRotationResult | None = None,
+    ) -> InsightResearchContext:
+        """Create an InsightResearchContext for an autonomous engine insight.
+
+        Maps the per-symbol analyst report structure to the flat schema
+        expected by InsightResearchContext, using the insight's primary_symbol
+        to select the relevant reports.
+
+        Args:
+            insight: The parent DeepInsight.
+            analyst_reports: Per-symbol analyst reports dict.
+            macro_result: Global macro scan results.
+            synthesis_raw_response: Raw LLM synthesis response text.
+            total_insights_count: Total insights generated in this run.
+            pre_context: Market context dict (heatmap pipeline).
+            heatmap_analysis: Heatmap analysis results (heatmap pipeline).
+            sector_result: Sector rotation results (legacy pipeline).
+
+        Returns:
+            InsightResearchContext model instance.
+        """
+        symbol = insight.primary_symbol
+        symbol_reports = analyst_reports.get(symbol, {}) if symbol else {}
+
+        def clean_report(report: dict[str, Any] | None) -> dict[str, Any] | None:
+            if not report or "error" in report:
+                return None
+            return {k: v for k, v in report.items() if not k.startswith("_")}
+
+        # Extract per-symbol analyst reports
+        technical_report = clean_report(symbol_reports.get("technical"))
+        sector_report = clean_report(symbol_reports.get("sector"))
+        risk_report = clean_report(symbol_reports.get("risk"))
+
+        # Macro is global in autonomous engine
+        macro_report = macro_result.to_dict() if macro_result else None
+
+        # Correlation not run in autonomous pipeline
+        correlation_report = None
+
+        # Market context snapshots from pre_context (heatmap pipeline)
+        market_summary_snapshot = pre_context.get("market_summary") if pre_context else None
+        sector_performance_snapshot = pre_context.get("sector_performance") if pre_context else None
+        economic_indicators_snapshot = pre_context.get("economic_indicators") if pre_context else None
+
+        # Build synthesis summary
+        analyst_names: set[str] = set()
+        for sym_reports in analyst_reports.values():
+            if isinstance(sym_reports, dict):
+                for name, report in sym_reports.items():
+                    if isinstance(report, dict) and "error" not in report:
+                        analyst_names.add(name)
+        synthesis_summary: dict[str, Any] = {
+            "insight_count": total_insights_count,
+            "analysts_included": sorted(analyst_names),
+            "pipeline": "heatmap" if heatmap_analysis else "legacy",
+        }
+
+        # Build condensed analysts summary
+        summaries: list[str] = []
+        if technical_report:
+            finding = technical_report.get("market_structure", "N/A")
+            conf = technical_report.get("confidence", 0)
+            summaries.append(f"Technical({symbol}): {finding} (conf: {conf:.0%})")
+        summaries.append(f"Macro: {macro_result.market_regime}")
+        if sector_report:
+            phase = sector_report.get("market_phase", "N/A")
+            summaries.append(f"Sector: {phase}")
+        if risk_report:
+            vol_regime = risk_report.get("volatility_regime", {})
+            vol_name = vol_regime.get("name", "N/A") if isinstance(vol_regime, dict) else "N/A"
+            summaries.append(f"Risk: {vol_name} volatility")
+        if heatmap_analysis:
+            summaries.append(f"Heatmap: {heatmap_analysis.overview[:80]}")
+        analysts_summary = " | ".join(summaries)[:2000]
+
+        # Build key data points
+        key_data_points: list[str] = []
+        key_data_points.append(f"regime:{macro_result.market_regime}")
+        if pre_context:
+            market_summary = pre_context.get("market_summary", {})
+            spy_data = market_summary.get("SPY", {})
+            if spy_data:
+                change = spy_data.get("change_percent", 0)
+                key_data_points.append(f"SPY_change={change:+.2f}%")
+        if technical_report:
+            for finding in (technical_report.get("findings") or [])[:3]:
+                if isinstance(finding, dict):
+                    rsi = finding.get("rsi")
+                    sym = finding.get("symbol", symbol)
+                    if rsi:
+                        key_data_points.append(f"RSI:{sym}={rsi:.1f}")
+
+        # Estimate token count
+        total_chars = len(str(symbol_reports)) + len(str(synthesis_raw_response or ""))
+        estimated_token_count = total_chars // 4
+
+        # Build successful analysts list
+        successful_analysts = [
+            f"{sym}:{analyst_name}"
+            for sym, reports in analyst_reports.items()
+            for analyst_name, report in (reports.items() if isinstance(reports, dict) else [])
+            if isinstance(report, dict) and "error" not in report
+        ]
+
+        return InsightResearchContext(
+            deep_insight=insight,
+            schema_version="1.0",
+            technical_report=technical_report,
+            macro_report=macro_report,
+            sector_report=sector_report,
+            risk_report=risk_report,
+            correlation_report=correlation_report,
+            synthesis_raw_response=synthesis_raw_response,
+            synthesis_summary=synthesis_summary,
+            symbols_analyzed=list(analyst_reports.keys()),
+            market_summary_snapshot=market_summary_snapshot,
+            sector_performance_snapshot=sector_performance_snapshot,
+            economic_indicators_snapshot=economic_indicators_snapshot,
+            analysts_summary=analysts_summary,
+            key_data_points=key_data_points[:20],
+            estimated_token_count=estimated_token_count,
+            analysis_duration_seconds=None,
+            successful_analysts=successful_analysts,
+            analyst_errors=None,
+        )
+
     async def _store_insights_from_heatmap(
         self,
         session: Any,
@@ -1305,6 +1477,8 @@ class AutonomousDeepEngine:
         macro_result: MacroScanResult,
         heatmap_analysis: HeatmapAnalysis,
         pre_context: dict[str, Any] | None = None,
+        analyst_reports: dict[str, dict[str, Any]] | None = None,
+        synthesis_raw_response: str | None = None,
     ) -> list[DeepInsight]:
         """Store insights in database with heatmap metadata.
 
@@ -1314,6 +1488,8 @@ class AutonomousDeepEngine:
             macro_result: Macro scan results for context.
             heatmap_analysis: Heatmap analysis for context.
             pre_context: Pre-built market context with rich_technical data.
+            analyst_reports: Per-symbol analyst reports for research context.
+            synthesis_raw_response: Raw LLM synthesis response text.
 
         Returns:
             List of created DeepInsight objects.
@@ -1373,6 +1549,26 @@ class AutonomousDeepEngine:
                 )
 
                 session.add(insight)
+
+                # Create and attach research context
+                if analyst_reports:
+                    try:
+                        research_ctx = self._create_research_context(
+                            insight=insight,
+                            analyst_reports=analyst_reports,
+                            macro_result=macro_result,
+                            synthesis_raw_response=synthesis_raw_response,
+                            total_insights_count=len(insights_data),
+                            pre_context=pre_context,
+                            heatmap_analysis=heatmap_analysis,
+                        )
+                        session.add(research_ctx)
+                    except Exception as rc_err:
+                        logger.warning(
+                            f"[AUTO] Research context creation failed for "
+                            f"{data.get('primary_symbol')}: {rc_err}"
+                        )
+
                 stored.append(insight)
 
             except Exception as e:
@@ -1678,7 +1874,7 @@ class AutonomousDeepEngine:
             await self._update_task_progress(task_id, "synthesis", 85, "Synthesizing insights...")
             if self._run_metrics:
                 self._run_metrics.start_phase("synthesis")
-            insights_data = await self._run_synthesis(
+            insights_data, synthesis_raw_response = await self._run_synthesis(
                 analyst_reports=analyst_reports,
                 macro_context=macro_result,
                 sector_context=sector_result,
@@ -1692,7 +1888,9 @@ class AutonomousDeepEngine:
 
             async with async_session_factory() as session:
                 saved_insights = await self._store_insights(
-                    session, insights_data, macro_result, sector_result, candidates
+                    session, insights_data, macro_result, sector_result, candidates,
+                    analyst_reports=analyst_reports,
+                    synthesis_raw_response=synthesis_raw_response,
                 )
                 result.insights = saved_insights
 
@@ -2174,7 +2372,7 @@ class AutonomousDeepEngine:
         candidates: OpportunityList,
         max_insights: int,
         portfolio_holdings: dict[str, dict[str, float]] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], str]:
         """Run Phase 5: Synthesis Lead (legacy pipeline).
 
         Args:
@@ -2186,16 +2384,17 @@ class AutonomousDeepEngine:
             portfolio_holdings: Optional dict of user portfolio holdings.
 
         Returns:
-            List of insight dictionaries.
+            Tuple of (list of insight dictionaries, raw LLM response).
         """
         # Build enhanced synthesis context
         async with async_session_factory() as session:
             memory_service = InstitutionalMemoryService(session)
 
             # Get patterns and track record
+            current_conditions = self._extract_conditions_from_analyst_reports(analyst_reports)
             patterns = await memory_service.get_relevant_patterns(
                 symbols=[c.symbol for c in candidates.candidates[:10]],
-                current_conditions={},
+                current_conditions=current_conditions,
             )
             track_record = await memory_service.get_insight_track_record()
 
@@ -2232,7 +2431,38 @@ class AutonomousDeepEngine:
         # Query LLM
         response = await self._query_llm(enhanced_prompt, full_context, "synthesis", "synthesis")
 
-        return parse_synthesis_response(response)
+        try:
+            insights = parse_synthesis_response(response)
+        except Exception as parse_err:
+            logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:500]}")
+            insights = []
+
+        # Adjust confidence based on historical track record
+        try:
+            async with async_session_factory() as adj_session:
+                memory_service_adj = InstitutionalMemoryService(adj_session)
+                adjuster = ConfidenceAdjuster(adj_session, memory_service_adj)
+                for insight_dict in insights:
+                    try:
+                        result = await adjuster.adjust_confidence(
+                            base_confidence=float(insight_dict.get("confidence", 0.5)),
+                            insight_type=insight_dict.get("insight_type", "opportunity"),
+                            action_type=insight_dict.get("action", "HOLD"),
+                            symbols=[insight_dict["primary_symbol"]] if insight_dict.get("primary_symbol") else None,
+                        )
+                        old_conf = insight_dict.get("confidence", 0.5)
+                        insight_dict["confidence"] = result["adjusted_confidence"]
+                        if result["adjusted_confidence"] != old_conf:
+                            logger.info(
+                                f"[AUTO] Confidence adjusted for {insight_dict.get('primary_symbol')}: "
+                                f"{old_conf:.2f} -> {result['adjusted_confidence']:.2f}"
+                            )
+                    except Exception as adj_err:
+                        logger.warning(f"[AUTO] Confidence adjustment failed: {adj_err}")
+        except Exception as e:
+            logger.warning(f"[AUTO] Confidence adjustment phase failed: {e}")
+
+        return insights, response
 
     def _build_autonomous_synthesis_context(
         self,
@@ -2296,6 +2526,59 @@ class AutonomousDeepEngine:
 
         return "\n".join(lines)
 
+    def _extract_conditions_from_analyst_reports(
+        self,
+        analyst_reports: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Extract current market conditions from analyst reports for pattern matching.
+
+        Pulls measurable indicators like RSI, VIX, and volume data from
+        the per-symbol analyst reports to enable pattern matching.
+
+        Args:
+            analyst_reports: Dictionary mapping symbols to their analyst report dicts.
+
+        Returns:
+            Dictionary of current conditions (rsi, vix, volume_surge_pct, etc.).
+        """
+        conditions: dict[str, Any] = {}
+
+        for symbol, reports in analyst_reports.items():
+            if not isinstance(reports, dict):
+                continue
+
+            # Extract RSI from technical report
+            tech = reports.get("technical", {})
+            if isinstance(tech, dict) and "error" not in tech:
+                findings = tech.get("findings", [])
+                for finding in findings if isinstance(findings, list) else []:
+                    if isinstance(finding, dict):
+                        rsi = finding.get("rsi")
+                        if rsi is not None and "rsi" not in conditions:
+                            conditions["rsi"] = rsi
+
+            # Extract VIX from risk report
+            risk = reports.get("risk", {})
+            if isinstance(risk, dict) and "error" not in risk:
+                vol_regime = risk.get("volatility_regime", {})
+                if isinstance(vol_regime, dict):
+                    vix = vol_regime.get("vix") or vol_regime.get("current_vix")
+                    if vix is not None and "vix" not in conditions:
+                        conditions["vix"] = vix
+
+            # Extract volume data from technical report
+            if isinstance(tech, dict) and "error" not in tech:
+                for finding in tech.get("findings", []) if isinstance(tech.get("findings"), list) else []:
+                    if isinstance(finding, dict):
+                        vol = finding.get("volume_surge_pct") or finding.get("volume_ratio")
+                        if vol is not None and "volume_surge_pct" not in conditions:
+                            conditions["volume_surge_pct"] = vol
+
+        if conditions:
+            logger.info(f"[AUTO] Extracted conditions from analyst reports: {conditions}")
+
+        return conditions
+
     def _flatten_analyst_reports(
         self,
         analyst_reports: dict[str, dict[str, Any]],
@@ -2352,6 +2635,8 @@ class AutonomousDeepEngine:
         macro_result: MacroScanResult,
         sector_result: SectorRotationResult,
         candidates: OpportunityList,
+        analyst_reports: dict[str, dict[str, Any]] | None = None,
+        synthesis_raw_response: str | None = None,
     ) -> list[DeepInsight]:
         """Store insights in database (legacy pipeline).
 
@@ -2361,6 +2646,8 @@ class AutonomousDeepEngine:
             macro_result: Macro scan results for context.
             sector_result: Sector rotation results for context.
             candidates: Opportunity candidates for context.
+            analyst_reports: Per-symbol analyst reports for research context.
+            synthesis_raw_response: Raw LLM synthesis response text.
 
         Returns:
             List of created DeepInsight objects.
@@ -2413,6 +2700,25 @@ class AutonomousDeepEngine:
                 )
 
                 session.add(insight)
+
+                # Create and attach research context
+                if analyst_reports:
+                    try:
+                        research_ctx = self._create_research_context(
+                            insight=insight,
+                            analyst_reports=analyst_reports,
+                            macro_result=macro_result,
+                            synthesis_raw_response=synthesis_raw_response,
+                            total_insights_count=len(insights_data),
+                            sector_result=sector_result,
+                        )
+                        session.add(research_ctx)
+                    except Exception as rc_err:
+                        logger.warning(
+                            f"[AUTO] Research context creation failed for "
+                            f"{data.get('primary_symbol')}: {rc_err}"
+                        )
+
                 stored.append(insight)
 
             except Exception as e:

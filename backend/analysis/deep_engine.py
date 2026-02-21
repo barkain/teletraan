@@ -48,15 +48,18 @@ from analysis.agents.risk_analyst import (
     parse_risk_response,
 )
 from analysis.agents.synthesis_lead import (
-    SYNTHESIS_LEAD_PROMPT,
     format_synthesis_context,
     parse_synthesis_response,
+    format_synthesis_prompt_with_context,
+    build_pattern_context,
+    build_track_record_context,
 )
 from analysis.context_builder import market_context_builder
 from analysis.statistical_calculator import StatisticalFeatureCalculator
 from analysis.memory_service import InstitutionalMemoryService
 from analysis.outcome_tracker import InsightOutcomeTracker
 from analysis.pattern_extractor import PatternExtractor
+from analysis.confidence_adjuster import ConfidenceAdjuster
 
 logger = logging.getLogger(__name__)
 
@@ -412,8 +415,27 @@ class DeepAnalysisEngine:
         synthesis_context = format_synthesis_context(analyst_reports)
         logger.info(f"[DEEP] Synthesis context length: {len(synthesis_context)} chars")
 
-        # Query LLM
-        response_text = await self._query_llm(SYNTHESIS_LEAD_PROMPT, synthesis_context, "synthesis")
+        # Build enhanced synthesis prompt with institutional memory
+        try:
+            async with async_session_factory() as mem_session:
+                memory_service = InstitutionalMemoryService(mem_session)
+                patterns = await memory_service.get_relevant_patterns(
+                    symbols=[k for k in analyst_reports.keys() if k not in ("error",)][:10],
+                    current_conditions=self._extract_conditions_from_reports(analyst_reports),
+                )
+                track_record = await memory_service.get_insight_track_record()
+
+            pattern_context_str = build_pattern_context(patterns)
+            track_record_str = build_track_record_context(track_record)
+            enhanced_prompt = format_synthesis_prompt_with_context(
+                pattern_context=pattern_context_str,
+                track_record_context=track_record_str,
+            )
+        except Exception as e:
+            logger.warning(f"[DEEP] Failed to build enhanced synthesis prompt: {e}")
+            enhanced_prompt = format_synthesis_prompt_with_context()
+
+        response_text = await self._query_llm(enhanced_prompt, synthesis_context, "synthesis")
         logger.info(f"[DEEP] Synthesis response length: {len(response_text)} chars")
         logger.info(f"[DEEP] Synthesis response preview: {response_text[:500]}")
 
@@ -491,8 +513,31 @@ class DeepAnalysisEngine:
                     continue
 
             if stored:
-                await session.commit()
+                await session.flush()
                 logger.info(f"Successfully stored {len(stored)} DeepInsight records")
+
+                # Adjust confidence based on historical track record
+                try:
+                    memory_service = InstitutionalMemoryService(session)
+                    adjuster = ConfidenceAdjuster(session, memory_service)
+                    for insight in stored:
+                        try:
+                            result = await adjuster.adjust_confidence(
+                                base_confidence=insight.confidence,
+                                insight_type=insight.insight_type or "opportunity",
+                                action_type=insight.action or "HOLD",
+                                symbols=[insight.primary_symbol] if insight.primary_symbol else None,
+                            )
+                            if result["adjusted_confidence"] != insight.confidence:
+                                insight.confidence = result["adjusted_confidence"]
+                                logger.info(
+                                    f"[DEEP] Confidence adjusted for {insight.primary_symbol}: "
+                                    f"{result['base_confidence']:.2f} -> {result['adjusted_confidence']:.2f}"
+                                )
+                        except Exception as adj_err:
+                            logger.warning(f"[DEEP] Confidence adjustment failed for {insight.primary_symbol}: {adj_err}")
+                except Exception as e:
+                    logger.warning(f"[DEEP] Confidence adjustment phase failed: {e}")
 
                 # Extract patterns from each stored insight
                 try:
@@ -718,6 +763,51 @@ class DeepAnalysisEngine:
                         data_points.append(f"RSI:{symbol}={rsi:.1f}")
 
         return data_points[:20]  # Limit to 20 data points
+
+    def _extract_conditions_from_reports(
+        self,
+        analyst_reports: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Extract current market conditions from analyst reports for pattern matching.
+
+        Args:
+            analyst_reports: Dictionary mapping analyst names to their reports.
+
+        Returns:
+            Dictionary of current conditions (rsi, vix, volume_surge, etc.).
+        """
+        conditions: dict[str, Any] = {}
+
+        # Extract RSI from technical report
+        tech_report = analyst_reports.get("technical", {})
+        if tech_report and "error" not in tech_report:
+            findings = tech_report.get("findings", [])
+            for finding in findings:
+                if isinstance(finding, dict):
+                    rsi = finding.get("rsi")
+                    if rsi is not None:
+                        conditions["rsi"] = rsi
+                        break
+
+        # Extract VIX from risk report
+        risk_report = analyst_reports.get("risk", {})
+        if risk_report and "error" not in risk_report:
+            vol_regime = risk_report.get("volatility_regime", {})
+            if isinstance(vol_regime, dict):
+                vix = vol_regime.get("vix") or vol_regime.get("current_vix")
+                if vix is not None:
+                    conditions["vix"] = vix
+
+        # Extract volume surge from technical report
+        if tech_report and "error" not in tech_report:
+            for finding in tech_report.get("findings", []):
+                if isinstance(finding, dict):
+                    volume = finding.get("volume_surge_pct") or finding.get("volume_ratio")
+                    if volume is not None:
+                        conditions["volume_surge_pct"] = volume
+                        break
+
+        return conditions
 
     @property
     def last_analysis_time(self) -> datetime | None:

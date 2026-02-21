@@ -209,6 +209,13 @@ class InsightResearchContext(TimestampMixin, Base):
         default=None,
     )
 
+    # IDs of KnowledgePattern records extracted from this insight's analysis
+    identified_pattern_ids: Mapped[list[int] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=list,
+    )
+
     # =========================================================================
     # INDEXES
     # =========================================================================
@@ -269,6 +276,7 @@ class InsightResearchContext(TimestampMixin, Base):
             "analysis_duration_seconds": self.analysis_duration_seconds,
             "successful_analysts": self.successful_analysts,
             "analyst_errors": self.analyst_errors,
+            "identified_pattern_ids": self.identified_pattern_ids,
             # Timestamps
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -284,4 +292,5 @@ class InsightResearchContext(TimestampMixin, Base):
             "synthesis_summary": self.synthesis_summary,
             "estimated_token_count": self.estimated_token_count,
             "successful_analysts": self.successful_analysts,
+            "identified_pattern_ids": self.identified_pattern_ids,
         }

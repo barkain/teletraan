@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from llm.client_pool import pool_query_llm
 
+from models.insight_research_context import InsightResearchContext
 from models.knowledge_pattern import KnowledgePattern, PatternType
 
 
@@ -291,6 +292,29 @@ class PatternExtractor:
             )
 
             logger.info(f"Created pattern from insight: {pattern.pattern_name}")
+
+            # Link pattern ID back to insight's research context
+            try:
+                if source_insight_id and pattern.id:
+                    # Find research context for this insight
+                    rc_query = select(InsightResearchContext).where(
+                        InsightResearchContext.deep_insight_id == source_insight_id
+                    )
+                    rc_result = await self.db.execute(rc_query)
+                    research_context = rc_result.scalar_one_or_none()
+
+                    if research_context:
+                        existing_ids = list(research_context.identified_pattern_ids or [])
+                        if pattern.id not in existing_ids:
+                            existing_ids.append(pattern.id)
+                            research_context.identified_pattern_ids = existing_ids
+                            await self.db.flush()
+                            logger.info(
+                                f"Linked pattern {pattern.id} to insight {source_insight_id} research context"
+                            )
+            except Exception as link_err:
+                logger.warning(f"Failed to link pattern to research context: {link_err}")
+
             return pattern
 
         except Exception as e:
