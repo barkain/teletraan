@@ -8,7 +8,6 @@ the tracking period ends.
 import logging
 from datetime import date, timedelta
 from typing import Any
-from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -274,21 +273,13 @@ class InsightOutcomeTracker:
 
             # Check if research context has pattern references
             research_context = insight.research_context
-            if not hasattr(research_context, "identified_patterns"):
+
+            # Read pattern IDs from the new identified_pattern_ids field
+            pattern_ids = research_context.identified_pattern_ids
+            if not pattern_ids:
                 continue
 
-            pattern_refs = getattr(research_context, "identified_patterns", [])
-            if not pattern_refs:
-                continue
-
-            for pattern_ref in pattern_refs:
-                # Extract pattern ID from reference (could be UUID or dict)
-                pattern_id = None
-                if isinstance(pattern_ref, dict):
-                    pattern_id = pattern_ref.get("pattern_id")
-                elif isinstance(pattern_ref, (str, UUID)):
-                    pattern_id = pattern_ref
-
+            for pattern_id in pattern_ids:
                 if not pattern_id:
                     continue
 
