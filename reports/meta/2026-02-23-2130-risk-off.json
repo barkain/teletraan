@@ -1,0 +1,39 @@
+{
+  "filename": "2026-02-23-2130-risk-off.html",
+  "task_id": "cde028f9-4076-4341-a094-4d9f707f3883",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Risk-Off\n\n**Key Macro Themes:**\n- Growth-to-Defensive Rotation & Rate Uncertainty: Sharp treasury yield decline combined with defensive sector outperformance signals investors rotatin...\n- Energy & Commodity Reflation Trade: Energy leading all sectors with +12.05% gain alongside crude oil rallying +9.48% and gold +3.36%. Th...\n- Technology Sector Correction & AI Reassessment: Technology sector down -5.15% leading market lower, with Nasdaq suffering -4.13% decline. Communicat...\n\n**Heatmap Analysis:** The market is exhibiting a classic risk-off defensive rotation with stark sector bifurcation. Defensive sectors (Consumer Staples +1.23%, Healthcare +1.10%, Utilities +0.76%) are sharply outperforming cyclicals and growth, while Financials (-3.35%), Consumer Discretionary (-2.09%), and Technology (-1.68%) face heavy selling pressure. The uniform 50% breadth across all sectors suggests a bifurcated stock-picking environment rather than broad directional moves.\n\n**Sectors Scanned:**\n- Technology: -1.7% (1D), breadth 50%\n- Financials: -3.4% (1D), breadth 50%\n- Energy: +0.5% (1D), breadth 50%\n- Healthcare: +1.1% (1D), breadth 50%\n- Industrials: -1.4% (1D), breadth 50%\n- Consumer Staples: +1.2% (1D), breadth 50%\n- Consumer Discretionary: -2.1% (1D), breadth 50%\n- Utilities: +0.8% (1D), breadth 50%\n- Communication Services: -1.2% (1D), breadth 50%\n- Real Estate: +0.1% (1D), breadth 50%\n- Materials: +0.0% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Defensive fortress: Consumer Staples, Healthcare, and Utilities forming a clear green cluster at the top of the heatmap, with Staples leading at +1.23% and showing the strongest 20-day momentum (+7.48%)\n- Financial sector capitulation: XLF down -3.35% on the day and -5.02% over 20 days, the worst-performing sector by far, while yields are falling (5Y -6.18%, 10Y -4.37%)\n- Commodity-linked sectors diverging: Energy (+0.49% today, +12.05% 20D) and Materials (flat today, +5.86% 20D) holding firm despite risk-off rotation, while oil is up +9.48% and gold +3.36%",
+  "top_sectors": [
+    "Energy +12.0%",
+    "Utilities +8.9%",
+    "Consumer Staples +7.5%",
+    "Industrials +6.4%",
+    "Consumer Discretionary -6.0%",
+    "Materials +5.9%"
+  ],
+  "insights_count": 5,
+  "symbols": [
+    "CAT",
+    "CL=F",
+    "LITE",
+    "MU",
+    "NVDA"
+  ],
+  "action_counts": {
+    "SELL": 1,
+    "STRONG_BUY": 1,
+    "BUY": 1,
+    "HOLD": 1,
+    "WATCH": 1
+  },
+  "avg_confidence": 0.7,
+  "insight_types": [
+    "opportunity",
+    "risk",
+    "rotation"
+  ],
+  "created_at": "2026-02-23T21:30:00",
+  "started_at": "2026-02-23T21:30:00.046145",
+  "completed_at": "2026-02-23T21:40:14.998399",
+  "elapsed_seconds": 614.950064
+}
