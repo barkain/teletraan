@@ -5,7 +5,7 @@ import uuid
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Date, Float, ForeignKey, Index, JSON, String, Text
+from sqlalchemy import Boolean, Date, Float, ForeignKey, Index, JSON, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,6 +33,9 @@ class TrackingStatus(str, enum.Enum):
     TRACKING = "TRACKING"  # Actively monitoring
     COMPLETED = "COMPLETED"  # Evaluation window closed
     INVALIDATED = "INVALIDATED"  # External factors made tracking invalid
+    STALE = "STALE"  # Insight has gone stale
+    RE_EVALUATING = "RE_EVALUATING"  # Under re-evaluation
+    EXPIRED = "EXPIRED"  # Time horizon exceeded
 
 
 class InsightOutcome(TimestampMixin, Base):
@@ -121,6 +124,33 @@ class InsightOutcome(TimestampMixin, Base):
         default=list,
         nullable=True,
     )  # Daily prices: [{"date": "2026-01-15", "price": 150.25}, ...]
+
+    # Intermediate tracking checkpoints
+    intermediate_checkpoints: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, default=dict,
+    )  # {"5d": {"price": 150.2, "return_pct": 2.1}, "10d": {...}, ...}
+
+    # Price-level trigger flags
+    entry_triggered: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, default=False,
+    )  # True when price enters entry_zone
+
+    target_triggered: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, default=False,
+    )  # True when price hits target
+
+    stop_triggered: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, default=False,
+    )  # True when price hits stop_loss
+
+    # Extrema tracking
+    max_favorable_move: Mapped[float | None] = mapped_column(
+        Float, nullable=True,
+    )  # Best return % seen during tracking
+
+    max_adverse_move: Mapped[float | None] = mapped_column(
+        Float, nullable=True,
+    )  # Worst return % seen during tracking
 
     # Relationship to DeepInsight
     deep_insight = relationship(

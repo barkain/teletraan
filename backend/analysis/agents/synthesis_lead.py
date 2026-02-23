@@ -342,6 +342,11 @@ Include a brief "Alternative Data Summary" in your synthesis noting the alignmen
 - Explain WHY this specific stock/commodity over alternatives in the same sector — reference specific catalysts, valuation metrics, or technical setups
 - Include commodity futures when macro analysis supports it — treat them as first-class recommendations, not afterthoughts
 
+## Upcoming Catalysts
+Consider these upcoming earnings and catalyst events when forming recommendations:
+
+{catalyst_context}
+
 ## Validated Historical Patterns
 When synthesizing, consider these historically validated patterns that may apply:
 
@@ -1172,20 +1177,31 @@ def build_track_record_context(track_record: dict[str, Any]) -> str:
 def format_synthesis_prompt_with_context(
     pattern_context: str | None = None,
     track_record_context: str | None = None,
+    catalyst_context: str | None = None,
 ) -> str:
-    """Format the synthesis lead prompt with pattern and track record context.
+    """Format the synthesis lead prompt with pattern, track record, and catalyst context.
 
     Substitutes the placeholders in SYNTHESIS_LEAD_PROMPT with actual
-    context from institutional memory.
+    context from institutional memory and catalyst data.
 
     Args:
         pattern_context: Formatted pattern context string, or None for default.
         track_record_context: Formatted track record string, or None for default.
+        catalyst_context: Formatted catalyst/earnings context string, or None for default.
 
     Returns:
         Complete synthesis prompt with context filled in.
     """
     prompt = SYNTHESIS_LEAD_PROMPT
+
+    # Replace catalyst context placeholder
+    if catalyst_context:
+        prompt = prompt.replace("{catalyst_context}", catalyst_context)
+    else:
+        prompt = prompt.replace(
+            "{catalyst_context}",
+            "No upcoming catalyst data available."
+        )
 
     # Replace pattern context placeholder
     if pattern_context:

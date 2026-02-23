@@ -709,6 +709,21 @@ class AutonomousDeepEngine:
         # ===== Load portfolio holdings (non-blocking) =====
         portfolio_holdings = await self._get_portfolio_holdings()
 
+        # ===== Compute Factor Scores from heatmap data =====
+        factor_scores: dict[str, Any] = {}
+        try:
+            from analysis.factor_model import get_factor_model  # type: ignore[import-not-found]
+
+            factor_model = get_factor_model()
+            heatmap_factor_data: dict[str, dict] = {}
+            for stock in heatmap_data.stocks:
+                heatmap_factor_data[stock.symbol] = stock.to_dict()
+            if heatmap_factor_data:
+                factor_scores = await factor_model.compute_factor_scores(heatmap_factor_data)
+                logger.info(f"[AUTO] Factor scores computed for {len(factor_scores)} symbols")
+        except Exception as e:
+            logger.warning(f"[AUTO] Factor model computation failed (non-fatal): {e}")
+
         # ===== PHASE 3: Heatmap Analysis =====
         logger.info("Phase 3: Analyzing heatmap patterns...")
         await self._update_task_progress(task_id, "heatmap_analysis", 35, "Analyzing heatmap patterns...")
@@ -778,7 +793,7 @@ class AutonomousDeepEngine:
 
         # Build discovery context using macro result and heatmap analysis
         discovery_context = self._build_heatmap_discovery_context(
-            macro_result, heatmap_analysis_result
+            macro_result, heatmap_analysis_result, factor_scores=factor_scores
         )
 
         # Run all symbols concurrently (semaphore gates actual LLM calls)
@@ -794,6 +809,33 @@ class AutonomousDeepEngine:
             include_rich_technical=True,
             include_fundamentals=True,
         )
+
+        # Compute correlation matrix from price history and append to discovery context
+        try:
+            from analysis.statistical_calculator import StatisticalFeatureCalculator  # type: ignore[import-not-found]
+            from analysis.agents.correlation_detective import format_correlation_matrix_context  # type: ignore[import-not-found]
+
+            price_history = pre_context.get("price_history", {})
+            if price_history and len(price_history) >= 2:
+                import pandas as pd  # type: ignore[import-untyped]
+
+                # Convert price_history dicts to DataFrames with 'close' column
+                price_dfs: dict[str, Any] = {}
+                for sym, prices in price_history.items():
+                    if prices and len(prices) >= 5:
+                        closes = [p.get("close", 0) for p in prices if p.get("close")]
+                        if len(closes) >= 5:
+                            price_dfs[sym] = pd.DataFrame({"close": closes})
+
+                if len(price_dfs) >= 2:
+                    async with async_session_factory() as corr_session:
+                        calc = StatisticalFeatureCalculator(corr_session)
+                        corr_result = await calc.compute_correlation_matrix(price_dfs)
+                    corr_context = format_correlation_matrix_context(corr_result=corr_result)
+                    discovery_context += f"\n\n{corr_context}"
+                    logger.info(f"[AUTO] Correlation matrix computed for {len(price_dfs)} symbols")
+        except Exception as corr_err:
+            logger.warning(f"[AUTO] Correlation matrix computation failed (non-fatal): {corr_err}")
 
         async def _analyze_symbol(sym: str) -> tuple[str, dict[str, Any]]:
             reports = await self._run_analysts_for_symbol(sym, discovery_context, pre_built_context=pre_context)
@@ -1103,12 +1145,14 @@ class AutonomousDeepEngine:
         self,
         macro_result: MacroScanResult,
         heatmap_analysis: HeatmapAnalysis,
+        factor_scores: dict[str, Any] | None = None,
     ) -> str:
         """Build discovery context for deep dive analysts using heatmap data.
 
         Args:
             macro_result: Results from macro scan.
             heatmap_analysis: Results from heatmap analysis.
+            factor_scores: Optional dict of symbol -> FactorScore from factor model.
 
         Returns:
             Formatted discovery context string.
@@ -1137,6 +1181,21 @@ class AutonomousDeepEngine:
             lines.append(f"- {pattern.description}")
             if pattern.implication:
                 lines.append(f"  Implication: {pattern.implication}")
+
+        # Append factor score summary if available
+        if factor_scores:
+            lines.extend(["", "### Factor Model Scores (Top 10 by Composite):"])
+            sorted_scores = sorted(
+                factor_scores.values(),
+                key=lambda fs: getattr(fs, "composite_score", 0),
+                reverse=True,
+            )
+            for fs in sorted_scores[:10]:
+                lines.append(
+                    f"- {fs.symbol}: Composite={fs.composite_score:.1f} "
+                    f"(Mom={fs.momentum_score:.0f} Vol={fs.volatility_score:.0f} "
+                    f"Tech={fs.technical_score:.0f})"
+                )
 
         lines.extend([
             "",
@@ -1182,10 +1241,25 @@ class AutonomousDeepEngine:
         pattern_context_str = build_pattern_context(patterns)
         track_record_str = build_track_record_context(track_record)
 
+        # Fetch catalyst/earnings context for analyzed symbols
+        catalyst_context_str: str | None = None
+        try:
+            from analysis.catalyst_tracker import get_catalyst_tracker  # type: ignore[import-not-found]
+
+            catalyst_tracker = get_catalyst_tracker()
+            catalyst_context_str = await catalyst_tracker.build_catalyst_context(
+                symbols, days_ahead=30
+            )
+            if catalyst_context_str:
+                logger.info(f"[AUTO] Catalyst context built for {len(symbols)} symbols")
+        except Exception as cat_err:
+            logger.warning(f"[AUTO] Catalyst context fetch failed (non-fatal): {cat_err}")
+
         # Build enhanced synthesis prompt
         enhanced_prompt = format_synthesis_prompt_with_context(
             pattern_context=pattern_context_str,
             track_record_context=track_record_str,
+            catalyst_context=catalyst_context_str,
         )
 
         # Build heatmap-enriched autonomous context
@@ -2116,11 +2190,28 @@ class AutonomousDeepEngine:
         # Build sector context dict
         sector_context_dict = sector_result.to_dict()
 
+        # Fetch catalyst context for opportunity screening
+        opp_catalyst_ctx: str | None = None
+        try:
+            from analysis.catalyst_tracker import get_catalyst_tracker  # type: ignore[import-not-found]
+
+            catalyst_tracker = get_catalyst_tracker()
+            opp_symbols = [c.get("symbol", "") for c in screened_candidates[:20] if c.get("symbol")]
+            if opp_symbols:
+                opp_catalyst_ctx = await catalyst_tracker.build_catalyst_context(
+                    opp_symbols, days_ahead=14
+                )
+                if opp_catalyst_ctx:
+                    logger.info(f"[AUTO] Catalyst context for opportunity hunt: {len(opp_symbols)} symbols")
+        except Exception as cat_err:
+            logger.warning(f"[AUTO] Opportunity catalyst fetch failed (non-fatal): {cat_err}")
+
         # Format context for LLM
         formatted_context = format_opportunity_context(
             macro_context_dict,
             sector_context_dict,
             screened_candidates,
+            catalyst_context=opp_catalyst_ctx,
         )
 
         # Query LLM
@@ -2401,10 +2492,26 @@ class AutonomousDeepEngine:
         pattern_context_str = build_pattern_context(patterns)
         track_record_str = build_track_record_context(track_record)
 
+        # Fetch catalyst/earnings context for legacy pipeline symbols
+        legacy_catalyst_str: str | None = None
+        try:
+            from analysis.catalyst_tracker import get_catalyst_tracker  # type: ignore[import-not-found]
+
+            catalyst_tracker = get_catalyst_tracker()
+            legacy_symbols = [c.symbol for c in candidates.candidates[:10]]
+            legacy_catalyst_str = await catalyst_tracker.build_catalyst_context(
+                legacy_symbols, days_ahead=30
+            )
+            if legacy_catalyst_str:
+                logger.info(f"[AUTO] Legacy catalyst context built for {len(legacy_symbols)} symbols")
+        except Exception as cat_err:
+            logger.warning(f"[AUTO] Legacy catalyst context fetch failed (non-fatal): {cat_err}")
+
         # Build enhanced synthesis prompt
         enhanced_prompt = format_synthesis_prompt_with_context(
             pattern_context=pattern_context_str,
             track_record_context=track_record_str,
+            catalyst_context=legacy_catalyst_str,
         )
 
         # Add autonomous context to synthesis

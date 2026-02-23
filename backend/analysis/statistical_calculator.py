@@ -2,11 +2,13 @@
 
 This module provides a StatisticalFeatureCalculator class that computes
 various statistical features for market symbols including momentum,
-mean-reversion, volatility, seasonality, and cross-sectional metrics.
+mean-reversion, volatility, seasonality, cross-sectional metrics,
+and pairwise correlation matrices.
 """
 
 import logging
-from datetime import date as date_type
+from dataclasses import dataclass, field
+from datetime import date as date_type, datetime
 
 import numpy as np
 import pandas as pd
@@ -18,6 +20,71 @@ from models.stock import Stock
 from models.price import PriceHistory
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Correlation data classes
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CorrelationResult:
+    """Pairwise correlation matrix with helper accessors."""
+
+    matrix: pd.DataFrame  # symbol x symbol correlation matrix
+    period_days: int
+    method: str
+    computed_at: datetime = field(default_factory=datetime.utcnow)
+
+    def get_pair(self, sym1: str, sym2: str) -> float | None:
+        """Get correlation between two symbols."""
+        if sym1 in self.matrix.index and sym2 in self.matrix.columns:
+            val = self.matrix.loc[sym1, sym2]
+            return float(val) if not pd.isna(val) else None
+        return None
+
+    def get_most_correlated(self, symbol: str, top_n: int = 5) -> list[tuple[str, float]]:
+        """Get top N most correlated symbols (excluding self)."""
+        if symbol not in self.matrix.index:
+            return []
+        row = self.matrix.loc[symbol].drop(symbol, errors="ignore").dropna()
+        return list(row.sort_values(ascending=False).head(top_n).items())
+
+    def get_least_correlated(self, symbol: str, top_n: int = 5) -> list[tuple[str, float]]:
+        """Get top N least correlated symbols (best diversifiers)."""
+        if symbol not in self.matrix.index:
+            return []
+        row = self.matrix.loc[symbol].drop(symbol, errors="ignore").dropna()
+        return list(row.sort_values(ascending=True).head(top_n).items())
+
+
+@dataclass
+class CrossAssetCorrelation:
+    """Stock-to-macro instrument correlations with regime label."""
+
+    stock_macro_corr: dict[str, dict[str, float]]  # {stock: {macro_sym: corr}}
+    regime_label: str  # "risk-on", "risk-off", "mixed"
+
+
+@dataclass
+class CorrelationShift:
+    """Detected regime change between a symbol pair."""
+
+    symbol_pair: tuple[str, str]
+    short_corr: float  # recent window
+    long_corr: float   # historical window
+    delta: float        # short - long
+    significance: str   # "converging", "diverging", "stable"
+
+
+@dataclass
+class CorrelationAnomaly:
+    """Unusual correlation observation."""
+
+    symbol1: str
+    symbol2: str
+    correlation: float
+    anomaly_type: str  # "unusually_high", "unusually_low", "regime_break"
+    context: str       # human-readable explanation
 
 
 class StatisticalFeatureCalculator:
@@ -745,6 +812,237 @@ class StatisticalFeatureCalculator:
         }
 
         return pd.DataFrame(data)
+
+    # ------------------------------------------------------------------
+    # Correlation computation methods
+    # ------------------------------------------------------------------
+
+    async def compute_correlation_matrix(
+        self,
+        price_data: dict[str, pd.DataFrame],
+        window: int = 60,
+        method: str = "pearson",
+    ) -> CorrelationResult:
+        """Compute pairwise correlation matrix from price data.
+
+        Args:
+            price_data: Dict of symbol -> DataFrame with 'close' column.
+            window: Rolling window in trading days (default 60 ~ 3 months).
+            method: 'pearson' or 'spearman'.
+
+        Returns:
+            CorrelationResult with the NxN correlation matrix.
+        """
+        returns_dict: dict[str, pd.Series] = {}
+        for symbol, df in price_data.items():
+            if df is None or len(df) < 2:
+                continue
+            closes = df["close"] if isinstance(df["close"], pd.Series) else pd.Series(df["close"].values)
+            # Daily log returns
+            log_ret = np.log(closes / closes.shift(1)).dropna()
+            # Trim to window
+            if len(log_ret) > window:
+                log_ret = log_ret.tail(window)
+            returns_dict[symbol] = log_ret.reset_index(drop=True)
+
+        if len(returns_dict) < 2:
+            # Return empty matrix
+            symbols = list(returns_dict.keys()) or list(price_data.keys())
+            empty = pd.DataFrame(np.nan, index=symbols, columns=symbols)
+            return CorrelationResult(matrix=empty, period_days=window, method=method)
+
+        returns_df = pd.DataFrame(returns_dict)
+        corr_matrix = returns_df.corr(method=method)
+
+        return CorrelationResult(
+            matrix=corr_matrix,
+            period_days=window,
+            method=method,
+        )
+
+    async def compute_cross_asset_correlations(
+        self,
+        stock_prices: dict[str, pd.DataFrame],
+        macro_prices: dict[str, pd.DataFrame],
+        window: int = 60,
+    ) -> CrossAssetCorrelation:
+        """Compute correlations between stocks and macro instruments.
+
+        Args:
+            stock_prices: Dict of stock symbol -> OHLCV DataFrame.
+            macro_prices: Dict of macro symbol (SPY, TLT, GLD, DXY, VIX) -> OHLCV DataFrame.
+            window: Rolling window in trading days.
+
+        Returns:
+            CrossAssetCorrelation with per-stock macro correlations and regime label.
+        """
+        # Build macro returns
+        macro_returns: dict[str, pd.Series] = {}
+        for sym, df in macro_prices.items():
+            if df is None or len(df) < 2:
+                continue
+            closes = df["close"] if isinstance(df["close"], pd.Series) else pd.Series(df["close"].values)
+            log_ret = np.log(closes / closes.shift(1)).dropna()
+            if len(log_ret) > window:
+                log_ret = log_ret.tail(window)
+            macro_returns[sym] = log_ret.reset_index(drop=True)
+
+        # Build stock returns
+        stock_returns: dict[str, pd.Series] = {}
+        for sym, df in stock_prices.items():
+            if df is None or len(df) < 2:
+                continue
+            closes = df["close"] if isinstance(df["close"], pd.Series) else pd.Series(df["close"].values)
+            log_ret = np.log(closes / closes.shift(1)).dropna()
+            if len(log_ret) > window:
+                log_ret = log_ret.tail(window)
+            stock_returns[sym] = log_ret.reset_index(drop=True)
+
+        stock_macro_corr: dict[str, dict[str, float]] = {}
+        spy_corrs: list[float] = []
+        tlt_corrs: list[float] = []
+
+        for stock_sym, s_ret in stock_returns.items():
+            stock_macro_corr[stock_sym] = {}
+            for macro_sym, m_ret in macro_returns.items():
+                min_len = min(len(s_ret), len(m_ret))
+                if min_len < 10:
+                    continue
+                corr_val = float(s_ret.tail(min_len).reset_index(drop=True).corr(
+                    m_ret.tail(min_len).reset_index(drop=True)
+                ))
+                if not np.isnan(corr_val):
+                    stock_macro_corr[stock_sym][macro_sym] = round(corr_val, 4)
+                    if macro_sym == "SPY":
+                        spy_corrs.append(corr_val)
+                    elif macro_sym == "TLT":
+                        tlt_corrs.append(corr_val)
+
+        # Determine regime
+        avg_spy = np.mean(spy_corrs) if spy_corrs else 0.0
+        avg_tlt = np.mean(tlt_corrs) if tlt_corrs else 0.0
+
+        if avg_spy > 0.5 and avg_tlt < 0:
+            regime = "risk-on"
+        elif avg_spy < 0.3 and avg_tlt > 0.1:
+            regime = "risk-off"
+        else:
+            regime = "mixed"
+
+        return CrossAssetCorrelation(
+            stock_macro_corr=stock_macro_corr,
+            regime_label=regime,
+        )
+
+    def detect_correlation_regime_changes(
+        self,
+        price_data: dict[str, pd.DataFrame],
+        short_window: int = 20,
+        long_window: int = 120,
+    ) -> list[CorrelationShift]:
+        """Detect significant correlation regime changes.
+
+        Compares short-window vs long-window correlations for all pairs.
+        A delta > 0.3 is considered significant.
+
+        Args:
+            price_data: Dict of symbol -> OHLCV DataFrame.
+            short_window: Recent window in trading days.
+            long_window: Historical window in trading days.
+
+        Returns:
+            List of CorrelationShift for pairs with significant changes.
+        """
+        returns_dict: dict[str, pd.Series] = {}
+        for symbol, df in price_data.items():
+            if df is None or len(df) < 2:
+                continue
+            closes = df["close"] if isinstance(df["close"], pd.Series) else pd.Series(df["close"].values)
+            log_ret = np.log(closes / closes.shift(1)).dropna()
+            returns_dict[symbol] = log_ret.reset_index(drop=True)
+
+        symbols = list(returns_dict.keys())
+        shifts: list[CorrelationShift] = []
+
+        for i, sym_a in enumerate(symbols):
+            for sym_b in symbols[i + 1:]:
+                ret_a = returns_dict[sym_a]
+                ret_b = returns_dict[sym_b]
+                min_len = min(len(ret_a), len(ret_b))
+
+                if min_len < long_window:
+                    continue
+
+                # Align tails
+                a_aligned = ret_a.tail(min_len).reset_index(drop=True)
+                b_aligned = ret_b.tail(min_len).reset_index(drop=True)
+
+                short_corr = float(a_aligned.tail(short_window).corr(b_aligned.tail(short_window)))
+                long_corr = float(a_aligned.tail(long_window).corr(b_aligned.tail(long_window)))
+
+                if np.isnan(short_corr) or np.isnan(long_corr):
+                    continue
+
+                delta = short_corr - long_corr
+
+                if abs(delta) >= 0.3:
+                    significance = "converging" if delta > 0 else "diverging"
+                else:
+                    significance = "stable"
+
+                if significance != "stable":
+                    shifts.append(CorrelationShift(
+                        symbol_pair=(sym_a, sym_b),
+                        short_corr=round(short_corr, 4),
+                        long_corr=round(long_corr, 4),
+                        delta=round(delta, 4),
+                        significance=significance,
+                    ))
+
+        return shifts
+
+    def find_unusual_correlations(
+        self,
+        corr_matrix: pd.DataFrame,
+        threshold: float = 0.7,
+    ) -> list[CorrelationAnomaly]:
+        """Find pairs with unusually high/low correlations.
+
+        Args:
+            corr_matrix: Symbol x symbol correlation DataFrame.
+            threshold: Absolute correlation above this is flagged as unusual.
+
+        Returns:
+            List of CorrelationAnomaly for notable pairs.
+        """
+        anomalies: list[CorrelationAnomaly] = []
+        symbols = list(corr_matrix.index)
+
+        for i, sym_a in enumerate(symbols):
+            for sym_b in symbols[i + 1:]:
+                val = corr_matrix.loc[sym_a, sym_b]
+                if pd.isna(val):
+                    continue
+                corr_val = float(val)
+
+                if corr_val >= threshold:
+                    anomalies.append(CorrelationAnomaly(
+                        symbol1=sym_a,
+                        symbol2=sym_b,
+                        correlation=round(corr_val, 4),
+                        anomaly_type="unusually_high",
+                        context=f"{sym_a}/{sym_b} correlation {corr_val:.2f} exceeds {threshold} threshold",
+                    ))
+                elif corr_val <= -threshold:
+                    anomalies.append(CorrelationAnomaly(
+                        symbol1=sym_a,
+                        symbol2=sym_b,
+                        correlation=round(corr_val, 4),
+                        anomaly_type="unusually_low",
+                        context=f"{sym_a}/{sym_b} negative correlation {corr_val:.2f} exceeds -{threshold} threshold",
+                    ))
+
+        return anomalies
 
     async def _save_features(
         self,

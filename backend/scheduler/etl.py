@@ -8,24 +8,24 @@ import logging
 from datetime import date, timedelta
 from typing import Any
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-not-found]
+from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-not-found]
+from sqlalchemy import select  # type: ignore[import-not-found]
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert  # type: ignore[import-not-found]
+from sqlalchemy.ext.asyncio import AsyncSession  # type: ignore[import-not-found]
 
-from database import async_session_factory
-from data.adapters.yahoo import yahoo_adapter
-from data.adapters.fred import fred_adapter
-from models.stock import Stock
-from models.price import PriceHistory
-from models.economic import EconomicIndicator
-from models.analysis_task import AnalysisTask, AnalysisTaskStatus
-from analysis.engine import AnalysisEngine
-from analysis.outcome_tracker import InsightOutcomeTracker
-from analysis.memory_service import InstitutionalMemoryService
-from analysis.statistical_calculator import StatisticalFeatureCalculator
-from config import get_settings
+from database import async_session_factory  # type: ignore[import-not-found]
+from data.adapters.yahoo import yahoo_adapter  # type: ignore[import-not-found]
+from data.adapters.fred import fred_adapter  # type: ignore[import-not-found]
+from models.stock import Stock  # type: ignore[import-not-found]
+from models.price import PriceHistory  # type: ignore[import-not-found]
+from models.economic import EconomicIndicator  # type: ignore[import-not-found]
+from models.analysis_task import AnalysisTask, AnalysisTaskStatus  # type: ignore[import-not-found]
+from analysis.engine import AnalysisEngine  # type: ignore[import-not-found]
+from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
+from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
+from analysis.statistical_calculator import StatisticalFeatureCalculator  # type: ignore[import-not-found]
+from config import get_settings  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
 
@@ -472,9 +472,9 @@ class ETLOrchestrator:
             try:
                 from datetime import datetime as _dt
 
-                from sqlalchemy import distinct as _distinct
+                from sqlalchemy import distinct as _distinct  # type: ignore[import-not-found]
 
-                from models.deep_insight import DeepInsight
+                from models.deep_insight import DeepInsight  # type: ignore[import-not-found]
 
                 cutoff = _dt.utcnow() - timedelta(days=30)
                 result = await session.execute(
@@ -509,6 +509,81 @@ class ETLOrchestrator:
                 "symbols": len(all_symbols),
             }
 
+    async def refresh_earnings_calendar(self) -> dict[str, Any]:
+        """Daily job to pre-cache earnings calendar data.
+
+        Fetches earnings calendar for all watchlist/portfolio symbols
+        and populates the TTL cache so that analysis pipelines have
+        fresh data available.
+
+        Returns:
+            Dict containing symbols_fetched and events_found counts.
+        """
+        from data.adapters.earnings import get_earnings_adapter  # type: ignore[import-not-found]
+
+        logger.info("Refreshing earnings calendar")
+
+        # Gather symbols from default watchlist + portfolio
+        all_symbols = list(self.DEFAULT_SYMBOLS)
+
+        try:
+            from models.portfolio import PortfolioHolding  # type: ignore[import-not-found]
+
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    select(PortfolioHolding.symbol).distinct()
+                )
+                portfolio_symbols = [row[0] for row in result.all() if row[0]]
+                all_symbols = list(set(all_symbols + portfolio_symbols))
+        except Exception as e:
+            logger.debug(f"Could not load portfolio symbols: {e}")
+
+        adapter = get_earnings_adapter()
+        try:
+            calendar = await adapter.get_earnings_calendar(all_symbols)
+            with_dates = sum(
+                1
+                for info in calendar.values()
+                if info.next_earnings_date is not None
+            )
+            logger.info(
+                f"Earnings calendar refreshed: {len(calendar)} symbols fetched, "
+                f"{with_dates} have upcoming earnings dates"
+            )
+            return {
+                "symbols_fetched": len(calendar),
+                "events_found": with_dates,
+            }
+        except Exception as e:
+            logger.warning(f"Earnings calendar refresh failed: {e}")
+            return {
+                "symbols_fetched": 0,
+                "events_found": 0,
+            }
+
+    async def check_insight_lifecycles(self) -> dict[str, Any]:
+        """Daily job to check insight lifecycle states and apply decay.
+
+        Evaluates all active insights for staleness, applies conviction
+        decay, and triggers state transitions when thresholds are exceeded.
+
+        Returns:
+            Dict containing insights_checked and transitions counts.
+        """
+        logger.info("Running insight lifecycle check job")
+
+        async with async_session_factory() as session:
+            tracker = InsightOutcomeTracker(session)
+            result = await tracker.check_lifecycle_states(session)
+
+            logger.info(
+                "Lifecycle check complete: %d insights checked, %d transitions",
+                result.get("insights_checked", 0),
+                len(result.get("transitions", [])),
+            )
+
+            return result
+
     async def run_scheduled_autonomous_analysis(self) -> None:
         """Scheduled job: run the autonomous analysis pipeline.
 
@@ -518,8 +593,8 @@ class ETLOrchestrator:
         """
         from uuid import uuid4
 
-        from analysis.autonomous_engine import get_autonomous_engine
-        from analysis.autonomous_runner import run_autonomous_analysis_pipeline
+        from analysis.autonomous_engine import get_autonomous_engine  # type: ignore[import-not-found]
+        from analysis.autonomous_runner import run_autonomous_analysis_pipeline  # type: ignore[import-not-found]
 
         settings = get_settings()
 
@@ -652,6 +727,30 @@ class ETLOrchestrator:
             replace_existing=True,
         )
 
+        # Daily earnings calendar refresh at 7:00 AM ET (before market open)
+        self.scheduler.add_job(
+            self.refresh_earnings_calendar,
+            CronTrigger(
+                day_of_week="mon-fri",
+                hour=7,
+                minute=0,
+                timezone="America/New_York",
+            ),
+            id="daily_earnings_refresh",
+            name="Daily earnings calendar refresh",
+            replace_existing=True,
+        )
+
+        # === Insight Lifecycle Jobs ===
+        self.scheduler.add_job(
+            self.check_insight_lifecycles,
+            CronTrigger(day_of_week="mon-fri", hour=8, minute=0,
+                        timezone="America/New_York"),
+            id="daily_lifecycle_check",
+            name="Daily insight lifecycle check",
+            replace_existing=True,
+        )
+
         # Scheduled autonomous analysis (opt-in, Mon-Fri after market close)
         settings = get_settings()
         if settings.SCHEDULED_ANALYSIS_ENABLED:
@@ -688,6 +787,8 @@ class ETLOrchestrator:
             "daily_outcome_check",
             "daily_theme_decay",
             "daily_feature_computation",
+            "daily_earnings_refresh",
+            "daily_lifecycle_check",
         ]
         if settings.SCHEDULED_ANALYSIS_ENABLED:
             job_names.append("scheduled_autonomous_analysis")

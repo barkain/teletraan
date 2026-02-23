@@ -414,13 +414,49 @@ class SectorHeatmapFetcher:
                 if avg_vol > 0:
                     volume_ratio = latest_vol / avg_vol
 
-            return {
+            # 60-day return (use full available history)
+            change_60d = None
+            if len(closes) >= 60:
+                prev_60d = float(closes.iloc[-60])
+                if prev_60d:
+                    change_60d = ((current / prev_60d) - 1) * 100
+
+            # 14-period RSI
+            rsi_14 = None
+            if len(closes) >= 15:
+                deltas = closes.diff().dropna()
+                recent = deltas.iloc[-14:]
+                gains = recent.clip(lower=0).mean()
+                losses = (-recent.clip(upper=0)).mean()
+                if losses > 0:
+                    rs = float(gains) / float(losses)
+                    rsi_14 = 100 - (100 / (1 + rs))
+                else:
+                    rsi_14 = 100.0
+
+            # 20-day annualized realized volatility
+            volatility_20d = None
+            if len(closes) >= 21:
+                log_returns = closes.pct_change().dropna().iloc[-20:]
+                if len(log_returns) >= 10:
+                    import math
+                    volatility_20d = float(log_returns.std()) * math.sqrt(252) * 100
+
+            result = {
                 "price": current,
                 "change_1d": change_1d,
                 "change_5d": change_5d,
                 "change_20d": change_20d,
                 "volume_ratio": volume_ratio,
             }
+            if change_60d is not None:
+                result["change_60d"] = change_60d
+            if rsi_14 is not None:
+                result["rsi_14"] = rsi_14
+            if volatility_20d is not None:
+                result["volatility_20d"] = volatility_20d
+
+            return result
         except Exception as e:
             logger.warning(f"Failed to compute metrics for {symbol}: {e}")
             return None

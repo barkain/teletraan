@@ -394,69 +394,91 @@ def get_all_screening_stocks_sync() -> list[str]:
     return list(set(all_stocks))
 
 
-def passes_technical_screen(data: dict[str, Any]) -> bool:
-    """Check if stock passes basic technical filters.
+def passes_technical_screen(
+    data: dict[str, Any],
+    factor_scores: dict[str, Any] | None = None,
+) -> bool:
+    """Check if stock passes basic technical filters and factor score threshold.
 
     Args:
         data: Stock data dictionary with avg_volume, price, return_20d
+        factor_scores: Optional dict mapping symbol -> FactorScore. When
+            provided, symbols with composite_score < 30 are filtered out.
 
     Returns:
         True if stock passes all filters.
     """
-    # Volume filter: Avg volume > 1M shares
-    if data.get("avg_volume", 0) < 1_000_000:
+    # Volume filter: Avg volume > 500K shares
+    if data.get("avg_volume", 0) < 500_000:
         return False
 
-    # Price filter: > $10 (avoid penny stocks)
-    if data.get("price", 0) < 10:
+    # Price filter: > $5 (avoid penny stocks)
+    if data.get("price", 0) < 5:
         return False
 
     # Severe downtrend filter: Not down more than 20% in 20 days
     if data.get("return_20d", 0) < -20:
         return False
 
+    # Factor score threshold
+    if factor_scores is not None:
+        symbol = data.get("symbol", "")
+        fs = factor_scores.get(symbol)
+        if fs is not None and hasattr(fs, "composite_score"):
+            if fs.composite_score < 30:
+                return False
+
     return True
 
 
-def calculate_screen_score(data: dict[str, Any]) -> float:
+def calculate_screen_score(
+    data: dict[str, Any],
+    factor_scores: dict[str, Any] | None = None,
+) -> float:
     """Calculate a screening score for ranking candidates.
 
-    Higher scores indicate more favorable technical characteristics.
+    When factor_scores are available, returns the composite factor score
+    (0-100). Otherwise falls back to the legacy heuristic scoring.
 
     Args:
         data: Stock data dictionary
+        factor_scores: Optional dict mapping symbol -> FactorScore from the
+            factor model. When present, the composite_score is used directly.
 
     Returns:
         Screening score (higher is better)
     """
+    # Use factor model composite score when available
+    if factor_scores is not None:
+        symbol = data.get("symbol", "")
+        fs = factor_scores.get(symbol)
+        if fs is not None and hasattr(fs, "composite_score"):
+            return float(fs.composite_score)
+
+    # Legacy heuristic fallback
     score = 0.0
 
-    # Volume factor: Higher relative volume is bullish
     volume_ratio = data.get("volume_ratio", 1.0)
     if volume_ratio > 1.5:
         score += 2.0
     elif volume_ratio > 1.2:
         score += 1.0
 
-    # Return factors
     return_5d = data.get("return_5d", 0)
     return_20d = data.get("return_20d", 0)
 
-    # Positive momentum (not extreme)
     if 0 < return_5d < 10:
         score += 1.5
     if 0 < return_20d < 20:
         score += 1.5
 
-    # Mean reversion opportunity (oversold)
     if -15 < return_20d < -5:
         score += 1.0
 
-    # RSI considerations if available
     rsi = data.get("rsi", 50)
-    if 30 < rsi < 70:  # Not at extremes
+    if 30 < rsi < 70:
         score += 0.5
-    elif rsi < 30:  # Oversold - potential opportunity
+    elif rsi < 30:
         score += 1.0
 
     return score
@@ -466,6 +488,8 @@ def format_opportunity_context(
     macro_context: dict[str, Any],
     sector_context: dict[str, Any],
     screened_candidates: list[dict[str, Any]],
+    factor_scores: dict[str, Any] | None = None,
+    catalyst_context: str | None = None,
 ) -> str:
     """Format context for the opportunity hunter agent.
 
@@ -473,6 +497,9 @@ def format_opportunity_context(
         macro_context: Macro analysis results from Phase 1
         sector_context: Sector analysis results from Phase 2
         screened_candidates: Pre-screened stock candidates with data
+        factor_scores: Optional dict mapping symbol -> FactorScore for
+            enriching candidate context with factor breakdowns.
+        catalyst_context: Optional formatted earnings/catalyst context string.
 
     Returns:
         Formatted string context for the opportunity hunter prompt.
@@ -556,8 +583,23 @@ def format_opportunity_context(
     context_parts.append("")
 
     # Create a table-like format for candidates
-    context_parts.append("| Symbol | Sector | Price | 5D Ret | 20D Ret | Vol Ratio | Screen Score |")
-    context_parts.append("|--------|--------|-------|--------|---------|-----------|--------------|")
+    has_factors = factor_scores is not None and len(factor_scores) > 0
+    if has_factors:
+        context_parts.append(
+            "| Symbol | Sector | Price | 5D Ret | 20D Ret | Vol Ratio "
+            "| Factor Score | Mom | Val | Qual | Vol | Tech |"
+        )
+        context_parts.append(
+            "|--------|--------|-------|--------|---------|----------"
+            "|--------------|-----|-----|------|-----|------|"
+        )
+    else:
+        context_parts.append(
+            "| Symbol | Sector | Price | 5D Ret | 20D Ret | Vol Ratio | Screen Score |"
+        )
+        context_parts.append(
+            "|--------|--------|-------|--------|---------|-----------|--------------|"
+        )
 
     for candidate in screened_candidates:
         symbol = candidate.get("symbol", "")
@@ -568,12 +610,32 @@ def format_opportunity_context(
         vol_ratio = candidate.get("volume_ratio", 1.0)
         score = candidate.get("screen_score", 0)
 
+        if has_factors and factor_scores is not None:
+            fs = factor_scores.get(symbol)
+            if fs is not None and hasattr(fs, "composite_score"):
+                context_parts.append(
+                    f"| {symbol} | {sector} | ${price:.2f} | {ret_5d:+.1f}% | "
+                    f"{ret_20d:+.1f}% | {vol_ratio:.2f}x "
+                    f"| {fs.composite_score:.1f} "
+                    f"| {fs.momentum_score:.0f} | {fs.value_score:.0f} "
+                    f"| {fs.quality_score:.0f} | {fs.volatility_score:.0f} "
+                    f"| {fs.technical_score:.0f} |"
+                )
+                continue
+
         context_parts.append(
             f"| {symbol} | {sector} | ${price:.2f} | {ret_5d:+.1f}% | "
             f"{ret_20d:+.1f}% | {vol_ratio:.2f}x | {score:.1f} |"
         )
 
     context_parts.append("")
+
+    # Append catalyst/earnings context if available
+    if catalyst_context:
+        context_parts.append("## Upcoming Catalysts & Earnings")
+        context_parts.append("")
+        context_parts.append(catalyst_context)
+        context_parts.append("")
 
     return "\n".join(context_parts)
 

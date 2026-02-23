@@ -643,6 +643,30 @@ async def get_active_analysis(
     )
 
 
+class LifecycleResponse(BaseModel):
+    """Lifecycle details for an insight."""
+    insight_id: int
+    lifecycle_state: str | None
+    staleness_score: float | None
+    conviction_decay_factor: float | None
+    effective_confidence: float | None
+    last_evaluated_at: str | None
+    entry_triggered: bool | None = None
+    target_triggered: bool | None = None
+    stop_triggered: bool | None = None
+    max_favorable_move: float | None = None
+    max_adverse_move: float | None = None
+    intermediate_checkpoints: dict | None = None
+
+
+class LifecycleSummaryResponse(BaseModel):
+    """Summary of all insights by lifecycle state."""
+    state_counts: dict[str, int]
+    avg_staleness: float
+    needs_attention: list[int]
+    total_active: int
+
+
 class CancelAnalysisResponse(BaseModel):
     """Response when cancelling an analysis."""
     task_id: str
@@ -750,4 +774,117 @@ async def get_recent_completed_analysis(
         elapsed_seconds=task.elapsed_seconds,
         started_at=task.started_at.isoformat() if task.started_at else None,
         completed_at=task.completed_at.isoformat() if task.completed_at else None,
+    )
+
+
+# ===== INSIGHT LIFECYCLE ENDPOINTS =====
+
+
+@router.get("/insights/{insight_id}/lifecycle", response_model=LifecycleResponse)
+async def get_insight_lifecycle(
+    insight_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get lifecycle details for an insight."""
+    result = await db.execute(
+        select(DeepInsight).where(DeepInsight.id == insight_id)
+    )
+    insight = result.scalar_one_or_none()
+    if not insight:
+        raise HTTPException(status_code=404, detail="Insight not found")
+
+    outcome = insight.outcome
+    return LifecycleResponse(
+        insight_id=insight.id,
+        lifecycle_state=insight.lifecycle_state,
+        staleness_score=insight.staleness_score,
+        conviction_decay_factor=insight.conviction_decay_factor,
+        effective_confidence=insight.effective_confidence,
+        last_evaluated_at=(
+            insight.last_evaluated_at.isoformat() if insight.last_evaluated_at else None
+        ),
+        entry_triggered=outcome.entry_triggered if outcome else None,
+        target_triggered=outcome.target_triggered if outcome else None,
+        stop_triggered=outcome.stop_triggered if outcome else None,
+        max_favorable_move=outcome.max_favorable_move if outcome else None,
+        max_adverse_move=outcome.max_adverse_move if outcome else None,
+        intermediate_checkpoints=outcome.intermediate_checkpoints if outcome else None,
+    )
+
+
+@router.post("/insights/{insight_id}/re-evaluate")
+async def trigger_re_evaluation(
+    insight_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark an insight for re-evaluation."""
+    result = await db.execute(
+        select(DeepInsight).where(DeepInsight.id == insight_id)
+    )
+    insight = result.scalar_one_or_none()
+    if not insight:
+        raise HTTPException(status_code=404, detail="Insight not found")
+
+    insight.lifecycle_state = "re_evaluating"
+    insight.last_evaluated_at = datetime.utcnow()
+    await db.commit()
+
+    return {"insight_id": insight_id, "lifecycle_state": "re_evaluating"}
+
+
+@router.post("/insights/{insight_id}/invalidate")
+async def invalidate_insight(
+    insight_id: int,
+    reason: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually invalidate an insight."""
+    result = await db.execute(
+        select(DeepInsight).where(DeepInsight.id == insight_id)
+    )
+    insight = result.scalar_one_or_none()
+    if not insight:
+        raise HTTPException(status_code=404, detail="Insight not found")
+
+    insight.lifecycle_state = "invalidated"
+    if insight.outcome:
+        insight.outcome.tracking_status = "INVALIDATED"
+    await db.commit()
+
+    return {"insight_id": insight_id, "lifecycle_state": "invalidated", "reason": reason}
+
+
+@router.get("/insights/lifecycle/summary", response_model=LifecycleSummaryResponse)
+async def get_lifecycle_summary(
+    db: AsyncSession = Depends(get_db),
+):
+    """Get summary of all insights by lifecycle state."""
+    result = await db.execute(select(DeepInsight))
+    insights = result.scalars().all()
+
+    state_counts: dict[str, int] = {}
+    staleness_values: list[float] = []
+    needs_attention: list[int] = []
+
+    for insight in insights:
+        state = insight.lifecycle_state or "active"
+        state_counts[state] = state_counts.get(state, 0) + 1
+
+        if insight.staleness_score is not None:
+            staleness_values.append(insight.staleness_score)
+
+        if state in ("stale", "re_evaluating") or (
+            insight.staleness_score is not None and insight.staleness_score >= 0.7
+        ):
+            needs_attention.append(insight.id)
+
+    avg_staleness = (
+        sum(staleness_values) / len(staleness_values) if staleness_values else 0.0
+    )
+
+    return LifecycleSummaryResponse(
+        state_counts=state_counts,
+        avg_staleness=round(avg_staleness, 4),
+        needs_attention=needs_attention,
+        total_active=state_counts.get("active", 0),
     )
