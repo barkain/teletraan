@@ -24,6 +24,26 @@ import yfinance as yf  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Non-equity symbol filter
+# ---------------------------------------------------------------------------
+# Patterns that indicate non-equity instruments (futures, indices, etc.)
+_NON_EQUITY_PATTERNS = ("=F", "^", "-USD", "=X")
+
+
+def _is_equity_symbol(symbol: str) -> bool:
+    """Return True if *symbol* looks like a plain equity ticker.
+
+    Filters out futures (``GC=F``), indices (``^VIX``), forex
+    (``EURUSD=X``), and crypto pairs (``BTC-USD``).
+    """
+    for pat in _NON_EQUITY_PATTERNS:
+        if pat in symbol:
+            return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Fundamental data cache (5-minute TTL)
 # ---------------------------------------------------------------------------
@@ -315,10 +335,18 @@ class FactorModel:
         """
         loop = asyncio.get_event_loop()
 
+        # Filter out non-equity symbols (futures, indices, etc.)
+        equity_symbols = [s for s in symbols if _is_equity_symbol(s)]
+        skipped = len(symbols) - len(equity_symbols)
+        if skipped:
+            logger.debug(
+                "Skipped %d non-equity symbols for fundamental fetch", skipped
+            )
+
         # Split into cached vs uncached
         result: dict[str, dict] = {}
         to_fetch: list[str] = []
-        for sym in symbols:
+        for sym in equity_symbols:
             cached = _get_cached_fundamental(sym)
             if cached is not None:
                 result[sym] = cached

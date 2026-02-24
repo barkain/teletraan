@@ -126,6 +126,28 @@ async def run_autonomous_analysis_pipeline(
                             metrics_err,
                         )
 
+                # Supplementary data for report generation
+                try:
+                    import json as _json
+
+                    supp: dict = {}
+                    if analysis_result.factor_scores:
+                        supp["factor_scores"] = analysis_result.factor_scores
+                    if analysis_result.correlation_highlights:
+                        supp["correlation_highlights"] = (
+                            analysis_result.correlation_highlights
+                        )
+                    if analysis_result.catalyst_data:
+                        supp["catalyst_data"] = analysis_result.catalyst_data
+                    if supp:
+                        task.supplementary_data = _json.dumps(supp)
+                except Exception as supp_err:
+                    logger.warning(
+                        "Failed to persist supplementary data for task %s: %s",
+                        task_id,
+                        supp_err,
+                    )
+
                 await session.commit()
                 logger.info(
                     "Background analysis %s completed successfully", task_id

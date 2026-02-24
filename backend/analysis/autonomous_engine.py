@@ -167,6 +167,11 @@ class AutonomousAnalysisResult:
     errors: list[str] = field(default_factory=list)
     run_metrics: RunMetrics | None = None
 
+    # Supplementary data for report generation (P1 enhancements)
+    factor_scores: dict[str, Any] = field(default_factory=dict)
+    correlation_highlights: dict[str, Any] = field(default_factory=dict)
+    catalyst_data: list[dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
@@ -721,6 +726,10 @@ class AutonomousDeepEngine:
             if heatmap_factor_data:
                 factor_scores = await factor_model.compute_factor_scores(heatmap_factor_data)
                 logger.info(f"[AUTO] Factor scores computed for {len(factor_scores)} symbols")
+                # Store factor scores on the result for report generation
+                result.factor_scores = {
+                    sym: fs.to_dict() for sym, fs in factor_scores.items()
+                }
         except Exception as e:
             logger.warning(f"[AUTO] Factor model computation failed (non-fatal): {e}")
 
@@ -834,6 +843,49 @@ class AutonomousDeepEngine:
                     corr_context = format_correlation_matrix_context(corr_result=corr_result)
                     discovery_context += f"\n\n{corr_context}"
                     logger.info(f"[AUTO] Correlation matrix computed for {len(price_dfs)} symbols")
+
+                    # Store correlation highlights on the result for report generation
+                    try:
+                        corr_highlights: dict[str, Any] = {
+                            "regime": macro_result.market_regime if macro_result else "Unknown",
+                        }
+                        # Top correlated pairs
+                        top_pairs: list[dict[str, Any]] = []
+                        anomalies: list[dict[str, Any]] = []
+                        symbols_list = list(corr_result.matrix.index)
+                        for i, sym_a in enumerate(symbols_list):
+                            for sym_b in symbols_list[i + 1:]:
+                                val = corr_result.get_pair(sym_a, sym_b)
+                                if val is not None:
+                                    top_pairs.append({
+                                        "symbol1": sym_a,
+                                        "symbol2": sym_b,
+                                        "correlation": round(val, 3),
+                                    })
+                                    # Flag anomalies (unusually high or low)
+                                    if abs(val) > 0.85:
+                                        anomalies.append({
+                                            "symbol1": sym_a,
+                                            "symbol2": sym_b,
+                                            "correlation": round(val, 3),
+                                            "type": "unusually_high" if val > 0 else "negative_high",
+                                        })
+                                    elif abs(val) < 0.1:
+                                        anomalies.append({
+                                            "symbol1": sym_a,
+                                            "symbol2": sym_b,
+                                            "correlation": round(val, 3),
+                                            "type": "near_zero",
+                                        })
+                        # Sort and keep top 10 most correlated
+                        top_pairs.sort(key=lambda p: abs(p["correlation"]), reverse=True)
+                        corr_highlights["top_pairs"] = top_pairs[:10]
+                        corr_highlights["anomalies"] = anomalies[:5]
+                        corr_highlights["period_days"] = corr_result.period_days
+                        corr_highlights["method"] = corr_result.method
+                        result.correlation_highlights = corr_highlights
+                    except Exception as corr_store_err:
+                        logger.debug(f"[AUTO] Failed to store correlation highlights: {corr_store_err}")
         except Exception as corr_err:
             logger.warning(f"[AUTO] Correlation matrix computation failed (non-fatal): {corr_err}")
 
@@ -879,6 +931,30 @@ class AutonomousDeepEngine:
             f"Coverage evaluation skipped (optimized pipeline). "
             f"{len(analyst_reports)} stocks analyzed."
         )
+
+        # ===== Capture catalyst data for report =====
+        try:
+            from analysis.catalyst_tracker import get_catalyst_tracker  # type: ignore[import-not-found]
+
+            catalyst_tracker = get_catalyst_tracker()
+            catalyst_symbols = list(analyst_reports.keys())[:10]
+            catalyst_events = await catalyst_tracker.earnings_adapter.get_upcoming_catalysts(
+                catalyst_symbols, days_ahead=30
+            )
+            if catalyst_events:
+                result.catalyst_data = [
+                    {
+                        "symbol": evt.symbol,
+                        "event_type": evt.event_type,
+                        "date": evt.date.strftime("%Y-%m-%d") if evt.date else None,
+                        "days_until": evt.days_until,
+                        "details": evt.details,
+                    }
+                    for evt in catalyst_events
+                ]
+                logger.info(f"[AUTO] Captured {len(result.catalyst_data)} catalyst events for report")
+        except Exception as cat_capture_err:
+            logger.debug(f"[AUTO] Catalyst data capture for report failed (non-fatal): {cat_capture_err}")
 
         # ===== PHASE 5: Synthesis =====
         logger.info("Phase 5: Synthesizing insights...")

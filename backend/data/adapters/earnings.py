@@ -23,6 +23,25 @@ import yfinance as yf  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Non-equity symbol filter
+# ---------------------------------------------------------------------------
+_NON_EQUITY_PATTERNS = ("=F", "^", "-USD", "=X")
+
+
+def _is_equity_symbol(symbol: str) -> bool:
+    """Return True if *symbol* looks like a plain equity ticker.
+
+    Filters out futures (``GC=F``), indices (``^VIX``), forex
+    (``EURUSD=X``), and crypto pairs (``BTC-USD``).
+    """
+    for pat in _NON_EQUITY_PATTERNS:
+        if pat in symbol:
+            return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Module-level cache (1-hour TTL)
 # ---------------------------------------------------------------------------
@@ -158,13 +177,25 @@ class EarningsAdapter:
     ) -> dict[str, EarningsInfo]:
         """Fetch upcoming earnings dates and consensus estimates for symbols.
 
+        Non-equity symbols (futures, indices, forex) are silently skipped.
+
         Args:
             symbols: List of ticker symbols.
 
         Returns:
             Dict mapping symbol -> EarningsInfo.
         """
-        cache_key = "cal:" + ",".join(sorted(s.upper() for s in symbols))
+        # Filter out non-equity symbols before fetching
+        equity_symbols = [s for s in symbols if _is_equity_symbol(s.upper())]
+        skipped = len(symbols) - len(equity_symbols)
+        if skipped:
+            logger.debug(
+                "Skipped %d non-equity symbols for earnings calendar", skipped
+            )
+        if not equity_symbols:
+            return {}
+
+        cache_key = "cal:" + ",".join(sorted(s.upper() for s in equity_symbols))
         cached = _get_cached(cache_key)
         if cached is not None:
             return cached
@@ -181,7 +212,7 @@ class EarningsAdapter:
                 return sym, EarningsInfo(symbol=sym)
 
         results = await asyncio.gather(
-            *[_fetch_one(s) for s in symbols],
+            *[_fetch_one(s) for s in equity_symbols],
             return_exceptions=True,
         )
 
@@ -421,6 +452,8 @@ class EarningsAdapter:
     ) -> list[CatalystEvent]:
         """Get all upcoming catalysts (earnings, ex-div dates) within N days.
 
+        Non-equity symbols (futures, indices, forex) are silently skipped.
+
         Args:
             symbols: List of ticker symbols.
             days_ahead: How many days ahead to look.
@@ -428,8 +461,13 @@ class EarningsAdapter:
         Returns:
             List of CatalystEvent sorted by date.
         """
+        # Filter out non-equity symbols
+        equity_symbols = [s for s in symbols if _is_equity_symbol(s.upper())]
+        if not equity_symbols:
+            return []
+
         cache_key = (
-            f"cat:{','.join(sorted(s.upper() for s in symbols))}:{days_ahead}"
+            f"cat:{','.join(sorted(s.upper() for s in equity_symbols))}:{days_ahead}"
         )
         cached = _get_cached(cache_key)
         if cached is not None:
@@ -439,54 +477,57 @@ class EarningsAdapter:
         cutoff = now + timedelta(days=days_ahead)
         events: list[CatalystEvent] = []
 
-        # Fetch earnings calendar
-        calendar = await self.get_earnings_calendar(symbols)
+        # Fetch earnings calendar (already filters non-equity internally)
+        calendar = await self.get_earnings_calendar(equity_symbols)
 
         for sym, info in calendar.items():
-            if (
-                info.next_earnings_date
-                and now <= info.next_earnings_date <= cutoff
-            ):
-                history = await self.get_earnings_history(sym, quarters=4)
-                beats = sum(
-                    1
-                    for q in history
-                    if q.surprise_pct is not None and q.surprise_pct > 0
-                )
-                total_with_data = sum(
-                    1 for q in history if q.surprise_pct is not None
-                )
-                beat_rate = (
-                    beats / total_with_data if total_with_data > 0 else None
-                )
-                avg_surprise = None
-                if total_with_data > 0:
-                    surprises = [
-                        q.surprise_pct
+            try:
+                if (
+                    info.next_earnings_date
+                    and now <= info.next_earnings_date <= cutoff
+                ):
+                    history = await self.get_earnings_history(sym, quarters=4)
+                    beats = sum(
+                        1
                         for q in history
-                        if q.surprise_pct is not None
-                    ]
-                    avg_surprise = (
-                        sum(surprises) / len(surprises) if surprises else None
+                        if q.surprise_pct is not None and q.surprise_pct > 0
                     )
+                    total_with_data = sum(
+                        1 for q in history if q.surprise_pct is not None
+                    )
+                    beat_rate = (
+                        beats / total_with_data if total_with_data > 0 else None
+                    )
+                    avg_surprise = None
+                    if total_with_data > 0:
+                        surprises = [
+                            q.surprise_pct
+                            for q in history
+                            if q.surprise_pct is not None
+                        ]
+                        avg_surprise = (
+                            sum(surprises) / len(surprises) if surprises else None
+                        )
 
-                events.append(
-                    CatalystEvent(
-                        symbol=sym,
-                        event_type="earnings",
-                        date=info.next_earnings_date,
-                        days_until=info.days_until_earnings or 0,
-                        details={
-                            "eps_estimate": info.eps_estimate,
-                            "revenue_estimate": info.revenue_estimate,
-                            "beat_rate_last_4q": beat_rate,
-                            "avg_surprise_pct": avg_surprise,
-                        },
+                    events.append(
+                        CatalystEvent(
+                            symbol=sym,
+                            event_type="earnings",
+                            date=info.next_earnings_date,
+                            days_until=info.days_until_earnings or 0,
+                            details={
+                                "eps_estimate": info.eps_estimate,
+                                "revenue_estimate": info.revenue_estimate,
+                                "beat_rate_last_4q": beat_rate,
+                                "avg_surprise_pct": avg_surprise,
+                            },
+                        )
                     )
-                )
+            except Exception as e:
+                logger.debug(f"Earnings catalyst fetch failed for {sym}: {e}")
 
         # Fetch ex-dividend dates
-        for sym in symbols:
+        for sym in equity_symbols:
             try:
                 div_event = await self._run_blocking(
                     lambda s=sym: self._fetch_ex_div(s.upper(), now, cutoff)  # type: ignore[misc]
