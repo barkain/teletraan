@@ -838,6 +838,10 @@ class StatisticalFeatureCalculator:
             if df is None or len(df) < 2:
                 continue
             closes = df["close"] if isinstance(df["close"], pd.Series) else pd.Series(df["close"].values)
+            # Filter out non-positive prices before log calculation
+            closes = closes[closes > 0]
+            if len(closes) < 2:
+                continue
             # Daily log returns
             log_ret = np.log(closes / closes.shift(1)).dropna()
             # Trim to window

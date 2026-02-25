@@ -197,7 +197,7 @@ class DeepAnalysisEngine:
                 price_dfs: dict[str, Any] = {}
                 for sym, prices in price_history.items():
                     if prices and len(prices) >= 5:
-                        closes = [p.get("close", 0) for p in prices if p.get("close")]
+                        closes = [p.get("close") for p in prices if p.get("close") is not None]
                         if len(closes) >= 5:
                             price_dfs[sym] = pd.DataFrame({"close": closes})
 
@@ -212,6 +212,13 @@ class DeepAnalysisEngine:
                     logger.info(f"[DEEP] Correlation matrix computed for {len(price_dfs)} symbols")
         except Exception as corr_err:
             logger.warning(f"[DEEP] Correlation matrix computation failed (non-fatal): {corr_err}")
+
+        # Ensure the placeholder is always replaced, even if correlation computation failed
+        if "{correlation_matrix_context}" in correlation_prompt:
+            default_corr_ctx = format_correlation_matrix_context()
+            correlation_prompt = correlation_prompt.replace(
+                "{correlation_matrix_context}", default_corr_ctx
+            )
 
         # Build analyst configs with potentially updated correlation prompt
         analyst_configs = dict(self.ANALYSTS)

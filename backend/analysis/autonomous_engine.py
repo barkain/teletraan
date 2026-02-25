@@ -832,7 +832,7 @@ class AutonomousDeepEngine:
                 price_dfs: dict[str, Any] = {}
                 for sym, prices in price_history.items():
                     if prices and len(prices) >= 5:
-                        closes = [p.get("close", 0) for p in prices if p.get("close")]
+                        closes = [p.get("close") for p in prices if p.get("close") is not None]
                         if len(closes) >= 5:
                             price_dfs[sym] = pd.DataFrame({"close": closes})
 

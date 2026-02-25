@@ -498,20 +498,20 @@ class InsightOutcomeTracker:
 
         target = self._parse_price_range(insight.target_price)
         if target:
-            _, target_high = target
+            target_low, target_high = target
             is_bullish = (insight.action or "").upper() in ("BUY", "STRONG_BUY")
             if is_bullish and current >= target_high:
                 result["target_triggered"] = True
-            elif not is_bullish and current <= target_high:
+            elif not is_bullish and current <= target_low:
                 result["target_triggered"] = True
 
         stop = self._parse_price_range(insight.stop_loss)
         if stop:
-            stop_low, _ = stop
+            stop_low, stop_high = stop
             is_bullish = (insight.action or "").upper() in ("BUY", "STRONG_BUY")
             if is_bullish and current <= stop_low:
                 result["stop_triggered"] = True
-            elif not is_bullish and current >= stop_low:
+            elif not is_bullish and current >= stop_high:
                 result["stop_triggered"] = True
 
         return result
