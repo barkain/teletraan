@@ -1,0 +1,40 @@
+{
+  "filename": "2026-02-26-2130-transitional.html",
+  "task_id": "dfdf1767-ab9a-4fab-b677-4e5e5ab3285c",
+  "market_regime": "Transitional",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Transitional\n\n**Key Macro Themes:**\n- Defensive Rotation & Rate Cut Anticipation: Sharp yield curve decline across all maturities signals market pricing in Fed rate cuts. Defensive s...\n- Tech Sector Correction & AI Consolidation: Technology sector showing sharp underperformance (-3.99% over 20D) despite overall market resilience...\n- Dollar Strength & Safe Haven Demand: US Dollar Index up +1.55% over 20 days signals safe-haven flows or relative US economic strength ver...\n\n**Heatmap Analysis:** Today's market shows a defensive rotation with Financials (+1.21%) leading while Technology (-1.40%) lags significantly. The 20-day view confirms a sustained shift from growth to value, with Energy (+10.83%), Utilities (+8.63%), and defensive sectors outperforming tech-heavy sectors. This aligns with the transitional regime characterized by elevated VIX (18.64) and declining yields signaling rate cut expectations.\n\n**Sectors Scanned:**\n- Technology: -1.4% (1D), breadth 50%\n- Financials: +1.2% (1D), breadth 50%\n- Energy: +0.3% (1D), breadth 50%\n- Healthcare: -0.3% (1D), breadth 50%\n- Industrials: +0.6% (1D), breadth 50%\n- Consumer Staples: -0.2% (1D), breadth 50%\n- Consumer Discretionary: -0.0% (1D), breadth 50%\n- Utilities: -0.4% (1D), breadth 50%\n- Communication Services: +0.2% (1D), breadth 50%\n- Real Estate: +0.4% (1D), breadth 50%\n- Materials: -0.1% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Sharp growth-to-value rotation: Financials leading today (+1.21%) while Technology bleeds (-1.40%), creating a 2.61% spread—the widest sector divergence in the session\n- Defensive sector resilience: Utilities, Consumer Staples, and Real Estate all positive over 5D and 20D despite today's slight weakness in Utilities/Staples\n- Energy momentum divergence: Energy showing strength over 20D (+10.83%) but nearly flat today (+0.33%), while Financials surge on 1D but lag on 20D (-0.94%)",
+  "top_sectors": [
+    "Energy +10.8%",
+    "Utilities +8.6%",
+    "Industrials +7.1%",
+    "Consumer Staples +6.9%",
+    "Materials +6.0%",
+    "Real Estate +5.8%"
+  ],
+  "insights_count": 6,
+  "symbols": [
+    "CAT",
+    "GC=F",
+    "JPM",
+    "LITE",
+    "MU",
+    "NVDA"
+  ],
+  "action_counts": {
+    "SELL": 1,
+    "HOLD": 2,
+    "BUY": 1,
+    "STRONG_BUY": 1,
+    "WATCH": 1
+  },
+  "avg_confidence": 0.7,
+  "insight_types": [
+    "opportunity",
+    "risk",
+    "rotation"
+  ],
+  "created_at": "2026-02-26T21:30:00",
+  "started_at": "2026-02-26T21:30:00.071211",
+  "completed_at": "2026-02-26T21:41:11.123517",
+  "elapsed_seconds": 671.043961
+}
