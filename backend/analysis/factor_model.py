@@ -1,0 +1,432 @@
+"""Multi-factor scoring model for quantitative pre-screening of stock candidates.
+
+Computes composite factor scores across six dimensions (momentum, value, quality,
+volatility, volume, technical) to replace crude heuristic screening in the
+autonomous analysis pipeline. Each factor is z-scored against the universe and
+converted to a 0-100 percentile rank before weighted aggregation.
+
+Fundamental data (PE, PB, ROE, etc.) is fetched via yfinance with a 5-min TTL
+cache. Blocking yfinance calls use run_in_executor with a ThreadPoolExecutor.
+When fundamental data is unavailable, the model gracefully degrades by
+redistributing weight to market-data-only factors.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from typing import Any
+
+import yfinance as yf  # type: ignore[import-untyped]
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Non-equity symbol filter
+# ---------------------------------------------------------------------------
+# Patterns that indicate non-equity instruments (futures, indices, etc.)
+_NON_EQUITY_PATTERNS = ("=F", "^", "-USD", "=X")
+
+
+def _is_equity_symbol(symbol: str) -> bool:
+    """Return True if *symbol* looks like a plain equity ticker.
+
+    Filters out futures (``GC=F``), indices (``^VIX``), forex
+    (``EURUSD=X``), and crypto pairs (``BTC-USD``).
+    """
+    for pat in _NON_EQUITY_PATTERNS:
+        if pat in symbol:
+            return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Fundamental data cache (5-minute TTL)
+# ---------------------------------------------------------------------------
+_fundamental_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_cached_fundamental(symbol: str) -> dict[str, Any] | None:
+    if symbol in _fundamental_cache:
+        ts, data = _fundamental_cache[symbol]
+        if time.time() - ts < _CACHE_TTL:
+            return data
+        del _fundamental_cache[symbol]
+    return None
+
+
+def _set_fundamental_cache(symbol: str, data: dict[str, Any]) -> None:
+    _fundamental_cache[symbol] = (time.time(), data)
+
+
+# ---------------------------------------------------------------------------
+# Factor weights
+# ---------------------------------------------------------------------------
+FACTOR_WEIGHTS = {
+    "momentum": 0.25,
+    "value": 0.20,
+    "quality": 0.20,
+    "volatility": 0.15,
+    "volume": 0.10,
+    "technical": 0.10,
+}
+
+# Degraded weights when fundamentals unavailable (value+quality redistributed)
+DEGRADED_WEIGHTS = {
+    "momentum": 0.40,
+    "value": 0.0,
+    "quality": 0.0,
+    "volatility": 0.25,
+    "volume": 0.20,
+    "technical": 0.15,
+}
+
+
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
+@dataclass
+class FactorScore:
+    """Composite and per-factor scores for a single symbol."""
+
+    symbol: str
+    composite_score: float  # 0-100 weighted sum
+    momentum_score: float = 50.0
+    value_score: float = 50.0
+    quality_score: float = 50.0
+    volatility_score: float = 50.0
+    volume_score: float = 50.0
+    technical_score: float = 50.0
+    factor_details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "composite_score": round(self.composite_score, 2),
+            "momentum_score": round(self.momentum_score, 2),
+            "value_score": round(self.value_score, 2),
+            "quality_score": round(self.quality_score, 2),
+            "volatility_score": round(self.volatility_score, 2),
+            "volume_score": round(self.volume_score, 2),
+            "technical_score": round(self.technical_score, 2),
+            "factor_details": self.factor_details,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Helper: z-score -> percentile rank (0-100)
+# ---------------------------------------------------------------------------
+def _zscore_to_percentile(values: list[float | None]) -> list[float]:
+    """Convert raw values to 0-100 percentile ranks via z-scoring.
+
+    NaN/None entries receive the median score (50).
+    """
+    clean: list[tuple[int, float]] = [
+        (i, v) for i, v in enumerate(values) if v is not None
+    ]
+    if len(clean) < 2:
+        return [50.0] * len(values)
+
+    vals = [v for _, v in clean]
+    mean = sum(vals) / len(vals)
+    variance = sum((v - mean) ** 2 for v in vals) / len(vals)
+    std = variance**0.5 if variance > 0 else 1.0
+
+    result = [50.0] * len(values)
+    for idx, val in clean:
+        z = (val - mean) / std
+        # Clamp z to [-3, 3] then map to 0-100
+        z = max(-3.0, min(3.0, z))
+        result[idx] = round((z + 3.0) / 6.0 * 100.0, 2)
+    return result
+
+
+def _inverse_zscore_to_percentile(values: list[float | None]) -> list[float]:
+    """Like _zscore_to_percentile but inverted (lower raw = higher score).
+
+    Used for volatility where lower is better.
+    """
+    inverted: list[float | None] = [(-v if v is not None else None) for v in values]
+    return _zscore_to_percentile(inverted)
+
+
+# ---------------------------------------------------------------------------
+# FactorModel
+# ---------------------------------------------------------------------------
+class FactorModel:
+    """Multi-factor scoring model for stock screening."""
+
+    def __init__(self) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=8)
+
+    async def compute_factor_scores(
+        self,
+        heatmap_data: dict[str, dict],
+        fundamental_data: dict[str, dict] | None = None,
+    ) -> dict[str, FactorScore]:
+        """Compute composite factor scores for all symbols in the heatmap.
+
+        Args:
+            heatmap_data: Mapping of symbol -> dict with keys like price,
+                return_1d (or change_1d), return_5d (or change_5d),
+                return_20d (or change_20d), change_60d, volume_ratio,
+                rsi_14, volatility_20d.
+            fundamental_data: Optional mapping of symbol -> dict with keys
+                like pe_ratio, pb_ratio, fcf_yield, roe, profit_margins,
+                debt_to_equity. If None, value/quality factors are skipped.
+
+        Returns:
+            Dict mapping symbol -> FactorScore.
+        """
+        symbols = list(heatmap_data.keys())
+        if not symbols:
+            return {}
+
+        has_fundamentals = fundamental_data is not None and len(fundamental_data) > 0
+        weights = FACTOR_WEIGHTS if has_fundamentals else DEGRADED_WEIGHTS
+
+        # --- Extract raw factor values ---
+        momentum_raw: list[float | None] = []
+        volume_raw: list[float | None] = []
+        volatility_raw: list[float | None] = []
+        technical_raw: list[float | None] = []
+        value_raw: list[float | None] = []
+        quality_raw: list[float | None] = []
+
+        details_per_symbol: list[dict[str, Any]] = []
+
+        for sym in symbols:
+            d = heatmap_data[sym]
+            det: dict[str, Any] = {}
+
+            # Momentum: composite of 5d (30%), 20d (50%), 60d (20%)
+            r5 = d.get("return_5d") or d.get("change_5d")
+            r20 = d.get("return_20d") or d.get("change_20d")
+            r60 = d.get("return_60d") or d.get("change_60d")
+            if r5 is not None and r20 is not None:
+                r60_val = r60 if r60 is not None else 0.0
+                mom = float(r5) * 0.3 + float(r20) * 0.5 + float(r60_val) * 0.2
+                momentum_raw.append(mom)
+                det["momentum_composite"] = round(mom, 4)
+            else:
+                momentum_raw.append(None)
+
+            # Volume ratio
+            vr = d.get("volume_ratio")
+            volume_raw.append(float(vr) if vr is not None else None)
+            det["volume_ratio"] = vr
+
+            # Volatility (lower is better — will be inverted)
+            vol = d.get("volatility_20d")
+            volatility_raw.append(float(vol) if vol is not None else None)
+            det["volatility_20d"] = vol
+
+            # Technical: RSI mean-reversion signal
+            # Oversold (<30) = bullish -> high score; Overbought (>70) = bearish -> low score
+            rsi = d.get("rsi_14") or d.get("rsi")
+            if rsi is not None:
+                rsi_val = float(rsi)
+                # Invert RSI: 100 - RSI so that oversold maps to high values
+                technical_raw.append(100.0 - rsi_val)
+                det["rsi_14"] = rsi_val
+            else:
+                technical_raw.append(None)
+
+            # Value factors (if fundamentals available)
+            if fundamental_data is not None and sym in fundamental_data:
+                fd = fundamental_data[sym]
+                pe = fd.get("pe_ratio")
+                pb = fd.get("pb_ratio")
+                fcf_y = fd.get("fcf_yield")
+
+                earnings_yield = (1.0 / pe) if pe and pe > 0 else None
+                book_yield = (1.0 / pb) if pb and pb > 0 else None
+
+                components = [
+                    v for v in [earnings_yield, book_yield, fcf_y] if v is not None
+                ]
+                val_composite = sum(components) / len(components) if components else None
+                value_raw.append(val_composite)
+                det["earnings_yield"] = earnings_yield
+                det["book_yield"] = book_yield
+                det["fcf_yield"] = fcf_y
+            else:
+                value_raw.append(None)
+
+            # Quality factors
+            if fundamental_data is not None and sym in fundamental_data:
+                fd = fundamental_data[sym]
+                roe = fd.get("roe")
+                margins = fd.get("profit_margins")
+                dte = fd.get("debt_to_equity")
+
+                # For debt_to_equity, lower is better -> invert
+                inv_dte = (1.0 / (1.0 + dte)) if dte is not None and dte >= 0 else None
+                components = [
+                    v for v in [roe, margins, inv_dte] if v is not None
+                ]
+                qual_composite = (
+                    sum(components) / len(components) if components else None
+                )
+                quality_raw.append(qual_composite)
+                det["roe"] = roe
+                det["profit_margins"] = margins
+                det["debt_to_equity"] = dte
+            else:
+                quality_raw.append(None)
+
+            details_per_symbol.append(det)
+
+        # --- Z-score each factor to 0-100 percentile ---
+        momentum_pct = _zscore_to_percentile(momentum_raw)
+        volume_pct = _zscore_to_percentile(volume_raw)
+        volatility_pct = _inverse_zscore_to_percentile(volatility_raw)
+        technical_pct = _zscore_to_percentile(technical_raw)
+        value_pct = _zscore_to_percentile(value_raw)
+        quality_pct = _zscore_to_percentile(quality_raw)
+
+        # --- Compute weighted composite ---
+        result: dict[str, FactorScore] = {}
+        for i, sym in enumerate(symbols):
+            composite = (
+                momentum_pct[i] * weights["momentum"]
+                + value_pct[i] * weights["value"]
+                + quality_pct[i] * weights["quality"]
+                + volatility_pct[i] * weights["volatility"]
+                + volume_pct[i] * weights["volume"]
+                + technical_pct[i] * weights["technical"]
+            )
+            result[sym] = FactorScore(
+                symbol=sym,
+                composite_score=round(composite, 2),
+                momentum_score=momentum_pct[i],
+                value_score=value_pct[i],
+                quality_score=quality_pct[i],
+                volatility_score=volatility_pct[i],
+                volume_score=volume_pct[i],
+                technical_score=technical_pct[i],
+                factor_details=details_per_symbol[i],
+            )
+
+        logger.info(
+            "Factor scores computed for %d symbols (fundamentals=%s)",
+            len(result),
+            has_fundamentals,
+        )
+        return result
+
+    async def fetch_fundamental_data(
+        self, symbols: list[str]
+    ) -> dict[str, dict]:
+        """Fetch fundamental data (PE, PB, ROE, etc.) via yfinance in thread pool.
+
+        Results are cached per-symbol with a 5-min TTL.
+
+        Args:
+            symbols: List of ticker symbols.
+
+        Returns:
+            Dict mapping symbol -> fundamental data dict.
+        """
+        loop = asyncio.get_event_loop()
+
+        # Filter out non-equity symbols (futures, indices, etc.)
+        equity_symbols = [s for s in symbols if _is_equity_symbol(s)]
+        skipped = len(symbols) - len(equity_symbols)
+        if skipped:
+            logger.debug(
+                "Skipped %d non-equity symbols for fundamental fetch", skipped
+            )
+
+        # Split into cached vs uncached
+        result: dict[str, dict] = {}
+        to_fetch: list[str] = []
+        for sym in equity_symbols:
+            cached = _get_cached_fundamental(sym)
+            if cached is not None:
+                result[sym] = cached
+            else:
+                to_fetch.append(sym)
+
+        if not to_fetch:
+            return result
+
+        def _fetch_single(sym: str) -> tuple[str, dict[str, Any] | None]:
+            try:
+                info = yf.Ticker(sym).info
+                data = {
+                    "pe_ratio": info.get("trailingPE") or info.get("forwardPE"),
+                    "pb_ratio": info.get("priceToBook"),
+                    "fcf_yield": None,
+                    "roe": info.get("returnOnEquity"),
+                    "profit_margins": info.get("profitMargins"),
+                    "debt_to_equity": info.get("debtToEquity"),
+                }
+                # Compute FCF yield if possible
+                fcf = info.get("freeCashflow")
+                mcap = info.get("marketCap")
+                if fcf and mcap and mcap > 0:
+                    data["fcf_yield"] = fcf / mcap
+
+                _set_fundamental_cache(sym, data)
+                return sym, data
+            except Exception as e:
+                logger.debug("Failed to fetch fundamentals for %s: %s", sym, e)
+                return sym, None
+
+        def _fetch_all() -> list[tuple[str, dict[str, Any] | None]]:
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                return list(executor.map(_fetch_single, to_fetch))
+
+        fetched = await loop.run_in_executor(None, _fetch_all)
+
+        success = 0
+        for sym, data in fetched:
+            if data is not None:
+                result[sym] = data
+                success += 1
+
+        logger.info(
+            "Fetched fundamentals: %d/%d symbols succeeded",
+            success,
+            len(to_fetch),
+        )
+        return result
+
+    def rank_candidates(
+        self, scores: dict[str, FactorScore], top_n: int = 20
+    ) -> list[dict]:
+        """Return top N candidates sorted by composite score with factor breakdown.
+
+        Args:
+            scores: Dict mapping symbol -> FactorScore.
+            top_n: Number of top candidates to return.
+
+        Returns:
+            List of dicts with symbol, composite_score, and factor breakdown.
+        """
+        sorted_scores = sorted(
+            scores.values(),
+            key=lambda s: s.composite_score,
+            reverse=True,
+        )
+        return [s.to_dict() for s in sorted_scores[:top_n]]
+
+
+# ---------------------------------------------------------------------------
+# Module singleton
+# ---------------------------------------------------------------------------
+_factor_model: FactorModel | None = None
+
+
+def get_factor_model() -> FactorModel:
+    """Get or create the singleton FactorModel instance."""
+    global _factor_model
+    if _factor_model is None:
+        _factor_model = FactorModel()
+    return _factor_model

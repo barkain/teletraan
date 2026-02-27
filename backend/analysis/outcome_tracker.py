@@ -6,10 +6,11 @@ the tracking period ends.
 """
 
 import logging
-from datetime import date, timedelta
+import re
+from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from data.adapters.yahoo import YahooFinanceAdapter, YahooFinanceError
@@ -18,6 +19,18 @@ from models.insight_outcome import InsightOutcome, OutcomeCategory, TrackingStat
 from models.knowledge_pattern import KnowledgePattern
 
 logger = logging.getLogger(__name__)
+
+# Time horizon string to approximate days mapping
+_HORIZON_DAYS: dict[str, int] = {
+    "1-2 weeks": 10,
+    "2-4 weeks": 21,
+    "1-3 months": 60,
+    "3-6 months": 120,
+    "6-12 months": 270,
+}
+
+# Checkpoint intervals in trading days
+_CHECKPOINT_DAYS = (5, 10, 20, 40)
 
 
 class InsightOutcomeTracker:
@@ -373,6 +386,181 @@ class InsightOutcomeTracker:
             "success_rate": success_rate,
             "direction_stats": direction_stats,
         }
+
+    # ------------------------------------------------------------------
+    # Lifecycle management methods
+    # ------------------------------------------------------------------
+
+    async def check_lifecycle_states(self, db: AsyncSession) -> dict[str, Any]:
+        """Check all active insights for staleness and lifecycle transitions."""
+        query = (
+            select(DeepInsight)
+            .where(
+                or_(
+                    DeepInsight.lifecycle_state == "active",
+                    DeepInsight.lifecycle_state == "re_evaluating",
+                    DeepInsight.lifecycle_state.is_(None),
+                )
+            )
+        )
+        result = await db.execute(query)
+        insights = result.scalars().all()
+
+        transitions: list[dict[str, str]] = []
+        now = datetime.utcnow()
+
+        for insight in insights:
+            staleness = await self.compute_staleness(insight)
+            insight.staleness_score = staleness
+
+            decay = await self.apply_conviction_decay(insight)
+            insight.conviction_decay_factor = decay
+            insight.effective_confidence = insight.compute_effective_confidence()
+            insight.last_evaluated_at = now
+
+            old_state = insight.lifecycle_state or "active"
+
+            if staleness >= 1.0 and old_state == "active":
+                insight.lifecycle_state = "expired"
+                transitions.append({
+                    "insight_id": str(insight.id),
+                    "from": old_state,
+                    "to": "expired",
+                })
+            elif staleness >= 0.7 and old_state == "active":
+                insight.lifecycle_state = "stale"
+                transitions.append({
+                    "insight_id": str(insight.id),
+                    "from": old_state,
+                    "to": "stale",
+                })
+
+            # Check price-level triggers if outcome exists
+            if insight.outcome and insight.outcome.tracking_status == TrackingStatus.TRACKING.value:
+                triggers = await self.check_price_level_triggers(insight.outcome, insight)
+                if triggers.get("entry_triggered"):
+                    insight.outcome.entry_triggered = True
+                if triggers.get("target_triggered"):
+                    insight.outcome.target_triggered = True
+                if triggers.get("stop_triggered"):
+                    insight.outcome.stop_triggered = True
+                await self.update_max_moves(insight.outcome)
+
+        await db.commit()
+
+        return {
+            "insights_checked": len(insights),
+            "transitions": transitions,
+        }
+
+    async def compute_staleness(self, insight: DeepInsight) -> float:
+        """Compute staleness score (0-1) based on age vs time_horizon."""
+        if not insight.created_at:
+            return 0.0
+
+        horizon_str = (insight.time_horizon or "").lower().strip()
+        expected_days = _HORIZON_DAYS.get(horizon_str)
+
+        if expected_days is None:
+            # Try to extract from freeform text like "2 weeks", "3 months"
+            for key, days in _HORIZON_DAYS.items():
+                if key in horizon_str:
+                    expected_days = days
+                    break
+            if expected_days is None:
+                expected_days = 30  # default fallback
+
+        age_days = (datetime.utcnow() - insight.created_at).total_seconds() / 86400
+        staleness = min(1.0, age_days / expected_days)
+        return round(staleness, 4)
+
+    async def apply_conviction_decay(self, insight: DeepInsight) -> float:
+        """Apply time-based conviction decay to insight confidence."""
+        staleness = insight.staleness_score or 0.0
+        decay = max(0.5, 1.0 - (staleness * 0.5))
+        return round(decay, 4)
+
+    async def check_price_level_triggers(
+        self, outcome: InsightOutcome, insight: DeepInsight,
+    ) -> dict[str, bool]:
+        """Check if current price has hit entry_zone, target, or stop_loss."""
+        current = outcome.current_price
+        if current is None:
+            return {"entry_triggered": False, "target_triggered": False, "stop_triggered": False}
+
+        result = {"entry_triggered": False, "target_triggered": False, "stop_triggered": False}
+
+        entry = self._parse_price_range(insight.entry_zone)
+        if entry:
+            low, high = entry
+            if low <= current <= high:
+                result["entry_triggered"] = True
+
+        target = self._parse_price_range(insight.target_price)
+        if target:
+            target_low, target_high = target
+            is_bullish = (insight.action or "").upper() in ("BUY", "STRONG_BUY")
+            if is_bullish and current >= target_high:
+                result["target_triggered"] = True
+            elif not is_bullish and current <= target_low:
+                result["target_triggered"] = True
+
+        stop = self._parse_price_range(insight.stop_loss)
+        if stop:
+            stop_low, stop_high = stop
+            is_bullish = (insight.action or "").upper() in ("BUY", "STRONG_BUY")
+            if is_bullish and current <= stop_low:
+                result["stop_triggered"] = True
+            elif not is_bullish and current >= stop_high:
+                result["stop_triggered"] = True
+
+        return result
+
+    async def record_intermediate_checkpoint(
+        self, outcome: InsightOutcome, checkpoint_day: int,
+    ) -> None:
+        """Record price at checkpoint intervals (5d, 10d, 20d, 40d)."""
+        if outcome.initial_price is None or outcome.initial_price == 0:
+            return
+        current = outcome.current_price
+        if current is None:
+            return
+
+        return_pct = round((current - outcome.initial_price) / outcome.initial_price * 100, 2)
+        key = f"{checkpoint_day}d"
+
+        checkpoints = dict(outcome.intermediate_checkpoints or {})
+        checkpoints[key] = {"price": current, "return_pct": return_pct}
+        outcome.intermediate_checkpoints = checkpoints
+
+    async def update_max_moves(self, outcome: InsightOutcome) -> None:
+        """Update max favorable/adverse move tracking."""
+        if outcome.initial_price is None or outcome.initial_price == 0:
+            return
+        current = outcome.current_price
+        if current is None:
+            return
+
+        return_pct = (current - outcome.initial_price) / outcome.initial_price * 100
+
+        if outcome.max_favorable_move is None or return_pct > outcome.max_favorable_move:
+            outcome.max_favorable_move = round(return_pct, 4)
+        if outcome.max_adverse_move is None or return_pct < outcome.max_adverse_move:
+            outcome.max_adverse_move = round(return_pct, 4)
+
+    @staticmethod
+    def _parse_price_range(price_str: str | None) -> tuple[float, float] | None:
+        """Parse '$150-155' or '$150' into (low, high) tuple."""
+        if not price_str:
+            return None
+        # Extract all numbers (int or float) from the string
+        numbers = re.findall(r"[\d]+(?:\.[\d]+)?", price_str)
+        if not numbers:
+            return None
+        values = [float(n) for n in numbers]
+        if len(values) == 1:
+            return (values[0], values[0])
+        return (min(values[0], values[1]), max(values[0], values[1]))
 
     def _categorize_return(
         self,

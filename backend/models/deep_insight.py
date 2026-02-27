@@ -1,9 +1,10 @@
 """DeepInsight model for storing AI-synthesized cross-analyst insights."""
 
 import enum
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, ForeignKey, Index, String, Text
+from sqlalchemy import DateTime, Float, JSON, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -141,6 +142,31 @@ class DeepInsight(TimestampMixin, Base):
     prediction_market_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     sentiment_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
+    # Lifecycle management
+    lifecycle_state: Mapped[str | None] = mapped_column(
+        String(30), nullable=True, default="active",
+    )  # active, stale, re_evaluating, invalidated, expired, graduated
+
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True,
+    )
+
+    staleness_score: Mapped[float | None] = mapped_column(
+        Float, nullable=True, default=0.0,
+    )  # 0.0 (fresh) to 1.0 (completely stale)
+
+    conviction_decay_factor: Mapped[float | None] = mapped_column(
+        Float, nullable=True, default=1.0,
+    )  # Multiplier on confidence: starts 1.0, decays toward 0.5
+
+    last_price_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True,
+    )
+
+    effective_confidence: Mapped[float | None] = mapped_column(
+        Float, nullable=True,
+    )  # confidence * conviction_decay_factor
+
     # Parent insight linking (for follow-up insights derived from conversations)
     parent_insight_id: Mapped[int | None] = mapped_column(
         ForeignKey("deep_insights.id", ondelete="SET NULL"),
@@ -193,6 +219,12 @@ class DeepInsight(TimestampMixin, Base):
         Index("ix_deep_insights_type_action", "insight_type", "action"),
         Index("ix_deep_insights_created_at", "created_at"),
     )
+
+    def compute_effective_confidence(self) -> float:
+        """Return confidence adjusted by conviction decay."""
+        base = self.confidence or 0.5
+        decay = self.conviction_decay_factor or 1.0
+        return round(base * decay, 4)
 
     def __repr__(self) -> str:
         return (

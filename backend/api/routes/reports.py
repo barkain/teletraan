@@ -3732,6 +3732,309 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
 """
 
 
+# ---------------------------------------------------------------------------
+# P1 supplementary-data section builders
+# ---------------------------------------------------------------------------
+
+
+def _build_factor_scores_section(factor_scores: dict) -> str:
+    """Build an HTML section showing the top 10 factor-model candidates.
+
+    Args:
+        factor_scores: Dict mapping symbol -> factor score dict (from
+            ``FactorScore.to_dict()``).
+
+    Returns:
+        HTML string for the factor scores card, or empty string when data
+        is missing/empty.
+    """
+    if not factor_scores:
+        return ""
+
+    # Sort by composite_score descending and take top 10
+    sorted_items = sorted(
+        factor_scores.items(),
+        key=lambda kv: kv[1].get("composite_score", 0),
+        reverse=True,
+    )[:10]
+
+    if not sorted_items:
+        return ""
+
+    def _score_color(val: float) -> str:
+        """Map a 0-100 score to a green-yellow-red gradient hex color."""
+        if val >= 70:
+            return "#10B981"
+        if val >= 50:
+            return "#F59E0B"
+        return "#EF4444"
+
+    rows_html = ""
+    for _sym, scores in sorted_items:
+        sym_esc = _esc(_sym)
+        composite = scores.get("composite_score", 0)
+        momentum = scores.get("momentum_score", 50)
+        value = scores.get("value_score", 50)
+        quality = scores.get("quality_score", 50)
+        volatility = scores.get("volatility_score", 50)
+        volume = scores.get("volume_score", 50)
+        technical = scores.get("technical_score", 50)
+
+        rows_html += (
+            "<tr>"
+            f'<td style="font-weight:700;color:#E2E8F0;font-family:\'JetBrains Mono\',monospace;">{sym_esc}</td>'
+            f'<td style="color:{_score_color(composite)};font-weight:700;font-family:\'JetBrains Mono\',monospace;">{composite:.1f}</td>'
+            f'<td style="color:{_score_color(momentum)};">{momentum:.0f}</td>'
+            f'<td style="color:{_score_color(value)};">{value:.0f}</td>'
+            f'<td style="color:{_score_color(quality)};">{quality:.0f}</td>'
+            f'<td style="color:{_score_color(volatility)};">{volatility:.0f}</td>'
+            f'<td style="color:{_score_color(volume)};">{volume:.0f}</td>'
+            f'<td style="color:{_score_color(technical)};">{technical:.0f}</td>'
+            "</tr>"
+        )
+
+    return f"""
+    <section class="card" style="margin-bottom:20px;">
+      <div class="card-label">Factor Model Scores &mdash; Top 10 Candidates</div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.08);text-align:left;">
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Symbol</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Composite</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Mom</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Val</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Qual</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Vol</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Volume</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Tech</th>
+            </tr>
+          </thead>
+          <tbody style="font-family:'JetBrains Mono',monospace;">
+            {rows_html}
+          </tbody>
+        </table>
+      </div>
+    </section>
+"""
+
+
+def _build_correlation_section(corr_highlights: dict) -> str:
+    """Build an HTML section for cross-asset correlation highlights.
+
+    Args:
+        corr_highlights: Dict with keys ``regime``, ``top_pairs``,
+            ``anomalies``, ``period_days``, ``method``.
+
+    Returns:
+        HTML string for the correlation card, or empty string when data
+        is missing/empty.
+    """
+    if not corr_highlights:
+        return ""
+
+    regime = corr_highlights.get("regime", "Unknown")
+    top_pairs = corr_highlights.get("top_pairs", [])
+    anomalies = corr_highlights.get("anomalies", [])
+
+    if not top_pairs and not anomalies:
+        return ""
+
+    # Regime badge color
+    regime_lower = regime.lower() if regime else ""
+    if "bull" in regime_lower or "risk-on" in regime_lower:
+        badge_color = "#10B981"
+        badge_bg = "rgba(16,185,129,0.12)"
+    elif "bear" in regime_lower or "risk-off" in regime_lower:
+        badge_color = "#EF4444"
+        badge_bg = "rgba(239,68,68,0.12)"
+    else:
+        badge_color = "#F59E0B"
+        badge_bg = "rgba(245,158,11,0.12)"
+
+    badge_html = (
+        f'<span style="display:inline-block;padding:4px 14px;border-radius:20px;'
+        f"font-size:12px;font-weight:700;color:{badge_color};"
+        f'background:{badge_bg};margin-bottom:16px;">'
+        f"{_esc(regime)}</span>"
+    )
+
+    # Top pairs table
+    pairs_html = ""
+    if top_pairs:
+        pair_rows = ""
+        for pair in top_pairs[:8]:
+            corr_val = pair.get("correlation", 0)
+            corr_color = "#10B981" if corr_val > 0 else "#EF4444"
+            pair_rows += (
+                "<tr>"
+                f'<td style="padding:6px 12px;font-family:\'JetBrains Mono\',monospace;font-weight:600;color:#E2E8F0;">'
+                f'{_esc(pair.get("symbol1", ""))}</td>'
+                f'<td style="padding:6px 12px;font-family:\'JetBrains Mono\',monospace;font-weight:600;color:#E2E8F0;">'
+                f'{_esc(pair.get("symbol2", ""))}</td>'
+                f'<td style="padding:6px 12px;font-family:\'JetBrains Mono\',monospace;font-weight:700;color:{corr_color};">'
+                f"{corr_val:+.3f}</td>"
+                "</tr>"
+            )
+        pairs_html = f"""
+        <div style="margin-top:12px;">
+          <div style="font-size:12px;font-weight:600;color:#94A3B8;margin-bottom:8px;">Notable Correlation Pairs</div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.08);">
+                <th style="padding:6px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;text-align:left;">Sym A</th>
+                <th style="padding:6px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;text-align:left;">Sym B</th>
+                <th style="padding:6px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;text-align:left;">Corr</th>
+              </tr>
+            </thead>
+            <tbody>{pair_rows}</tbody>
+          </table>
+        </div>
+"""
+
+    # Anomalies list
+    anomalies_html = ""
+    if anomalies:
+        items = ""
+        for anom in anomalies[:5]:
+            atype = anom.get("type", "")
+            label = {
+                "unusually_high": "Unusually high correlation",
+                "negative_high": "Strong negative correlation",
+                "near_zero": "Near-zero correlation (decorrelated)",
+            }.get(atype, atype)
+            items += (
+                f'<li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">'
+                f'<span style="font-family:\'JetBrains Mono\',monospace;font-weight:600;">'
+                f'{_esc(anom.get("symbol1", ""))}/{_esc(anom.get("symbol2", ""))}</span>'
+                f' &mdash; {_esc(label)} ({anom.get("correlation", 0):+.3f})</li>'
+            )
+        anomalies_html = f"""
+        <div style="margin-top:16px;">
+          <div style="font-size:12px;font-weight:600;color:#94A3B8;margin-bottom:8px;">Anomalies</div>
+          <ul style="margin:0;padding-left:20px;">{items}</ul>
+        </div>
+"""
+
+    return f"""
+    <section class="card" style="margin-bottom:20px;">
+      <div class="card-label">Correlation Highlights</div>
+      {badge_html}
+      {pairs_html}
+      {anomalies_html}
+    </section>
+"""
+
+
+def _build_catalyst_section(catalyst_data: list) -> str:
+    """Build an HTML section showing upcoming catalyst events as timeline cards.
+
+    Args:
+        catalyst_data: List of dicts with keys ``symbol``, ``event_type``,
+            ``date``, ``days_until``, ``details``.
+
+    Returns:
+        HTML string for the catalyst timeline, or empty string when data
+        is missing/empty.
+    """
+    if not catalyst_data:
+        return ""
+
+    cards_html = ""
+    for evt in catalyst_data:
+        sym = _esc(evt.get("symbol", ""))
+        event_type = evt.get("event_type", "unknown")
+        evt_date = _esc(evt.get("date", "TBD"))
+        days_until = evt.get("days_until", 0)
+        details = evt.get("details", {})
+
+        # Icon and color by event type
+        if event_type == "earnings":
+            icon = "&#x1F4CA;"
+            border_color = "#6366F1"
+            type_label = "Earnings"
+        elif event_type == "ex_dividend":
+            icon = "&#x1F4B0;"
+            border_color = "#10B981"
+            type_label = "Ex-Dividend"
+        else:
+            icon = "&#x1F4C5;"
+            border_color = "#64748B"
+            type_label = _esc(event_type.replace("_", " ").title())
+
+        # Days-until badge
+        if days_until <= 3:
+            days_color = "#EF4444"
+        elif days_until <= 7:
+            days_color = "#F59E0B"
+        else:
+            days_color = "#64748B"
+
+        details_html = ""
+        if event_type == "earnings":
+            eps_est = details.get("eps_estimate")
+            beat_rate = details.get("beat_rate_last_4q")
+            avg_surprise = details.get("avg_surprise_pct")
+            detail_parts = []
+            if eps_est is not None:
+                detail_parts.append(
+                    f'<span style="color:#94A3B8;font-size:12px;">EPS Est: '
+                    f'<strong style="color:#E2E8F0;">${eps_est:.2f}</strong></span>'
+                )
+            if beat_rate is not None:
+                detail_parts.append(
+                    f'<span style="color:#94A3B8;font-size:12px;">Beat Rate: '
+                    f'<strong style="color:#E2E8F0;">{beat_rate:.0%}</strong></span>'
+                )
+            if avg_surprise is not None:
+                surprise_color = "#10B981" if avg_surprise > 0 else "#EF4444"
+                detail_parts.append(
+                    f'<span style="color:#94A3B8;font-size:12px;">Avg Surprise: '
+                    f'<strong style="color:{surprise_color};">{avg_surprise:+.1f}%</strong></span>'
+                )
+            if detail_parts:
+                details_html = (
+                    '<div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;">'
+                    + "".join(detail_parts)
+                    + "</div>"
+                )
+        elif event_type == "ex_dividend":
+            div_yield = details.get("dividend_yield")
+            if div_yield is not None:
+                details_html = (
+                    f'<div style="margin-top:8px;font-size:12px;color:#94A3B8;">'
+                    f'Yield: <strong style="color:#10B981;">{div_yield:.2%}</strong></div>'
+                )
+
+        cards_html += f"""
+          <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);
+                      border-left:3px solid {border_color};border-radius:0 12px 12px 0;
+                      padding:16px;margin-bottom:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:18px;">{icon}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#E2E8F0;">{sym}</span>
+                <span style="font-size:12px;color:#94A3B8;font-weight:600;">{type_label}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:12px;color:#94A3B8;">{evt_date}</span>
+                <span style="font-size:11px;font-weight:700;color:{days_color};
+                             background:rgba(255,255,255,0.04);padding:2px 10px;
+                             border-radius:12px;">{days_until}d</span>
+              </div>
+            </div>
+            {details_html}
+          </div>
+"""
+
+    return f"""
+    <section class="card" style="margin-bottom:20px;">
+      <div class="card-label">Upcoming Catalysts</div>
+      {cards_html}
+    </section>
+"""
+
+
 def _build_report_html(task: AnalysisTask, insights: list[DeepInsight]) -> str:
     """Build an interactive dashboard HTML report.
 
@@ -3799,6 +4102,24 @@ def _build_report_html(task: AnalysisTask, insights: list[DeepInsight]) -> str:
         task.phases_completed or [],
         phase_summaries=task.phase_summaries,
     )
+
+    # --- P1 supplementary data sections (optional) ---
+    supp_raw = task._parse_json_field(
+        task.supplementary_data
+    ) if task.supplementary_data else None
+    factor_section_html = ""
+    correlation_section_html = ""
+    catalyst_section_html = ""
+    if supp_raw and isinstance(supp_raw, dict):
+        factor_section_html = _build_factor_scores_section(
+            supp_raw.get("factor_scores", {})
+        )
+        correlation_section_html = _build_correlation_section(
+            supp_raw.get("correlation_highlights", {})
+        )
+        catalyst_section_html = _build_catalyst_section(
+            supp_raw.get("catalyst_data", [])
+        )
 
     # --- TL;DR action box ---
     tldr_html = _build_tldr_section(insights, regime, effective_sectors)
@@ -5232,6 +5553,11 @@ body {{
       {phases_html}
     </div>
   </div>
+
+  <!-- P1 SUPPLEMENTARY DATA SECTIONS (conditionally rendered) -->
+  {factor_section_html}
+  {correlation_section_html}
+  {catalyst_section_html}
 
   <div class="section-divider"></div>
 

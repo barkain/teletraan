@@ -185,6 +185,49 @@ class DeepAnalysisEngine:
         if enhanced_context:
             market_context["_enhanced_context"] = enhanced_context
 
+        # Step 1.5: Compute correlation matrix for the Correlation Detective
+        correlation_prompt = CORRELATION_DETECTIVE_PROMPT
+        try:
+            from analysis.agents.correlation_detective import format_correlation_matrix_context  # type: ignore[import-not-found]
+
+            price_history = market_context.get("price_history", {})
+            if price_history and len(price_history) >= 2:
+                import pandas as pd  # type: ignore[import-untyped]
+
+                price_dfs: dict[str, Any] = {}
+                for sym, prices in price_history.items():
+                    if prices and len(prices) >= 5:
+                        closes = [p.get("close") for p in prices if p.get("close") is not None]
+                        if len(closes) >= 5:
+                            price_dfs[sym] = pd.DataFrame({"close": closes})
+
+                if len(price_dfs) >= 2:
+                    async with async_session_factory() as corr_session:
+                        calc = StatisticalFeatureCalculator(corr_session)
+                        corr_result = await calc.compute_correlation_matrix(price_dfs)
+                    corr_matrix_ctx = format_correlation_matrix_context(corr_result=corr_result)
+                    correlation_prompt = CORRELATION_DETECTIVE_PROMPT.replace(
+                        "{correlation_matrix_context}", corr_matrix_ctx
+                    )
+                    logger.info(f"[DEEP] Correlation matrix computed for {len(price_dfs)} symbols")
+        except Exception as corr_err:
+            logger.warning(f"[DEEP] Correlation matrix computation failed (non-fatal): {corr_err}")
+
+        # Ensure the placeholder is always replaced, even if correlation computation failed
+        if "{correlation_matrix_context}" in correlation_prompt:
+            default_corr_ctx = format_correlation_matrix_context()
+            correlation_prompt = correlation_prompt.replace(
+                "{correlation_matrix_context}", default_corr_ctx
+            )
+
+        # Build analyst configs with potentially updated correlation prompt
+        analyst_configs = dict(self.ANALYSTS)
+        if correlation_prompt != CORRELATION_DETECTIVE_PROMPT:
+            analyst_configs["correlation"] = {
+                **analyst_configs["correlation"],
+                "prompt": correlation_prompt,
+            }
+
         # Step 2: Run all analysts in parallel
         logger.info("Running Technical Analyst...")
         logger.info("Running Sector Strategist...")
@@ -195,7 +238,7 @@ class DeepAnalysisEngine:
         analysts_start = datetime.utcnow()
         analyst_tasks = [
             self._run_analyst(analyst_name, config, market_context, symbols)
-            for analyst_name, config in self.ANALYSTS.items()
+            for analyst_name, config in analyst_configs.items()
         ]
 
         analyst_results = await asyncio.gather(*analyst_tasks, return_exceptions=True)
@@ -204,7 +247,7 @@ class DeepAnalysisEngine:
         # Collect results, handling any exceptions
         analyst_reports: dict[str, Any] = {}
         successful_count = 0
-        for (analyst_name, _), result in zip(self.ANALYSTS.items(), analyst_results):
+        for (analyst_name, _), result in zip(analyst_configs.items(), analyst_results):
             if isinstance(result, Exception):
                 logger.error(f"Analyst {analyst_name} failed: {result}")
                 analyst_reports[analyst_name] = {

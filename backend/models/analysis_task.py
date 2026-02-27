@@ -204,6 +204,13 @@ class AnalysisTask(TimestampMixin, Base):
         nullable=True,
     )
 
+    # Supplementary data for report generation (factor scores, correlation
+    # highlights, catalyst events) stored as a JSON blob.
+    supplementary_data: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )  # JSON: {"factor_scores": {...}, "correlation_highlights": {...}, "catalyst_data": [...]}
+
     __table_args__ = (
         Index("ix_analysis_tasks_status_created", "status", "created_at"),
     )
@@ -253,5 +260,6 @@ class AnalysisTask(TimestampMixin, Base):
             "model_used": self.model_used,
             "provider_used": self.provider_used,
             "llm_call_count": self.llm_call_count,
+            "supplementary_data": self._parse_json_field(self.supplementary_data),
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

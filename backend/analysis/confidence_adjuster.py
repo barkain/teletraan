@@ -511,6 +511,61 @@ class ConfidenceAdjuster:
 
         return round(boost, 4)
 
+    def adjust_confidence_with_decay(
+        self,
+        base_confidence: float,
+        symbol: str,
+        staleness_score: float = 0.0,
+        patterns: list | None = None,
+        track_record: dict | None = None,
+    ) -> float:
+        """Enhanced confidence adjustment with time-decay factor.
+
+        Applies the existing pattern/track-record boost then multiplies
+        by a staleness-derived decay so older insights lose conviction.
+
+        Args:
+            base_confidence: Analyst's original confidence (0.0-1.0).
+            symbol: Stock symbol for symbol-specific accuracy lookup.
+            staleness_score: Staleness score (0.0=fresh, 1.0=stale).
+            patterns: Optional matching KnowledgePattern objects.
+            track_record: Optional pre-fetched track record dict.
+
+        Returns:
+            Adjusted confidence clamped to [0.1, 0.95].
+        """
+        adjusted = base_confidence
+
+        # Apply pattern boost if available
+        if patterns:
+            high_success = [
+                p for p in patterns
+                if p.success_rate >= self.PATTERN_SUCCESS_THRESHOLD
+            ]
+            if high_success:
+                total_weight = 0
+                weighted_sum = 0.0
+                for p in high_success:
+                    w = min(p.occurrences, 100)
+                    weighted_sum += p.success_rate * w
+                    total_weight += w
+                if total_weight > 0:
+                    avg = weighted_sum / total_weight
+                    boost = max(0.0, min(self.MAX_PATTERN_BOOST,
+                                         (avg - self.PATTERN_SUCCESS_THRESHOLD) * 0.5))
+                    adjusted += boost
+
+        # Apply track-record blending if sufficient data
+        if track_record and track_record.get("total_insights", 0) >= 5:
+            hist = track_record.get("success_rate", 0.5)
+            adjusted = adjusted * self.BASE_WEIGHT + hist * self.HISTORICAL_WEIGHT
+
+        # Apply time decay
+        decay_multiplier = max(0.5, 1.0 - staleness_score * 0.3)
+        adjusted = adjusted * decay_multiplier
+
+        return round(self._ensure_bounds(adjusted), 4)
+
     def _ensure_bounds(self, confidence: float) -> float:
         """Clamp confidence to valid bounds.
 

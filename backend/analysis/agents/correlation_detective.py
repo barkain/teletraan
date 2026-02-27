@@ -32,8 +32,11 @@ CORRELATION_DETECTIVE_PROMPT = """You are a Correlation Detective specializing i
 - Historical analogs (similar market conditions in the past)
 - Unusual institutional activity patterns
 
+## Quantitative Correlation Data
+{correlation_matrix_context}
+
 ## Your Task
-Analyze relationships and identify:
+Using the quantitative correlation data above together with the market context, analyze relationships and identify:
 1. **Unusual divergences** - What's not moving together that usually does?
 2. **Lead indicators** - What assets tend to lead others?
 3. **Historical patterns** - Similar setups in the past and their outcomes
@@ -345,6 +348,106 @@ def format_correlation_context(market_data: dict[str, Any]) -> str:
     context_parts.append("\n\n=== End of Context ===")
 
     return "\n".join(context_parts)
+
+
+def format_correlation_matrix_context(
+    corr_result: Any = None,
+    cross_asset: Any = None,
+    shifts: list[Any] | None = None,
+    anomalies: list[Any] | None = None,
+) -> str:
+    """Format computed correlation data into a context string for the LLM prompt.
+
+    Accepts CorrelationResult, CrossAssetCorrelation, list[CorrelationShift],
+    and list[CorrelationAnomaly] from statistical_calculator and converts them
+    into a human-readable markdown table format for the correlation detective prompt.
+
+    Args:
+        corr_result: CorrelationResult — pairwise correlation matrix.
+        cross_asset: CrossAssetCorrelation — stock-to-macro correlations with regime.
+        shifts: list[CorrelationShift] — detected regime changes.
+        anomalies: list[CorrelationAnomaly] — unusual correlation observations.
+
+    Returns:
+        Formatted markdown string. Returns a placeholder if no data provided.
+    """
+    if not corr_result and not cross_asset and not shifts and not anomalies:
+        return "(No quantitative correlation data available for this run.)"
+
+    parts: list[str] = []
+
+    # --- Cross-asset regime ---
+    if cross_asset:
+        parts.append(f"### Cross-Asset Regime: {cross_asset.regime_label.upper()}")
+        # Summarize average stock-macro correlations
+        macro_syms = set()
+        for stock_corrs in cross_asset.stock_macro_corr.values():
+            macro_syms.update(stock_corrs.keys())
+        if macro_syms:
+            for macro_sym in sorted(macro_syms):
+                vals = [
+                    sc[macro_sym]
+                    for sc in cross_asset.stock_macro_corr.values()
+                    if macro_sym in sc
+                ]
+                if vals:
+                    avg = sum(vals) / len(vals)
+                    parts.append(f"Stock-{macro_sym} avg correlation: {avg:.2f}")
+        parts.append("")
+
+    # --- Pairwise correlation table ---
+    if corr_result is not None and not corr_result.matrix.empty:
+        period = corr_result.period_days
+        parts.append(f"### Pairwise Correlations ({period}-day, {corr_result.method})")
+        parts.append("")
+
+        # Build shift lookup for quick delta display
+        shift_lookup: dict[tuple[str, str], Any] = {}
+        if shifts:
+            for s in shifts:
+                shift_lookup[s.symbol_pair] = s
+                shift_lookup[(s.symbol_pair[1], s.symbol_pair[0])] = s
+
+        symbols = list(corr_result.matrix.index)
+        rows: list[str] = []
+        rows.append("| Pair | Corr | Shift |")
+        rows.append("|------|------|-------|")
+        seen: set[tuple[str, str]] = set()
+        for i, sym_a in enumerate(symbols):
+            for sym_b in symbols[i + 1:]:
+                if (sym_a, sym_b) in seen:
+                    continue
+                seen.add((sym_a, sym_b))
+                val = corr_result.get_pair(sym_a, sym_b)
+                if val is None:
+                    continue
+                shift_str = ""
+                sh = shift_lookup.get((sym_a, sym_b))
+                if sh:
+                    shift_str = f"{sh.delta:+.2f} ({sh.significance})"
+                rows.append(f"| {sym_a}-{sym_b} | {val:.2f} | {shift_str} |")
+        parts.extend(rows)
+        parts.append("")
+
+    # --- Correlation anomalies ---
+    if anomalies:
+        parts.append("### Correlation Anomalies")
+        for a in anomalies:
+            parts.append(f"- {a.symbol1}-{a.symbol2}: {a.correlation:.2f} ({a.anomaly_type}) -- {a.context}")
+        parts.append("")
+
+    # --- Diversification opportunities ---
+    if corr_result is not None and not corr_result.matrix.empty:
+        parts.append("### Diversification Opportunities")
+        symbols = list(corr_result.matrix.index)
+        for sym in symbols:
+            least = corr_result.get_least_correlated(sym, top_n=3)
+            if least:
+                pairs_str = ", ".join(f"{s} ({v:.2f})" for s, v in least)
+                parts.append(f"- Best diversifiers for {sym}: {pairs_str}")
+        parts.append("")
+
+    return "\n".join(parts)
 
 
 def parse_correlation_response(response: str) -> CorrelationAnalysisResult:
