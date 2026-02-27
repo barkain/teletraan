@@ -1,0 +1,23 @@
+{
+  "filename": "2026-02-27-1543-risk-off.html",
+  "task_id": "73cc1cd8-3bdb-4773-82f0-2deb8af74183",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "",
+  "top_sectors": [
+    "Utilities",
+    "Energy",
+    "Materials",
+    "Consumer Staples",
+    "Real Estate",
+    "Healthcare"
+  ],
+  "insights_count": 0,
+  "symbols": [],
+  "action_counts": {},
+  "avg_confidence": 0.0,
+  "insight_types": [],
+  "created_at": "2026-02-27T15:43:09.260177",
+  "started_at": "2026-02-27T15:43:10.839374",
+  "completed_at": "2026-02-27T16:21:02.437488",
+  "elapsed_seconds": 2270.196979
+}
