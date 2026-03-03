@@ -1,0 +1,22 @@
+{
+  "filename": "2026-03-03-1447-risk-off.html",
+  "task_id": "d37192e4-d017-4d69-bd74-97d542e8a23e",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "",
+  "top_sectors": [
+    "Energy",
+    "Utilities",
+    "Consumer Staples",
+    "Precious Metals & Safe Havens",
+    "Healthcare"
+  ],
+  "insights_count": 0,
+  "symbols": [],
+  "action_counts": {},
+  "avg_confidence": 0.0,
+  "insight_types": [],
+  "created_at": "2026-03-03T14:47:04.796414",
+  "started_at": "2026-03-03T14:47:06.316323",
+  "completed_at": "2026-03-03T15:29:09.156886",
+  "elapsed_seconds": 2521.513436
+}
