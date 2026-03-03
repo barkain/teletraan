@@ -564,6 +564,7 @@ class MarketContextBuilder:
                 "sector": s.sector,
                 "industry": s.industry,
                 "market_cap": s.market_cap,
+                "thematic_description": s.thematic_description,
                 "is_active": s.is_active,
             }
             for s in stocks
