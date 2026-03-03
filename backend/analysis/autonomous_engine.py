@@ -682,6 +682,7 @@ class AutonomousDeepEngine:
 
                 except Exception as e:
                     logger.warning("Failed to persist thematic thread %s: %s", thread.theme_name, e)
+                    await session.rollback()
                     continue
 
             await session.commit()
@@ -2150,8 +2151,13 @@ class AutonomousDeepEngine:
 
         try:
             insights = parse_synthesis_response(response)
+            if not insights:
+                logger.warning(
+                    "[AUTO] Synthesis returned 0 insights. Response preview (first 1000 chars): %s",
+                    response[:1000]
+                )
         except Exception as parse_err:
-            logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:500]}")
+            logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:1000]}")
             insights = []
 
         # Adjust confidence based on historical track record
@@ -3430,8 +3436,13 @@ class AutonomousDeepEngine:
 
         try:
             insights = parse_synthesis_response(response)
+            if not insights:
+                logger.warning(
+                    "[AUTO] Synthesis returned 0 insights. Response preview (first 1000 chars): %s",
+                    response[:1000]
+                )
         except Exception as parse_err:
-            logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:500]}")
+            logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:1000]}")
             insights = []
 
         # Adjust confidence based on historical track record
