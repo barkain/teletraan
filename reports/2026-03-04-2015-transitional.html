@@ -1,0 +1,1993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teletraan Intelligence &mdash; March 04, 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
+<style>
+/* === RESET & BASE === */
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0;
+  background: #0B0F19;
+  background-image: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.08) 0%, transparent 60%);
+  color: #CBD5E1;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* === HEADER BAR (slim, fixed) === */
+.header-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(11,15,25,0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header-bar-brand {
+  font-size: 15px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.3px;
+}
+.header-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  color: #64748B;
+}
+.header-bar-regime {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 32px 24px 60px;
+}
+
+/* === KPI ROW === */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.kpi-card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 20px;
+  text-align: center;
+  transition: all 0.25s ease;
+}
+.kpi-card:hover {
+  background: rgba(255,255,255,0.05);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+}
+.kpi-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #64748B;
+  margin-bottom: 8px;
+}
+.kpi-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 28px;
+  font-weight: 700;
+  color: #F1F5F9;
+  line-height: 1.2;
+}
+.kpi-sub {
+  font-size: 12px;
+  color: #475569;
+  margin-top: 4px;
+}
+
+/* === CARDS (glassmorphism) === */
+.card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.card-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #6366F1;
+  margin-bottom: 12px;
+}
+
+/* === SUMMARY / EXECUTIVE BRIEFING === */
+.summary-card {
+  margin-bottom: 28px;
+}
+.summary-text {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #CBD5E1;
+}
+.summary-text .md-heading {
+  font-size: 16px;
+  font-weight: 700;
+  color: #E2E8F0;
+  margin: 20px 0 8px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.summary-text .md-para {
+  margin: 8px 0;
+}
+.summary-text .md-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  color: #CBD5E1;
+  line-height: 1.8;
+}
+.summary-text .md-list li {
+  margin-bottom: 4px;
+}
+.summary-text .md-kv {
+  margin: 4px 0;
+  font-size: 14px;
+}
+.summary-text .md-kv-key {
+  font-weight: 700;
+  color: #A5B4FC;
+}
+.summary-text .md-kv-value {
+  color: #E2E8F0;
+}
+.summary-text strong { color: #F1F5F9; }
+.summary-text .num-positive {
+  color: #10B981;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.summary-text .num-negative {
+  color: #EF4444;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+
+/* === TL;DR ACTION BOX === */
+.tldr-box {
+  margin-bottom: 24px;
+  padding: 20px 24px;
+  background: rgba(245,158,11,0.05);
+  border: 1px solid rgba(245,158,11,0.18);
+  border-left: 4px solid #F59E0B;
+  border-radius: 12px;
+  position: relative;
+}
+.tldr-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.tldr-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+.tldr-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #F59E0B;
+  letter-spacing: -0.2px;
+}
+.tldr-list {
+  margin: 0;
+  padding-left: 20px;
+  list-style: none;
+}
+.tldr-list li {
+  position: relative;
+  padding-left: 8px;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #E2E8F0;
+}
+.tldr-list li::before {
+  content: "→";
+  position: absolute;
+  left: -18px;
+  color: #F59E0B;
+  font-weight: 700;
+}
+.tldr-list li strong {
+  color: #FCD34D;
+}
+.tldr-list li:last-child {
+  margin-bottom: 0;
+}
+
+/* === TWO-COL GRID === */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+
+/* === SECTOR BARS === */
+.sector-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sector-bars-subtitle {
+  font-size: 12px;
+  color: #8888aa;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+.sector-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sector-bar-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94A3B8;
+  min-width: 90px;
+  flex-shrink: 0;
+}
+.sector-bar-track {
+  flex: 1;
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  position: relative;
+}
+.sector-bar-zero {
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: rgba(255,255,255,0.25);
+  border-left: 1px dashed rgba(255,255,255,0.25);
+  z-index: 2;
+}
+.sector-bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  transition: width 0.6s ease;
+}
+.sector-bar-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 56px;
+  text-align: right;
+}
+.sector-bar-axis {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+.sector-bar-axis-track {
+  flex: 1;
+  position: relative;
+  height: 14px;
+}
+.sector-bar-axis-label {
+  position: absolute;
+  top: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #64748B;
+}
+.num-positive { color: #10B981; }
+.num-negative { color: #EF4444; }
+
+/* === PHASE ACCORDION === */
+.phase-timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.phase-count-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #10B981;
+  background: rgba(16,185,129,0.12);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.phase-expand-all-btn {
+  font-size: 12px;
+  color: #64748B;
+  background: none;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.phase-expand-all-btn:hover {
+  color: #CBD5E1;
+  border-color: rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.04);
+}
+.phase-accordion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.phase-accordion {
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+.phase-accordion:hover {
+  border-color: rgba(255,255,255,0.12);
+}
+.phase-accordion.open {
+  border-color: rgba(16,185,129,0.25);
+}
+.phase-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.02);
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  text-align: left;
+  color: inherit;
+  font-family: inherit;
+}
+.phase-header:hover {
+  background: rgba(255,255,255,0.04);
+}
+.phase-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.phase-step-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  background: rgba(255,255,255,0.06);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+}
+.phase-accordion.open .phase-step-num {
+  background: rgba(16,185,129,0.15);
+  color: #10B981;
+}
+.phase-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.phase-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #E2E8F0;
+}
+.phase-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.phase-status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #10B981;
+  background: rgba(16,185,129,0.10);
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.phase-chevron {
+  color: #475569;
+  transition: transform 0.25s ease;
+  flex-shrink: 0;
+}
+.phase-accordion.open .phase-chevron {
+  transform: rotate(180deg);
+  color: #10B981;
+}
+.phase-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease, padding 0.3s ease;
+  padding: 0 14px;
+}
+.phase-accordion.open .phase-content {
+  max-height: 200px;
+  padding: 0 14px 14px;
+}
+.phase-desc {
+  font-size: 13px;
+  color: #94A3B8;
+  line-height: 1.6;
+  margin: 0;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+/* === DIVIDER === */
+.section-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.06);
+  margin: 8px 0 28px;
+}
+
+/* === FILTER BAR === */
+.insights-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #94A3B8;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+.filter-btn:hover {
+  background: rgba(255,255,255,0.08);
+  color: #E2E8F0;
+}
+.filter-btn.active {
+  background: rgba(99,102,241,0.15);
+  border-color: rgba(99,102,241,0.3);
+  color: #A5B4FC;
+}
+.sort-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #64748B;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sort-btn:hover {
+  color: #E2E8F0;
+  background: rgba(255,255,255,0.08);
+}
+.sort-btn.active {
+  color: #A5B4FC;
+  border-color: rgba(99,102,241,0.3);
+}
+
+/* === INSIGHT CARDS === */
+.insight-card {
+  background: rgba(255,255,255,0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  transition: all 0.25s ease;
+}
+.insight-card:hover {
+  border-color: rgba(255,255,255,0.10);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+}
+.insight-card.expanded {
+  border-color: rgba(99,102,241,0.20);
+  background: rgba(255,255,255,0.04);
+  transform: none;
+  box-shadow: 0 4px 32px rgba(99,102,241,0.08);
+}
+.insight-header {
+  padding: 20px 24px 16px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.insight-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.insight-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.action-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.symbol-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #94A3B8;
+  background: rgba(255,255,255,0.05);
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.symbol-tag.primary {
+  color: #E2E8F0;
+  background: rgba(255,255,255,0.08);
+  font-size: 13px;
+}
+.timeframe-badge {
+  font-size: 11px;
+  color: #64748B;
+  background: rgba(255,255,255,0.04);
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* Confidence progress bar (inline in insight cards) */
+.confidence-bar-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 100px;
+}
+.confidence-bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 60px;
+}
+.confidence-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+.confidence-bar-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Layman explanation text */
+.layman-explanation {
+  font-style: italic;
+  color: #94A3B8;
+  font-size: 13px;
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(255,255,255,0.1);
+  line-height: 1.6;
+}
+
+/* Analyst section cards (per-analyst evidence) */
+.analyst-section {
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.analyst-section:last-child {
+  margin-bottom: 0;
+}
+.analyst-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.analyst-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.analyst-finding {
+  margin-bottom: 10px;
+}
+.analyst-finding:last-child {
+  margin-bottom: 0;
+}
+.analyst-finding-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #CBD5E1;
+}
+.analyst-conf-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.analyst-conf-track {
+  flex: 1;
+  max-width: 120px;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.analyst-conf-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.analyst-conf-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Charts row */
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 28px;
+}
+.chart-container {
+  min-height: 220px;
+}
+
+.insight-title {
+  margin: 0 0 6px 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #F1F5F9;
+  line-height: 1.4;
+}
+.insight-thesis-preview {
+  margin: 0;
+  font-size: 14px;
+  color: #94A3B8;
+  line-height: 1.6;
+}
+.expand-indicator {
+  text-align: center;
+  padding-top: 8px;
+}
+.chevron {
+  width: 20px;
+  height: 20px;
+  color: #475569;
+  transition: transform 0.3s ease;
+}
+.insight-card.expanded .chevron {
+  transform: rotate(180deg);
+}
+
+/* Expanded details */
+.insight-details {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s ease;
+  padding: 0 24px;
+}
+.insight-card.expanded .insight-details {
+  max-height: 3000px;
+  padding: 0 24px 24px;
+}
+.detail-section {
+  margin-bottom: 16px;
+}
+.detail-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #6366F1;
+  margin-bottom: 8px;
+}
+.detail-content {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #CBD5E1;
+}
+.detail-content strong { color: #F1F5F9; }
+.detail-content .md-heading {
+  font-size: 15px;
+  font-weight: 700;
+  color: #E2E8F0;
+  margin: 16px 0 8px 0;
+}
+.detail-content .md-para {
+  margin: 8px 0;
+}
+.detail-content .md-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  line-height: 1.8;
+}
+.detail-content .md-list li {
+  margin-bottom: 4px;
+}
+.detail-content .md-kv {
+  margin: 4px 0;
+}
+.detail-content .md-kv-key {
+  font-weight: 700;
+  color: #A5B4FC;
+}
+.detail-content .md-kv-value {
+  color: #E2E8F0;
+}
+.detail-content .num-positive {
+  color: #10B981;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.detail-content .num-negative {
+  color: #EF4444;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+.detail-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #94A3B8;
+  line-height: 1.8;
+}
+.detail-list li { margin-bottom: 4px; }
+.detail-list strong { color: #CBD5E1; }
+
+/* Trading levels */
+.trading-levels {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 16px 0;
+}
+.level-box {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 10px 16px;
+  min-width: 100px;
+}
+.level-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #64748B;
+  margin-bottom: 2px;
+}
+.level-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: #E2E8F0;
+}
+
+/* Risk box */
+.risk-box {
+  background: rgba(245,158,11,0.06);
+  border: 1px solid rgba(245,158,11,0.12);
+  border-radius: 10px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.risk-box .detail-list {
+  color: #FCD34D;
+}
+
+/* Invalidation */
+.invalidation-box {
+  background: rgba(239,68,68,0.06);
+  border-left: 3px solid #EF4444;
+  border-radius: 0 10px 10px 0;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 13px;
+  color: #FCA5A5;
+}
+.invalidation-box strong { color: #F87171; }
+
+/* === SECTION TITLE === */
+.section-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #F1F5F9;
+  margin: 0 0 4px 0;
+}
+.section-subtitle {
+  font-size: 13px;
+  color: #64748B;
+  margin: 0 0 20px 0;
+}
+
+/* === EMPTY STATE === */
+.empty-state {
+  text-align: center;
+  padding: 60px 24px;
+  color: #475569;
+  font-size: 15px;
+}
+
+/* === FOOTER === */
+.report-footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.report-footer p {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+}
+.report-footer strong {
+  color: #475569;
+}
+.report-footer a {
+  color: #6366F1;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+.report-footer a:hover {
+  text-decoration: underline;
+}
+
+/* === RESPONSIVE === */
+@media (max-width: 768px) {
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .charts-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .container { padding: 20px 16px 40px; }
+  .header-bar { padding: 10px 16px; flex-wrap: wrap; gap: 8px; }
+  .kpi-row { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .kpi-value { font-size: 22px; }
+  .two-col { grid-template-columns: 1fr; }
+  .charts-row { grid-template-columns: 1fr; }
+  .insight-header { padding: 16px; }
+  .insight-details { padding: 0 16px; }
+  .insight-card.expanded .insight-details { padding: 0 16px 16px; }
+  .insights-toolbar { flex-direction: column; align-items: flex-start; }
+  .trading-levels { flex-direction: column; }
+  .src-pred-grid { grid-template-columns: 1fr; }
+  .src-breakdown-row { grid-template-columns: 70px 1fr 44px; gap: 6px; }
+  .src-key-levels { flex-direction: column; gap: 8px; }
+}
+
+/* === ANIMATIONS === */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.kpi-card {
+  animation: fadeInUp 0.4s ease both;
+}
+.kpi-card:nth-child(2) { animation-delay: 0.05s; }
+.kpi-card:nth-child(3) { animation-delay: 0.1s; }
+.kpi-card:nth-child(4) { animation-delay: 0.15s; }
+.insight-card {
+  animation: fadeInUp 0.4s ease both;
+}
+.insight-card:nth-child(2) { animation-delay: 0.05s; }
+.insight-card:nth-child(3) { animation-delay: 0.1s; }
+.insight-card:nth-child(4) { animation-delay: 0.15s; }
+.insight-card:nth-child(5) { animation-delay: 0.2s; }
+.insight-card:nth-child(6) { animation-delay: 0.25s; }
+.insight-card:nth-child(7) { animation-delay: 0.3s; }
+.insight-card:nth-child(8) { animation-delay: 0.35s; }
+
+/* === TOOLTIP ON CARD TITLES === */
+.card-title-tooltip {
+  position: relative;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.card-title-tooltip .tooltip-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748B;
+  border: 1px solid #475569;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.card-title-tooltip:hover .tooltip-icon {
+  color: #A5B4FC;
+  border-color: #6366F1;
+}
+.card-title-tooltip .tooltip-text {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  top: 100%;
+  z-index: 200;
+  width: 280px;
+  padding: 10px 14px;
+  background: #1a1a2e;
+  color: #CBD5E1;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: 0;
+  text-transform: none;
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s ease;
+}
+.card-title-tooltip:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* === ANALYSIS SOURCES SECTION === */
+.analysis-sources {
+  margin-top: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.02);
+}
+.sources-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.04);
+  border: none;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sources-toggle:hover {
+  background: rgba(255,255,255,0.08);
+}
+.toggle-chevron {
+  margin-left: auto;
+  transition: transform 0.3s;
+  font-size: 10px;
+}
+.analysis-sources.open .toggle-chevron {
+  transform: rotate(180deg);
+}
+.sources-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s;
+  padding: 0 16px;
+}
+.analysis-sources.open .sources-content {
+  max-height: 800px;
+  padding: 16px;
+}
+.src-section {
+  padding: 14px;
+  margin-bottom: 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.src-section:last-child {
+  margin-bottom: 0;
+}
+.src-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #64748b;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Technical Analysis */
+.src-ta-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.src-ta-score {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+.src-ta-rating {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+}
+.src-ta-conf {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.src-ta-explain {
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+.src-breakdown {
+  display: grid;
+  gap: 8px;
+}
+.src-breakdown-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 50px;
+  align-items: center;
+  gap: 10px;
+}
+.src-breakdown-label {
+  font-size: 12px;
+  color: #94a3b8;
+  text-transform: capitalize;
+}
+.src-breakdown-track {
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.src-breakdown-center {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255,255,255,0.15);
+}
+.src-breakdown-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+.src-breakdown-val {
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  text-align: right;
+}
+.src-breakdown-meaning {
+  font-size: 11px;
+  color: #64748b;
+  grid-column: 1 / -1;
+  margin-top: -4px;
+}
+.src-key-levels {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  flex-wrap: wrap;
+}
+.src-level {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.src-level-label {
+  color: #64748b;
+}
+.src-level-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+
+/* Prediction Markets */
+.src-pred-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.src-pred-card {
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.src-pred-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+.src-pred-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+.src-pred-bar {
+  height: 4px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.src-pred-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: #3b82f6;
+}
+.src-pred-explain {
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-top: 4px;
+}
+.src-source-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+
+/* Sentiment */
+.src-sent-mood {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.src-sent-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.src-sent-explain {
+  font-size: 12px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-bottom: 10px;
+}
+.src-sent-tickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.src-sent-ticker {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.src-sent-mentions {
+  font-size: 12px;
+  color: #cbd5e1;
+  margin-bottom: 4px;
+}
+
+/* === DISCLAIMER BANNER === */
+.disclaimer-banner {
+  background: rgba(255,165,0,0.08);
+  border: 1px solid rgba(255,165,0,0.2);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  line-height: 1.5;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.disclaimer-banner strong {
+  color: #d1d5db;
+}
+.disclaimer-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+.disclaimer-footer {
+  font-size: 0.7rem;
+  margin-top: 32px;
+  opacity: 0.8;
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER BAR (slim, fixed) -->
+<div class="header-bar">
+  <div class="header-bar-brand">Teletraan Intelligence</div>
+  <div class="header-bar-right">
+    <span>March 04, 2026 at 20:31 UTC</span>
+    <span class="header-bar-regime" style="background:rgba(255,255,255,0.04);color:#F59E0B;border:1px solid #F59E0B33;">
+      <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#F59E0B;box-shadow:0 0 6px #F59E0B;"></span>
+      Transitional
+    </span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- DISCLAIMER (top) -->
+  <div class="disclaimer-banner">
+    <span class="disclaimer-icon">&#x26A0;&#xFE0F;</span>
+    <span>
+      <strong>DISCLAIMER:</strong> This report is generated by an AI system for informational and educational purposes only.
+      It does not constitute financial advice, investment recommendations, or solicitation to buy or sell any securities.
+      The information provided may be inaccurate, incomplete, or outdated. Past performance does not guarantee future results.
+      Always consult a qualified financial advisor before making investment decisions. The authors and contributors of this
+      tool accept no liability for any financial losses or damages arising from the use of this information.
+    </span>
+  </div>
+
+  <!-- KPI ROW -->
+  <div class="kpi-row">
+    <div class="kpi-card">
+      <div class="kpi-label">Insights</div>
+      <div class="kpi-value">0</div>
+      <div class="kpi-sub">findings</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label"><span class="card-title-tooltip">Regime<span class="tooltip-icon">?</span><span class="tooltip-text">Market regime indicates the current overall market behavior pattern (Bullish, Bearish, Transitional, or Volatile). It&#39;s determined by analyzing macro indicators, sector rotation, and price trends across the market.</span></span></div>
+      <div class="kpi-value" style="font-size:20px;color:#F59E0B;">Transitional</div>
+      <div class="kpi-sub" style="margin-top:6px;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#F59E0B;box-shadow:0 0 6px #F59E0B;vertical-align:middle;"></span>
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Duration</div>
+      <div class="kpi-value" style="font-size:22px;">16m 28s</div>
+      <div class="kpi-sub">analysis time</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Top Action</div>
+      <div class="kpi-value" style="font-size:20px;color:#6366F1;">--</div>
+      <div class="kpi-sub" style="font-family:'JetBrains Mono',monospace;">(0)</div>
+    </div>
+  </div>
+
+  <!-- CHARTS ROW -->
+  <div class="charts-row">
+    <div class="card">
+      <div class="card-label"><span class="card-title-tooltip">Confidence Distribution<span class="tooltip-icon">?</span><span class="tooltip-text">Shows how analysis confidence is distributed across insights. Higher confidence (80-100%) means stronger supporting data. The bands are: Low (0-40%), Medium-Low (40-60%), Medium (60-80%), and High (80-100%).</span></span></div>
+      <div class="chart-container" id="chart-confidence"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Action Breakdown</div>
+      <div class="chart-container" id="chart-actions"></div>
+    </div>
+  </div>
+
+  <!-- EXECUTIVE BRIEFING -->
+  
+    <section class="card summary-card">
+      <div class="card-label">Executive Briefing</div>
+      
+    <div class="tldr-box">
+      <div class="tldr-header">
+        <span class="tldr-icon">&#9889;</span>
+        <span class="tldr-title">TL;DR &mdash; What Should You Do?</span>
+      </div>
+      <ul class="tldr-list">
+      <li>Market is <strong>transitional</strong> &mdash; be cautious with new positions and wait for clearer signals.</li>
+      <li><strong>Sectors favoring:</strong> Utilities, Energy, Real Estate. <strong>Caution:</strong> Financials, Consumer Discretionary.</li>
+      </ul>
+    </div>
+
+      <div class="summary-text"><h3 class="md-heading">How These Opportunities Were Discovered</h3>
+<p class="md-para"><strong>Market Regime:</strong> Transitional</p>
+<p class="md-para"><strong>Key Macro Themes:</strong></p>
+<ul class="md-list">
+<li>Geopolitical Risk Premium &amp; Energy Security Crisis: Crude oil's massive 14.52% surge in 20 days signals severe supply disruption or geopolitical tension...</li>
+<li>Global Growth Slowdown &amp; Safe-Haven Rotation: Simultaneous global equity selloff (Nikkei <span class="num-negative">-7.67%</span>, European indices <span class="num-negative">-4%</span>+) with gold hitting $5,145 (...</li>
+<li>Late-Cycle Defensive Positioning &amp; Rate Cut Anticipation: Treasury yields declining 4<span class="num-negative">-5%</span> across curve with Real Estate (<span class="num-positive">+5.50%</span>) and Utilities (<span class="num-positive">+9.94%</span>) leading...</li>
+</ul>
+<p class="md-para"><strong>Heatmap Analysis:</strong> Today's market shows a classic defensive-to-growth rotation with Technology (<span class="num-positive">+1.91%</span>) and Consumer Discretionary (<span class="num-positive">+1.76%</span>) leading, while Energy (<span class="num-negative">-0.85%</span>) and Consumer Staples (<span class="num-negative">-0.42%</span>) lag. This creates tension with the macro narrative of geopolitical risk and global growth concerns—suggesting either a relief rally or late-cycle rotation into quality growth before a deeper correction.</p>
+<p class="md-para"><strong>Sectors Scanned:</strong></p>
+<ul class="md-list">
+<li>Technology: <span class="num-positive">+1.9%</span> (1D), breadth 50%</li>
+<li>Financials: <span class="num-positive">+0.7%</span> (1D), breadth 50%</li>
+<li>Energy: <span class="num-negative">-0.8%</span> (1D), breadth 50%</li>
+<li>Healthcare: <span class="num-positive">+0.4%</span> (1D), breadth 50%</li>
+<li>Industrials: <span class="num-positive">+0.4%</span> (1D), breadth 50%</li>
+<li>Consumer Staples: <span class="num-negative">-0.4%</span> (1D), breadth 50%</li>
+<li>Consumer Discretionary: <span class="num-positive">+1.8%</span> (1D), breadth 50%</li>
+<li>Utilities: <span class="num-positive">+0.6%</span> (1D), breadth 50%</li>
+<li>Communication Services: <span class="num-positive">+0.6%</span> (1D), breadth 50%</li>
+<li>Real Estate: <span class="num-positive">+0.1%</span> (1D), breadth 50%</li>
+<li>Materials: <span class="num-positive">+0.3%</span> (1D), breadth 50%</li>
+</ul>
+<p class="md-para"><strong>Stocks in Universe:</strong> 0</p>
+<p class="md-para"><strong>Stocks Selected for Deep Dive:</strong> 15</p>
+<p class="md-para"><strong>Key Patterns Identified:</strong></p>
+<ul class="md-list">
+<li>Technology sector leading with <span class="num-positive">+1.91%</span> 1D gain while showing <span class="num-negative">-2.02%</span> 5D weakness—potential mean reversion or dead-cat bounce off oversold levels</li>
+<li>Energy sector (<span class="num-negative">-0.85%</span> 1D) sharply reversing from strong 5D momentum (<span class="num-positive">+2.13%</span>) and 20D outperformance (<span class="num-positive">+6.08%</span>)—potential profit-taking after geopolitical premium spike</li>
+<li>Defensive sectors (Utilities <span class="num-positive">+0.61%</span>, Real Estate <span class="num-positive">+0.10%</span>) showing modest gains despite risk-on tech rally—mixed signal suggesting investor uncertainty</li>
+</ul></div>
+    </section>
+
+
+  <!-- SECTORS -->
+  <div style="margin-bottom:20px;">
+    <div class="card">
+      <div class="card-label">Sectors</div>
+      <div class="sector-bars">
+      <div class="sector-bars-subtitle">
+        1-Day Price Change&nbsp;&mdash;&nbsp;
+        <span style="color:#10B981;">&#9632;</span> positive&nbsp;&nbsp;
+        <span style="color:#EF4444;">&#9632;</span> negative
+      </div>
+      
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Utilities</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="left:50%;width:50%;background:#10B981;border-radius:0 4px 4px 0;"></div>
+              </div>
+              <span class="sector-bar-val num-positive">+9.9%</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Energy</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="left:50%;width:30%;background:#10B981;border-radius:0 4px 4px 0;"></div>
+              </div>
+              <span class="sector-bar-val num-positive">+6.1%</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Real Estate</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="left:50%;width:27%;background:#10B981;border-radius:0 4px 4px 0;"></div>
+              </div>
+              <span class="sector-bar-val num-positive">+5.5%</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Financials</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="right:50%;width:22%;background:#EF4444;border-radius:4px 0 0 4px;"></div>
+              </div>
+              <span class="sector-bar-val num-negative">-4.5%</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Industrials</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="left:50%;width:20%;background:#10B981;border-radius:0 4px 4px 0;"></div>
+              </div>
+              <span class="sector-bar-val num-positive">+4.0%</span>
+            </div>
+            <div class="sector-bar-row">
+              <span class="sector-bar-name">Consumer Discretionary</span>
+              <div class="sector-bar-track">
+                <div class="sector-bar-zero"></div>
+                <div class="sector-bar-fill" style="right:50%;width:15%;background:#EF4444;border-radius:4px 0 0 4px;"></div>
+              </div>
+              <span class="sector-bar-val num-negative">-3.1%</span>
+            </div>
+      <div class="sector-bar-axis">
+        <span class="sector-bar-name"></span>
+        <div class="sector-bar-axis-track">
+          <span class="sector-bar-axis-label" style="left:0;">-9.9%</span>
+          <span class="sector-bar-axis-label" style="left:50%;transform:translateX(-50%);">0%</span>
+          <span class="sector-bar-axis-label" style="right:0;">+9.9%</span>
+        </div>
+        <span class="sector-bar-val"></span>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <!-- ANALYSIS PIPELINE -->
+  <div style="margin-bottom:28px;">
+    <div class="card">
+      <div class="card-label">Analysis Pipeline</div>
+      
+    <div class="phase-timeline-header">
+      <span class="phase-count-badge">7 / 7 phases</span>
+      <button class="phase-expand-all-btn" onclick="toggleAllPhases()">Expand All</button>
+    </div>
+    <div class="phase-accordion-list">
+        <div class="phase-accordion" data-phase="macro_scan">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">1</span>
+              <span class="phase-icon">&#127758;</span>
+              <span class="phase-name">Macro Scan</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Detected Transitional regime (72% confidence). Key themes: Geopolitical Risk Premium &amp; Energy Security Crisis, Global Growth Slowdown &amp; Safe-Haven Rotation, Late-Cycle Defensive Positioning &amp; Rate Cut Anticipation. Top risks: Cascading global financial stress - Banking sector weakness (XLF -4.46%) combined with international equity rout could trigger credit event or systemic crisis, Stagflation scenario - Oil surge (+14.52%) could reignite inflation pressures just as growth slows globally, trapping central banks.</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="heatmap_fetch">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">2</span>
+              <span class="phase-icon">&#128229;</span>
+              <span class="phase-name">Heatmap Fetch</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Fetched 11 sectors and 0 stocks (open). Strongest: Technology (+1.9%), weakest: Energy (-0.8%).</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="heatmap_analysis">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">3</span>
+              <span class="phase-icon">&#128202;</span>
+              <span class="phase-name">Heatmap Analysis</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Selected 15 stocks (7 high priority) at 65% confidence. Sectors to watch: Technology, Energy, Financials, Consumer Discretionary. Key patterns: Technology sector leading with +1.91% 1D gain while showing ; Energy sector (-0.85% 1D) sharply reversing from strong 5D m.</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="deep_dive">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">4</span>
+              <span class="phase-icon">&#128269;</span>
+              <span class="phase-name">Deep Dive</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Analyzed 10 stocks successfully. Symbols: NVDA, CL=F, JPM, AAPL, GC=F, AMZN, XOM, GLW....</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="coverage_evaluation">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">5</span>
+              <span class="phase-icon">&#9989;</span>
+              <span class="phase-name">Coverage Evaluation</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Coverage evaluation skipped (optimized pipeline). 10 stocks analyzed.</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="cluster_analysis">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">6</span>
+              <span class="phase-icon">&#9679;</span>
+              <span class="phase-name">Cluster Analysis</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Analyzed 6 thematic clusters</p>
+          </div>
+        </div>
+
+        <div class="phase-accordion" data-phase="synthesis">
+          <button class="phase-header" onclick="togglePhase(this)" aria-expanded="false">
+            <div class="phase-header-left">
+              <span class="phase-step-num">7</span>
+              <span class="phase-icon">&#129520;</span>
+              <span class="phase-name">Synthesis</span>
+            </div>
+            <div class="phase-header-right">
+              <span class="phase-status-badge">Completed</span>
+              <svg class="phase-chevron" width="16" height="16" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+          </button>
+          <div class="phase-content">
+            <p class="phase-desc">Generated 5 insights (avg confidence: 81%). Actions: 2 SELL, 2 STRONG_BUY, 1 BUY. Top: GLW/LITE Holdings at Critical Risk: Opti; XOM: Energy Security Monopoly at Geopoli; GC=F Catch-Up Trade: Gold Lagging Crude'.</p>
+          </div>
+        </div>
+</div>
+    </div>
+  </div>
+
+  <!-- P1 SUPPLEMENTARY DATA SECTIONS (conditionally rendered) -->
+  
+    <section class="card" style="margin-bottom:20px;">
+      <div class="card-label">&#128279; Thematic Analysis</div>
+      <p style="font-size:13px;color:#CBD5E1;line-height:1.6;margin-bottom:16px;">Markets are navigating a treacherous transition from synchronized global growth to fragmented, crisis-prone regime defined by geopolitical energy shocks, financial sector fragility, and late-cycle dynamics. The simultaneous rally in defensive infrastructure assets (Utilities +9.94%), geopolitical commodities (oil +14.52%, gold $5,145), and US mega-cap quality, combined with sharp international equity declines and financial sector weakness, signals investors are positioning for stagflation and potential systemic stress while seeking shelter in American exceptionalism. This creates a barbell of winners—energy security plays, defensive infrastructure, real assets, and US quality monopolies—versus losers in cyclical growth, international exposure, and credit-sensitive financials.</p>
+      
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.08);text-align:left;">
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Theme</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Category</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;text-align:center;">Dir</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Confidence</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Key Symbols</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Supply Chain</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Catalyst</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;font-weight:600;color:#E2E8F0;font-size:13px;"></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#EF4444;background:#EF44441F;">Geopolitical</span></td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#10B981;">&#8593;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:88%;height:100%;background:#10B981;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#10B981;font-family:'JetBrains Mono',monospace;">88%</span></div></td><td style="padding:8px 12px;"></td><td style="padding:8px 12px;font-size:12px;color:#94A3B8;">Middle East disruption -&gt; COP (upstream production) -&gt; SLB (oilfield services) -&gt; XOM (integrated refining) -&gt; Consumer inflation, Natural gas shortage -&gt; LNG (export terminals) -&gt; European utilities -&gt; Industrial production cuts, Strategic reserves draw -&gt; HES (Guyana offshore) -&gt; CVX (global distribution) -&gt; Asian demand competition, Oil spike -&gt; Refining margins -&gt; XOM/CVX (downstream) -&gt; Petrochemical costs -&gt; Packaging/plastics inflation</td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;color:#94A3B8;background:rgba(255,255,255,0.04);">near_term</span></td></tr><tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;font-weight:600;color:#E2E8F0;font-size:13px;"></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#64748B;background:#64748B1F;">Financial Stress</span></td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#EF4444;">&#8595;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:82%;height:100%;background:#10B981;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#10B981;font-family:'JetBrains Mono',monospace;">82%</span></div></td><td style="padding:8px 12px;"></td><td style="padding:8px 12px;font-size:12px;color:#94A3B8;">Banking stress (XLF -4.46%) -&gt; Credit availability tightens -&gt; Commercial Real Estate funding gap -&gt; Regional bank exposure, Higher deposit costs -&gt; Net Interest Margin compression -&gt; JPM/BAC earnings miss -&gt; Lending pullback -&gt; Small business squeeze, Investment banking freeze (MS/GS) -&gt; M&amp;A drought -&gt; Corporate restructuring stalls -&gt; Private equity dry powder stuck, Wealth management pressure (SCHW) -&gt; Asset gathering slows -&gt; Fee revenue decline -&gt; Cost cutting cycle</td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;color:#94A3B8;background:rgba(255,255,255,0.04);">near_term</span></td></tr><tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;font-weight:600;color:#E2E8F0;font-size:13px;"></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#6366F1;background:#6366F11F;">Monetary Policy</span></td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#10B981;">&#8593;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:75%;height:100%;background:#10B981;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#10B981;font-family:'JetBrains Mono',monospace;">75%</span></div></td><td style="padding:8px 12px;"></td><td style="padding:8px 12px;font-size:12px;color:#94A3B8;">Rate cut expectations (yields -4.56%) -&gt; Duration asset revaluation -&gt; AMT (towers) / PLD (logistics REITs) cap rate compression, AI power demand -&gt; NEE (renewable build-out) -&gt; SO (nuclear/gas baseload) -&gt; Data center expansion (EQIX), Defensive rotation -&gt; Utility dividend yields attractive -&gt; Income investor flows -&gt; Valuation multiple expansion, Recession hedge buying -&gt; Essential infrastructure assets -&gt; PLD (e-commerce logistics) -&gt; Rental rate stability</td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;color:#94A3B8;background:rgba(255,255,255,0.04);">medium_term</span></td></tr><tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;font-weight:600;color:#E2E8F0;font-size:13px;"></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#EF4444;background:#EF44441F;">Geopolitical</span></td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#F59E0B;">&#8596;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:79%;height:100%;background:#10B981;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#10B981;font-family:'JetBrains Mono',monospace;">79%</span></div></td><td style="padding:8px 12px;"></td><td style="padding:8px 12px;font-size:12px;color:#94A3B8;">Global selloff (Nikkei -7.67%, DAX -4.29%) -&gt; Capital flight to US -&gt; Mega-cap tech as safe haven -&gt; MSFT/GOOGL/AMZN relative strength, Emerging market stress (DXY +1.16%) -&gt; Dollar revenue benefit -&gt; V/MA (payment processing) -&gt; Cross-border volume resilience, International growth slowdown -&gt; US consumer/healthcare defensiveness -&gt; UNH (domestic healthcare spend) -&gt; Quality flight, European recession -&gt; Cloud migration accelerates (cost cutting) -&gt; MSFT/AMZN (Azure/AWS) -&gt; Market share gains from local competitors</td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;color:#94A3B8;background:rgba(255,255,255,0.04);">near_term</span></td></tr><tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;font-weight:600;color:#E2E8F0;font-size:13px;"></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#64748B;background:#64748B1F;">Commodity Supercycle</span></td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#10B981;">&#8593;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:71%;height:100%;background:#10B981;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#10B981;font-family:'JetBrains Mono',monospace;">71%</span></div></td><td style="padding:8px 12px;"></td><td style="padding:8px 12px;font-size:12px;color:#94A3B8;">Oil shock (+14.52%) + slowing growth -&gt; Stagflation fears -&gt; Gold record high $5,145 -&gt; NEM/GOLD (miners) leverage, Energy inflation -&gt; Agricultural input costs (MOS fertilizer) -&gt; Food prices -&gt; Consumer staples pricing power test, Real assets bid -&gt; Industrial metals -&gt; FCX (copper) / BHP (diversified) -&gt; Inflation hedging demand, Dollar strength paradox -&gt; Gold rising despite DXY +1.16% -&gt; Central bank buying (dedollarization) -&gt; WPM (streaming royalties)</td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;color:#94A3B8;background:rgba(255,255,255,0.04);">medium_term</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      
+      <div style="margin-top:16px;">
+        <div style="font-size:12px;font-weight:600;color:#94A3B8;margin-bottom:8px;">Theme Interactions</div>
+        <ul style="margin:0;padding-left:20px;"><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;"><span style="font-weight:600;color:#E2E8F0;"></span> &mdash; </li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;"><span style="font-weight:600;color:#E2E8F0;"></span> &mdash; </li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;"><span style="font-weight:600;color:#E2E8F0;"></span> &mdash; </li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;"><span style="font-weight:600;color:#E2E8F0;"></span> &mdash; </li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;"><span style="font-weight:600;color:#E2E8F0;"></span> &mdash; </li></ul>
+      </div>
+
+    </section>
+
+  
+  
+    <section class="card" style="margin-bottom:20px;">
+      <div class="card-label">Correlation Highlights</div>
+      <span style="display:inline-block;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:700;color:#F59E0B;background:rgba(245,158,11,0.12);margin-bottom:16px;">Transitional</span>
+      
+        <div style="margin-top:12px;">
+          <div style="font-size:12px;font-weight:600;color:#94A3B8;margin-bottom:8px;">Notable Correlation Pairs</div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.08);">
+                <th style="padding:6px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;text-align:left;">Sym A</th>
+                <th style="padding:6px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;text-align:left;">Sym B</th>
+                <th style="padding:6px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;text-align:left;">Corr</th>
+              </tr>
+            </thead>
+            <tbody><tr><td style="padding:6px 12px;font-family:'JetBrains Mono',monospace;font-weight:600;color:#E2E8F0;">AAPL</td><td style="padding:6px 12px;font-family:'JetBrains Mono',monospace;font-weight:600;color:#E2E8F0;">AMZN</td><td style="padding:6px 12px;font-family:'JetBrains Mono',monospace;font-weight:700;color:#10B981;">+0.317</td></tr><tr><td style="padding:6px 12px;font-family:'JetBrains Mono',monospace;font-weight:600;color:#E2E8F0;">AAPL</td><td style="padding:6px 12px;font-family:'JetBrains Mono',monospace;font-weight:600;color:#E2E8F0;">NVDA</td><td style="padding:6px 12px;font-family:'JetBrains Mono',monospace;font-weight:700;color:#10B981;">+0.013</td></tr><tr><td style="padding:6px 12px;font-family:'JetBrains Mono',monospace;font-weight:600;color:#E2E8F0;">NVDA</td><td style="padding:6px 12px;font-family:'JetBrains Mono',monospace;font-weight:600;color:#E2E8F0;">AMZN</td><td style="padding:6px 12px;font-family:'JetBrains Mono',monospace;font-weight:700;color:#EF4444;">-0.001</td></tr></tbody>
+          </table>
+        </div>
+
+      
+        <div style="margin-top:16px;">
+          <div style="font-size:12px;font-weight:600;color:#94A3B8;margin-bottom:8px;">Anomalies</div>
+          <ul style="margin:0;padding-left:20px;"><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;"><span style="font-family:'JetBrains Mono',monospace;font-weight:600;">AAPL/NVDA</span> &mdash; Near-zero correlation (decorrelated) (+0.013)</li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;"><span style="font-family:'JetBrains Mono',monospace;font-weight:600;">NVDA/AMZN</span> &mdash; Near-zero correlation (decorrelated) (-0.001)</li></ul>
+        </div>
+
+    </section>
+
+  
+    <section class="card" style="margin-bottom:20px;">
+      <div class="card-label">Upcoming Catalysts</div>
+      
+          <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);
+                      border-left:3px solid #10B981;border-radius:0 12px 12px 0;
+                      padding:16px;margin-bottom:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:18px;">&#x1F4B0;</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#E2E8F0;">NVDA</span>
+                <span style="font-size:12px;color:#94A3B8;font-weight:600;">Ex-Dividend</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:12px;color:#94A3B8;">2026-03-11</span>
+                <span style="font-size:11px;font-weight:700;color:#F59E0B;
+                             background:rgba(255,255,255,0.04);padding:2px 10px;
+                             border-radius:12px;">6d</span>
+              </div>
+            </div>
+            <div style="margin-top:8px;font-size:12px;color:#94A3B8;">Yield: <strong style="color:#10B981;">2.00%</strong></div>
+          </div>
+
+    </section>
+
+  
+    <section class="card" style="margin-bottom:20px;">
+      <div class="card-label">&#127963;&#65039; Investor Intelligence</div>
+      <span style="display:inline-block;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:700;color:#F59E0B;background:rgba(245,158,11,0.12);margin-bottom:16px;">Consensus: The tracked institutional investors show a clear bifurcation: value-oriented managers (Buffett, Dalio, Klarman) are in defensive mode with cash accumulation, zero buybacks, and selective energy exposure, while growth-focused managers (Wood, Druckenmiller) are making contrarian accumulations in tech/crypto infrastructure during market weakness. The fact that Berkshire eliminated buybacks while Druckenmiller loaded up on semiconductors represents a stark generational and philosophical divide. The dominant positioning appears defensive, aligned with the 'Transitional' macro regime and elevated VIX.</span>
+      
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.08);text-align:left;">
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Signal Type</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Symbols</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Investors</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;text-align:center;">Dir</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Conviction</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Macro Align</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#64748B;background:#64748B1F;">Distribution</span></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#E2E8F0;background:rgba(255,255,255,0.06);font-family:'JetBrains Mono',monospace;margin-right:4px;margin-bottom:2px;">BRK.A</span><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#E2E8F0;background:rgba(255,255,255,0.06);font-family:'JetBrains Mono',monospace;margin-right:4px;margin-bottom:2px;">BRK.B</span></td><td style="padding:8px 12px;font-size:12px;color:#CBD5E1;">Warren Buffett</td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#EF4444;">&#8595;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:85%;height:100%;background:#10B981;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#10B981;font-family:'JetBrains Mono',monospace;">85%</span></div></td><td style="padding:8px 12px;">—</td></tr><tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#64748B;background:#64748B1F;">Accumulation</span></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#E2E8F0;background:rgba(255,255,255,0.06);font-family:'JetBrains Mono',monospace;margin-right:4px;margin-bottom:2px;">OXY</span></td><td style="padding:8px 12px;font-size:12px;color:#CBD5E1;">Warren Buffett</td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#10B981;">&#8593;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:78%;height:100%;background:#10B981;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#10B981;font-family:'JetBrains Mono',monospace;">78%</span></div></td><td style="padding:8px 12px;">—</td></tr><tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#64748B;background:#64748B1F;">Contrarian</span></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#E2E8F0;background:rgba(255,255,255,0.06);font-family:'JetBrains Mono',monospace;margin-right:4px;margin-bottom:2px;">COIN</span><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#E2E8F0;background:rgba(255,255,255,0.06);font-family:'JetBrains Mono',monospace;margin-right:4px;margin-bottom:2px;">HOOD</span></td><td style="padding:8px 12px;font-size:12px;color:#CBD5E1;">Cathie Wood</td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#10B981;">&#8593;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:65%;height:100%;background:#F59E0B;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#F59E0B;font-family:'JetBrains Mono',monospace;">65%</span></div></td><td style="padding:8px 12px;">—</td></tr><tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#64748B;background:#64748B1F;">Accumulation</span></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#E2E8F0;background:rgba(255,255,255,0.06);font-family:'JetBrains Mono',monospace;margin-right:4px;margin-bottom:2px;">NVDA</span></td><td style="padding:8px 12px;font-size:12px;color:#CBD5E1;">Stanley Druckenmiller</td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#10B981;">&#8593;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:72%;height:100%;background:#10B981;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#10B981;font-family:'JetBrains Mono',monospace;">72%</span></div></td><td style="padding:8px 12px;">—</td></tr><tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#64748B;background:#64748B1F;">Consensus</span></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#E2E8F0;background:rgba(255,255,255,0.06);font-family:'JetBrains Mono',monospace;margin-right:4px;margin-bottom:2px;">BRK.A</span><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#E2E8F0;background:rgba(255,255,255,0.06);font-family:'JetBrains Mono',monospace;margin-right:4px;margin-bottom:2px;">BRK.B</span></td><td style="padding:8px 12px;font-size:12px;color:#CBD5E1;">Warren Buffett, Ray Dalio, Seth Klarman</td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#F59E0B;">&#8596;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:70%;height:100%;background:#10B981;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#10B981;font-family:'JetBrains Mono',monospace;">70%</span></div></td><td style="padding:8px 12px;">—</td></tr><tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;color:#64748B;background:#64748B1F;">Consensus</span></td><td style="padding:8px 12px;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#E2E8F0;background:rgba(255,255,255,0.06);font-family:'JetBrains Mono',monospace;margin-right:4px;margin-bottom:2px;">GM</span></td><td style="padding:8px 12px;font-size:12px;color:#CBD5E1;">Warren Buffett</td><td style="padding:8px 12px;text-align:center;"><span style="font-size:16px;color:#F59E0B;">&#8596;</span></td><td style="padding:8px 12px;"><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;min-width:50px;"><div style="width:55%;height:100%;background:#F59E0B;border-radius:3px;"></div></div><span style="font-size:11px;font-weight:700;color:#F59E0B;font-family:'JetBrains Mono',monospace;">55%</span></div></td><td style="padding:8px 12px;">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      
+      <div style="margin-top:16px;">
+        <div style="font-size:12px;font-weight:600;color:#94A3B8;margin-bottom:8px;">Notable Divergences</div>
+        <ul style="margin:0;padding-left:20px;"><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">Buffett conducting zero stock buybacks and emphasizing cash preservation while Druckenmiller aggressively accumulates semiconductor/AI exposure via concentrated ETF position</li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">Cathie Wood adding to crypto infrastructure (COIN, HOOD) during risk-off period while Berkshire acquires traditional energy assets (OxyChem from OXY)</li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">Druckenmiller making high-conviction NVDA-linked plays suggesting AI infrastructure bull case while Buffett's operating earnings fell 30% and he maintains defensive cash posture</li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">Tiger Global (Coleman) filed recent 13F Feb 17th but limited commentary, suggesting continued tech exposure while Buffett transitions to Abel's 'cash-focused future'</li></ul>
+      </div>
+
+      
+      <div style="margin-top:16px;">
+        <div style="font-size:12px;font-weight:600;color:#94A3B8;margin-bottom:8px;">Key Themes</div>
+        <ul style="margin:0;padding-left:20px;"><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">Defensive cash accumulation by value titans - Buffett's zero buybacks and Greg Abel's cash-focused mandate signals risk management at critical juncture</li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">Energy security and infrastructure plays - Berkshire's OxyChem acquisition and OXY conviction aligns with +14.52% oil surge and geopolitical risk premium</li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">AI infrastructure conviction amid volatility - Druckenmiller's concentrated semiconductor bet suggests smart money separating AI winners from losers despite market turbulence</li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">Crypto/fintech contrarian accumulation - Wood buying COIN/HOOD weakness indicates belief in regulatory clarity and Bitcoin ETF flow sustainability</li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">Leadership transition risk management - Abel's first letter emphasizing operational cash flow over Buffett-era buybacks marks philosophical shift toward balance sheet fortress mentality</li><li style="margin-bottom:6px;font-size:13px;color:#CBD5E1;">Value-growth bifurcation - Stark divide between defensive value managers (Buffett, Klarman, Dalio) and aggressive growth positioning (Wood, Druckenmiller) reflects macro uncertainty</li></ul>
+      </div>
+
+    </section>
+
+
+  <div class="section-divider"></div>
+
+  <!-- ACTIONABLE INSIGHTS -->
+  <div>
+    <h2 class="section-title">Actionable Insights</h2>
+    <p class="section-subtitle">Click any insight to expand full analysis, risks, and trading levels.</p>
+
+    <div class="insights-toolbar">
+      <div class="filter-bar">
+        <button class="filter-btn active" data-action="ALL" onclick="filterInsights('ALL')">All</button>
+      </div>
+      <button class="sort-btn" onclick="toggleSort()" id="sort-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <polyline points="19 12 12 19 5 12"></polyline>
+        </svg>
+        Sort by confidence
+      </button>
+    </div>
+
+    <div id="insights-container">
+      <div class="empty-state">No insights generated for this report.</div>
+    </div>
+  </div>
+
+  <!-- DISCLAIMER (footer) -->
+  <div class="disclaimer-banner disclaimer-footer">
+    <span class="disclaimer-icon">&#x26A0;&#xFE0F;</span>
+    <span>
+      <strong>DISCLAIMER:</strong> This report is generated by an AI system for informational and educational purposes only.
+      It does not constitute financial advice, investment recommendations, or solicitation to buy or sell any securities.
+      Always consult a qualified financial advisor before making investment decisions.
+    </span>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="report-footer">
+    <p>Generated by <strong>Teletraan Intelligence</strong> &middot; March 04, 2026 at 20:31 UTC</p>
+    <a href="../index.html">All Reports</a>
+  </footer>
+
+</div>
+
+<script>
+(function() {
+  // Phase accordion toggle
+  window.togglePhase = function(btn) {
+    var accordion = btn.closest('.phase-accordion');
+    accordion.classList.toggle('open');
+    var isOpen = accordion.classList.contains('open');
+    btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  };
+
+  // Expand / collapse all phases
+  window.toggleAllPhases = function() {
+    var accordions = document.querySelectorAll('.phase-accordion');
+    var btn = document.querySelector('.phase-expand-all-btn');
+    var anyOpen = Array.from(accordions).some(function(a) { return a.classList.contains('open'); });
+    accordions.forEach(function(a) {
+      if (anyOpen) {
+        a.classList.remove('open');
+        a.querySelector('.phase-header').setAttribute('aria-expanded', 'false');
+      } else {
+        a.classList.add('open');
+        a.querySelector('.phase-header').setAttribute('aria-expanded', 'true');
+      }
+    });
+    btn.textContent = anyOpen ? 'Expand All' : 'Collapse All';
+  };
+})();
+</script>
+
+<script>
+(function() {
+  // Insight data for filtering/sorting
+  var insightData = [];
+  var currentFilter = 'ALL';
+  var sortDescending = false;
+
+  // Toggle expand/collapse
+  window.toggleInsight = function(index) {
+    var card = document.querySelector('.insight-card[data-index="' + index + '"]');
+    if (card) {
+      card.classList.toggle('expanded');
+    }
+  };
+
+  // Filter insights by action
+  window.filterInsights = function(action) {
+    currentFilter = action;
+    document.querySelectorAll('.filter-btn').forEach(function(btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-action') === action);
+    });
+    applyFiltersAndSort();
+  };
+
+  // Toggle sort by confidence
+  window.toggleSort = function() {
+    sortDescending = !sortDescending;
+    var btn = document.getElementById('sort-btn');
+    btn.classList.toggle('active', sortDescending);
+    applyFiltersAndSort();
+  };
+
+  function applyFiltersAndSort() {
+    var container = document.getElementById('insights-container');
+    var cards = Array.from(container.querySelectorAll('.insight-card'));
+    var order = insightData.slice();
+    if (currentFilter !== 'ALL') {
+      order = order.filter(function(d) { return d.action === currentFilter; });
+    }
+    if (sortDescending) {
+      order.sort(function(a, b) { return b.confidence - a.confidence; });
+    }
+    var visibleIndices = new Set(order.map(function(d) { return d.index; }));
+    cards.forEach(function(card) {
+      var idx = parseInt(card.getAttribute('data-index'));
+      card.style.display = visibleIndices.has(idx) ? '' : 'none';
+    });
+    if (sortDescending) {
+      order.forEach(function(d) {
+        var card = container.querySelector('.insight-card[data-index="' + d.index + '"]');
+        if (card) container.appendChild(card);
+      });
+    }
+  }
+
+  // === ApexCharts === //
+  var darkTheme = {
+    mode: 'dark',
+    palette: 'palette1',
+    monochrome: { enabled: false }
+  };
+
+  // Confidence Distribution (radialBar)
+  var confDist = [0, 0, 0];
+  var confTotal = confDist[0] + confDist[1] + confDist[2];
+  if (confTotal > 0) {
+    var confPcts = confDist.map(function(v) { return Math.round(v / confTotal * 100); });
+    var confHoveredIdx = -1;
+    new ApexCharts(document.querySelector('#chart-confidence'), {
+      chart: { type: 'radialBar', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      plotOptions: {
+        radialBar: {
+          hollow: { size: '30%' },
+          track: { background: 'rgba(255,255,255,0.06)' },
+          dataLabels: {
+            name: { fontSize: '12px', color: '#94A3B8', offsetY: -4,
+                     formatter: function(seriesName, opts) { confHoveredIdx = opts && opts.seriesIndex != null ? opts.seriesIndex : -1; return seriesName; } },
+            value: { fontSize: '14px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,
+                      formatter: function(val) { var count = confHoveredIdx >= 0 && confHoveredIdx < confDist.length ? confDist[confHoveredIdx] : confTotal; return count + ' insight' + (count !== 1 ? 's' : ''); } }
+          }
+        }
+      },
+      series: confPcts,
+      labels: ['High (>80%)', 'Medium (60-80%)', 'Low (<60%)'],
+      colors: ['#10B981', '#F59E0B', '#EF4444'],
+      stroke: { lineCap: 'round' }
+    }).render();
+  } else {
+    document.querySelector('#chart-confidence').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No confidence data</div>';
+  }
+
+  // Action Breakdown (donut)
+  var actionLabels = [];
+  var actionValues = [];
+  var actionColors = [];
+  if (actionValues.length > 0) {
+    new ApexCharts(document.querySelector('#chart-actions'), {
+      chart: { type: 'donut', height: 220, background: 'transparent' },
+      theme: darkTheme,
+      series: actionValues,
+      labels: actionLabels,
+      colors: actionColors,
+      plotOptions: {
+        pie: {
+          donut: {
+            size: '60%',
+            labels: {
+              show: true,
+              total: {
+                show: true,
+                label: 'Total',
+                fontSize: '13px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 600,
+                color: '#94A3B8',
+                formatter: function(w) { return w.globals.seriesTotals.reduce(function(a,b){ return a+b; }, 0); }
+              },
+              value: {
+                fontSize: '20px',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontWeight: 700,
+                color: '#F1F5F9'
+              }
+            }
+          }
+        }
+      },
+      dataLabels: { enabled: false },
+      legend: {
+        position: 'bottom',
+        fontSize: '12px',
+        fontFamily: 'Inter, sans-serif',
+        fontWeight: 600,
+        labels: { colors: '#94A3B8' },
+        markers: { radius: 3 }
+      },
+      stroke: { width: 2, colors: ['#0B0F19'] }
+    }).render();
+  } else {
+    document.querySelector('#chart-actions').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No action data</div>';
+  }
+
+})();
+</script>
+
+</body>
+</html>

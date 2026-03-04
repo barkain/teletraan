@@ -1,0 +1,23 @@
+{
+  "filename": "2026-03-04-2015-transitional.html",
+  "task_id": "ab785929-771f-4fc0-bf4d-8aaf42532227",
+  "market_regime": "Transitional",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Transitional\n\n**Key Macro Themes:**\n- Geopolitical Risk Premium & Energy Security Crisis: Crude oil's massive 14.52% surge in 20 days signals severe supply disruption or geopolitical tension...\n- Global Growth Slowdown & Safe-Haven Rotation: Simultaneous global equity selloff (Nikkei -7.67%, European indices -4%+) with gold hitting $5,145 (...\n- Late-Cycle Defensive Positioning & Rate Cut Anticipation: Treasury yields declining 4-5% across curve with Real Estate (+5.50%) and Utilities (+9.94%) leading...\n\n**Heatmap Analysis:** Today's market shows a classic defensive-to-growth rotation with Technology (+1.91%) and Consumer Discretionary (+1.76%) leading, while Energy (-0.85%) and Consumer Staples (-0.42%) lag. This creates tension with the macro narrative of geopolitical risk and global growth concerns—suggesting either a relief rally or late-cycle rotation into quality growth before a deeper correction.\n\n**Sectors Scanned:**\n- Technology: +1.9% (1D), breadth 50%\n- Financials: +0.7% (1D), breadth 50%\n- Energy: -0.8% (1D), breadth 50%\n- Healthcare: +0.4% (1D), breadth 50%\n- Industrials: +0.4% (1D), breadth 50%\n- Consumer Staples: -0.4% (1D), breadth 50%\n- Consumer Discretionary: +1.8% (1D), breadth 50%\n- Utilities: +0.6% (1D), breadth 50%\n- Communication Services: +0.6% (1D), breadth 50%\n- Real Estate: +0.1% (1D), breadth 50%\n- Materials: +0.3% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Technology sector leading with +1.91% 1D gain while showing -2.02% 5D weakness—potential mean reversion or dead-cat bounce off oversold levels\n- Energy sector (-0.85% 1D) sharply reversing from strong 5D momentum (+2.13%) and 20D outperformance (+6.08%)—potential profit-taking after geopolitical premium spike\n- Defensive sectors (Utilities +0.61%, Real Estate +0.10%) showing modest gains despite risk-on tech rally—mixed signal suggesting investor uncertainty",
+  "top_sectors": [
+    "Utilities +9.9%",
+    "Energy +6.1%",
+    "Real Estate +5.5%",
+    "Financials -4.5%",
+    "Industrials +4.0%",
+    "Consumer Discretionary -3.1%"
+  ],
+  "insights_count": 0,
+  "symbols": [],
+  "action_counts": {},
+  "avg_confidence": 0.0,
+  "insight_types": [],
+  "created_at": "2026-03-04T20:15:21.471183",
+  "started_at": "2026-03-04T20:15:23.087244",
+  "completed_at": "2026-03-04T20:31:53.036079",
+  "elapsed_seconds": 988.560599
+}
