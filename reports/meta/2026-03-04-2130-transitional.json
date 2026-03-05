@@ -1,0 +1,38 @@
+{
+  "filename": "2026-03-04-2130-transitional.html",
+  "task_id": "f84769b9-d28b-4c8a-9136-366445e7229f",
+  "market_regime": "Transitional",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Transitional\n\n**Key Macro Themes:**\n- Energy Supply Shock / Geopolitical Risk Premium: Crude oil futures surging +16.36% over 20 days to $75.80 is the most dramatic move in the dataset, s...\n- Flight to Quality / Risk-Off Rotation: Gold hitting record highs at $5,153 combined with treasury yield compression (-4-5% decline across c...\n- Defensive Sector Rotation / Late-Cycle Dynamics: Utilities leading all sectors at +9.68%, Real Estate +6.14%, suggesting investors seeking yield and ...\n\n**Heatmap Analysis:** Today's market shows a defensive-to-cyclical rotation with Consumer Discretionary (+1.78%) and Technology (+1.70%) leading, while defensive Consumer Staples (-0.66%) lags. This contradicts the risk-off macro regime identified in Phase 1, suggesting either a counter-trend bounce or early signs of regime transition. Notably, all sectors show exactly 50% breadth, indicating mixed conviction and lack of decisive directional bias.\n\n**Sectors Scanned:**\n- Technology: +1.7% (1D), breadth 50%\n- Financials: +0.6% (1D), breadth 50%\n- Energy: -0.6% (1D), breadth 50%\n- Healthcare: +0.2% (1D), breadth 50%\n- Industrials: +0.3% (1D), breadth 50%\n- Consumer Staples: -0.7% (1D), breadth 50%\n- Consumer Discretionary: +1.8% (1D), breadth 50%\n- Utilities: +0.4% (1D), breadth 50%\n- Communication Services: +0.7% (1D), breadth 50%\n- Real Estate: +0.1% (1D), breadth 50%\n- Materials: -0.0% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Counter-trend risk-on rally in cyclical sectors despite elevated VIX (21.15) and defensive macro backdrop\n- Defensive sectors underperforming despite macro signals favoring safe havens (gold at $5,153, declining yields)\n- Energy sector showing weakness (-0.58% 1D) despite strong 20-day momentum (+7.62%) and geopolitical risk premium",
+  "top_sectors": [
+    "Utilities +9.7%",
+    "Energy +7.6%",
+    "Real Estate +6.1%",
+    "Industrials +4.5%",
+    "Financials -3.4%",
+    "Technology +3.1%"
+  ],
+  "insights_count": 5,
+  "symbols": [
+    "GC=F",
+    "GLW",
+    "NVDA",
+    "SPY",
+    "XOM"
+  ],
+  "action_counts": {
+    "BUY": 2,
+    "HOLD": 2,
+    "STRONG_BUY": 1
+  },
+  "avg_confidence": 0.8,
+  "insight_types": [
+    "macro",
+    "opportunity",
+    "risk",
+    "rotation"
+  ],
+  "created_at": "2026-03-04T21:30:01.921102",
+  "started_at": "2026-03-04T21:30:03.302737",
+  "completed_at": "2026-03-05T20:21:27.261676",
+  "elapsed_seconds": 82282.485853
+}
