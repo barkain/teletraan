@@ -1,0 +1,39 @@
+{
+  "filename": "2026-03-06-0920-risk-off.html",
+  "task_id": "511cbf52-0129-48a8-99a0-360e7646d8e3",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Risk-Off\n\n**Key Macro Themes:**\n- Energy Supply Shock & Inflationary Pressure: Crude oil's extraordinary +28.48% rally in 20 days signals a major supply disruption or geopolitical...\n- Flight to Quality & Safe Haven Demand: Gold reaching record high of $5109 (+3.19%) combined with elevated VIX (23.38, trending up) indicate...\n- Financial Sector Stress & Credit Concerns: Financials sector (XLF) severely underperforming at -5.58%, nearly 3x worse than broader market decl...\n\n**Heatmap Analysis:** Today's pre-market session reveals a classic risk-off rotation with sharp sector bifurcation: Energy (+0.52%) leading on supply concerns while defensive Consumer Staples (-2.01%), Industrials (-2.22%), and Materials (-2.10%) face aggressive selling. The 274 basis point spread between best and worst performers signals heightened volatility and sector-specific catalysts overwhelming broad market direction. Uniform 50% breadth across all sectors suggests thin pre-market liquidity rather than conviction.\n\n**Sectors Scanned:**\n- Technology: +0.2% (1D), breadth 50%\n- Financials: -0.5% (1D), breadth 50%\n- Energy: +0.5% (1D), breadth 50%\n- Healthcare: -2.0% (1D), breadth 50%\n- Industrials: -2.2% (1D), breadth 50%\n- Consumer Staples: -2.0% (1D), breadth 50%\n- Consumer Discretionary: +0.1% (1D), breadth 50%\n- Utilities: -0.8% (1D), breadth 50%\n- Communication Services: -0.3% (1D), breadth 50%\n- Real Estate: -1.0% (1D), breadth 50%\n- Materials: -2.1% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Energy sector isolation at the top (+0.52% 1D, +6.07% 20D) while traditional cyclicals (Materials -2.10%, Industrials -2.22%) collapse, breaking the typical energy-cyclicals correlation\n- Defensive sector inversion: Utilities (-0.78%) and Consumer Staples (-2.01%) selling off despite risk-off regime, while typically cyclical Communication Services (-0.29%) shows relative resilience\n- Financials (-0.52% 1D, -5.58% 20D) showing persistent 20-day weakness despite only modest 1-day decline, suggesting structural concern rather than daily volatility",
+  "top_sectors": [
+    "Utilities +8.2%",
+    "Energy +6.1%",
+    "Financials -5.6%",
+    "Real Estate +3.2%",
+    "Consumer Staples -2.9%",
+    "Healthcare -2.4%"
+  ],
+  "insights_count": 6,
+  "symbols": [
+    "CAT",
+    "GC=F",
+    "GLW",
+    "GOOGL",
+    "JPM",
+    "XOM"
+  ],
+  "action_counts": {
+    "SELL": 2,
+    "STRONG_BUY": 3,
+    "HOLD": 1
+  },
+  "avg_confidence": 0.8,
+  "insight_types": [
+    "macro",
+    "opportunity",
+    "risk",
+    "rotation"
+  ],
+  "created_at": "2026-03-06T09:20:05.579863",
+  "started_at": "2026-03-06T09:20:07.102564",
+  "completed_at": "2026-03-06T09:38:40.671427",
+  "elapsed_seconds": 1112.228838
+}
