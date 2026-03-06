@@ -149,7 +149,7 @@ class DeepInsight(TimestampMixin, Base):
 
     # Lifecycle management
     lifecycle_state: Mapped[str | None] = mapped_column(
-        String(30), nullable=True, default="active", index=True,
+        String(30), nullable=True, default="active",
     )  # active, stale, re_evaluating, invalidated, expired, graduated
 
     last_evaluated_at: Mapped[datetime | None] = mapped_column(
