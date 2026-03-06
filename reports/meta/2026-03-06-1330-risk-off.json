@@ -1,0 +1,37 @@
+{
+  "filename": "2026-03-06-1330-risk-off.html",
+  "task_id": "1d264698-3188-419a-9319-d1e16e3e108f",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Risk-Off\n\n**Key Macro Themes:**\n- Energy Supply Shock / Geopolitical Crisis: Crude oil's +35% surge in 20 days is unprecedented outside of major supply disruptions (war, OPEC cu...\n- Flight to Quality / Defensive Rotation: Utilities up 8.19% and Real Estate up 3.22% in a down market signals aggressive defensive rotation. ...\n- Financial Sector Stress / Credit Concerns: Financials down -5.58% (worst sector) alongside flat-to-rising yields is unusual and suggests credit...\n\n**Heatmap Analysis:** The market is experiencing a sharp risk-off session with extreme sector dispersion. Energy leads (+0.52%) while defensive sectors hemorrhage value—Industrials (-2.22%), Materials (-2.10%), and Consumer Staples (-2.01%) all down heavily. This inverts the typical risk-off playbook where staples/utilities should outperform, suggesting a unique energy-driven stagflation dynamic is overwhelming traditional defensive positioning.\n\n**Sectors Scanned:**\n- Technology: +0.2% (1D), breadth 50%\n- Financials: -0.5% (1D), breadth 50%\n- Energy: +0.5% (1D), breadth 50%\n- Healthcare: -2.0% (1D), breadth 50%\n- Industrials: -2.2% (1D), breadth 50%\n- Consumer Staples: -2.0% (1D), breadth 50%\n- Consumer Discretionary: +0.1% (1D), breadth 50%\n- Utilities: -0.8% (1D), breadth 50%\n- Communication Services: -0.3% (1D), breadth 50%\n- Real Estate: -1.0% (1D), breadth 50%\n- Materials: -2.1% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Inverted defensive behavior: Traditional defensive sectors (Consumer Staples -2.01%, Healthcare -2.00%) are selling off sharply despite elevated VIX at 25.45, while typically cyclical Energy leads\n- Technology resilience (+0.24% 1D) despite -0.67% 20D decline and risk-off backdrop, contrasting sharply with cyclical sectors like Industrials (-2.22%) and Materials (-2.10%)\n- Financial sector weakness cascade: Financials (-0.52% 1D, -2.42% 5D, -5.58% 20D) dragging Real Estate (-0.96% 1D) lower in tandem, both accelerating declines",
+  "top_sectors": [
+    "Utilities +8.2%",
+    "Energy +6.1%",
+    "Financials -5.6%",
+    "Real Estate +3.2%",
+    "Consumer Staples -2.9%",
+    "Healthcare -2.4%"
+  ],
+  "insights_count": 6,
+  "symbols": [
+    "CAT",
+    "GC=F",
+    "GLW",
+    "PG",
+    "XOM"
+  ],
+  "action_counts": {
+    "SELL": 2,
+    "STRONG_BUY": 3,
+    "BUY": 1
+  },
+  "avg_confidence": 0.8,
+  "insight_types": [
+    "opportunity",
+    "risk",
+    "rotation"
+  ],
+  "created_at": "2026-03-06T13:30:40.569768",
+  "started_at": "2026-03-06T13:30:42.103734",
+  "completed_at": "2026-03-06T13:55:00.488126",
+  "elapsed_seconds": 1456.98837
+}
