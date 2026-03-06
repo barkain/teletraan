@@ -75,3 +75,11 @@ class PortfolioImpactResponse(BaseModel):
     overall_bullish_exposure: float
     overall_bearish_exposure: float
     insight_count: int
+
+
+class ImportResult(BaseModel):
+    imported: int
+    created: int
+    updated: int
+    skipped: int
+    warnings: list[str] = []

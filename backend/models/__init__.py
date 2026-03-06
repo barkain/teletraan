@@ -28,6 +28,8 @@ from .settings import UserSettings
 from .analysis_task import AnalysisTask, AnalysisTaskStatus, PHASE_PROGRESS, PHASE_NAMES
 from .statistical_feature import StatisticalFeature, StatisticalFeatureType
 from .stock import Stock
+from .thematic_insight import LifecycleState, ThematicInsight
+from .thematic_outcome import ThematicOutcome
 
 __all__ = [
     "TimestampMixin",
@@ -75,4 +77,8 @@ __all__ = [
     # Portfolio models
     "Portfolio",
     "PortfolioHolding",
+    # Thematic insight models
+    "ThematicInsight",
+    "LifecycleState",
+    "ThematicOutcome",
 ]

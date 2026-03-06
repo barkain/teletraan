@@ -644,6 +644,7 @@ class DeepAnalysisEngine:
             thesis=data.get("thesis", ""),
             primary_symbol=data.get("primary_symbol"),
             related_symbols=data.get("related_symbols", []),
+            secondary_plays=data.get("secondary_plays"),
             supporting_evidence=supporting_evidence,
             confidence=float(data.get("confidence", 0.5)),
             time_horizon=data.get("time_horizon", "medium_term"),

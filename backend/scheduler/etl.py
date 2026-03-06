@@ -10,11 +10,12 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-not-found]
 from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-not-found]
+from apscheduler.triggers.interval import IntervalTrigger  # type: ignore[import-not-found]
 from sqlalchemy import select  # type: ignore[import-not-found]
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert  # type: ignore[import-not-found]
+from db_utils import dialect_insert  # type: ignore[import-not-found]
 from sqlalchemy.ext.asyncio import AsyncSession  # type: ignore[import-not-found]
 
-from database import async_session_factory  # type: ignore[import-not-found]
+from database import async_session_factory, engine  # type: ignore[import-not-found]
 from data.adapters.yahoo import yahoo_adapter  # type: ignore[import-not-found]
 from data.adapters.fred import fred_adapter  # type: ignore[import-not-found]
 from models.stock import Stock  # type: ignore[import-not-found]
@@ -23,6 +24,7 @@ from models.economic import EconomicIndicator  # type: ignore[import-not-found]
 from models.analysis_task import AnalysisTask, AnalysisTaskStatus  # type: ignore[import-not-found]
 from analysis.engine import AnalysisEngine  # type: ignore[import-not-found]
 from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
+from analysis.thematic_outcome_tracker import ThematicOutcomeTracker  # type: ignore[import-not-found]
 from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
 from analysis.statistical_calculator import StatisticalFeatureCalculator  # type: ignore[import-not-found]
 from config import get_settings  # type: ignore[import-not-found]
@@ -130,7 +132,7 @@ class ETLOrchestrator:
         if price_data.get("close") is None or price_data.get("date") is None:
             return
 
-        stmt = sqlite_insert(PriceHistory).values(
+        stmt = dialect_insert(engine)(PriceHistory).values(
             stock_id=stock_id,
             date=price_data["date"],
             open=price_data.get("open", 0),
@@ -230,7 +232,7 @@ class ETLOrchestrator:
 
                     # Store each data point
                     for point in data:
-                        stmt = sqlite_insert(EconomicIndicator).values(
+                        stmt = dialect_insert(engine)(EconomicIndicator).values(
                             series_id=series_id,
                             name=description,
                             date=point["date"],
@@ -509,6 +511,39 @@ class ETLOrchestrator:
                 "symbols": len(all_symbols),
             }
 
+    async def refresh_investor_feeds(self) -> dict[str, Any]:
+        """Refresh investor positions and commentary cache.
+
+        Fetches the latest 13F filings and commentary from tracked
+        institutional investors so the data is warm when the autonomous
+        analysis pipeline runs later in the day.
+
+        Returns:
+            Dict containing positions and commentary counts.
+        """
+        try:
+            from data.adapters.investor_feeds import get_investor_feed_adapter  # type: ignore[import-not-found]
+
+            adapter = get_investor_feed_adapter()
+            data = await adapter.get_all_intelligence()
+            positions = len(data.get("positions", []))
+            commentary = len(data.get("commentary", []))
+            logger.info(
+                "Investor feeds refreshed: %d positions, %d commentary items",
+                positions,
+                commentary,
+            )
+            return {
+                "positions": positions,
+                "commentary": commentary,
+            }
+        except Exception as e:
+            logger.warning("Investor feed refresh failed: %s", e)
+            return {
+                "positions": 0,
+                "commentary": 0,
+            }
+
     async def refresh_earnings_calendar(self) -> dict[str, Any]:
         """Daily job to pre-cache earnings calendar data.
 
@@ -578,6 +613,77 @@ class ETLOrchestrator:
 
             logger.info(
                 "Lifecycle check complete: %d insights checked, %d transitions",
+                result.get("insights_checked", 0),
+                len(result.get("transitions", [])),
+            )
+
+            return result
+
+    async def check_thematic_outcomes(self) -> dict[str, Any]:
+        """Daily job to check and update thematic outcome tracking.
+
+        Evaluates all actively tracking thematic outcomes, updates basket
+        prices, and evaluates completed tracking periods.
+
+        Returns:
+            Dict containing outcomes_checked and patterns_updated counts.
+        """
+        logger.info("Running thematic outcome check job")
+
+        async with async_session_factory() as session:
+            tracker = ThematicOutcomeTracker(session)
+            updated_outcomes = await tracker.check_outcomes()
+            patterns_updated = await tracker.update_pattern_success_rates()
+
+            logger.info(
+                "Thematic outcome check complete: %d outcomes updated, "
+                "%d patterns updated",
+                len(updated_outcomes),
+                patterns_updated,
+            )
+
+            return {
+                "outcomes_checked": len(updated_outcomes),
+                "patterns_updated": patterns_updated,
+            }
+
+    async def keepalive_ping(self) -> None:
+        """Lightweight periodic ping to prevent Neon PostgreSQL from suspending.
+
+        Neon free-tier auto-suspends compute after 5 minutes of inactivity,
+        causing 3-5 second cold-start latency on the next query.  This job
+        runs a trivial ``SELECT 1`` every 4 minutes to keep the connection
+        warm and avoid that penalty.
+
+        The job is only registered when the DATABASE_URL points at a
+        PostgreSQL backend (i.e. it is a no-op for local SQLite dev).
+        """
+        from sqlalchemy import text as _text  # type: ignore[import-not-found]
+
+        try:
+            async with async_session_factory() as session:
+                await session.execute(_text("SELECT 1"))
+            logger.debug("Neon keepalive ping OK")
+        except Exception as e:
+            logger.warning("Neon keepalive ping failed: %s", e)
+
+    async def check_thematic_lifecycles(self) -> dict[str, Any]:
+        """Daily job to check thematic insight lifecycle states.
+
+        Evaluates all active thematic insights for staleness, applies
+        conviction decay, and triggers state transitions.
+
+        Returns:
+            Dict containing insights_checked and transitions counts.
+        """
+        logger.info("Running thematic lifecycle check job")
+
+        async with async_session_factory() as session:
+            tracker = ThematicOutcomeTracker(session)
+            result = await tracker.check_lifecycle_states(session)
+
+            logger.info(
+                "Thematic lifecycle check complete: %d insights checked, %d transitions",
                 result.get("insights_checked", 0),
                 len(result.get("transitions", [])),
             )
@@ -741,6 +847,20 @@ class ETLOrchestrator:
             replace_existing=True,
         )
 
+        # Daily investor feeds refresh at 7:15 AM ET Mon-Fri
+        self.scheduler.add_job(
+            self.refresh_investor_feeds,
+            CronTrigger(
+                hour=7,
+                minute=15,
+                day_of_week="mon-fri",
+                timezone="US/Eastern",
+            ),
+            id="refresh_investor_feeds",
+            name="Refresh investor feeds",
+            replace_existing=True,
+        )
+
         # === Insight Lifecycle Jobs ===
         self.scheduler.add_job(
             self.check_insight_lifecycles,
@@ -751,8 +871,42 @@ class ETLOrchestrator:
             replace_existing=True,
         )
 
-        # Scheduled autonomous analysis (opt-in, Mon-Fri after market close)
+        # === Thematic Insight Jobs ===
+        # Thematic outcome check at 4:45 PM ET Mon-Fri (after insight outcomes)
+        self.scheduler.add_job(
+            self.check_thematic_outcomes,
+            CronTrigger(day_of_week="mon-fri", hour=16, minute=45,
+                        timezone="America/New_York"),
+            id="daily_thematic_outcome_check",
+            name="Daily thematic outcome check",
+            replace_existing=True,
+        )
+
+        # Thematic lifecycle check at 8:15 AM ET Mon-Fri
+        self.scheduler.add_job(
+            self.check_thematic_lifecycles,
+            CronTrigger(day_of_week="mon-fri", hour=8, minute=15,
+                        timezone="America/New_York"),
+            id="daily_thematic_lifecycle_check",
+            name="Daily thematic lifecycle check",
+            replace_existing=True,
+        )
+
+        # Neon PostgreSQL keepalive ping every 4 minutes (prevents free-tier
+        # compute suspension after 5 min idle, which causes 3-5s cold starts).
+        # Only enabled when using a PostgreSQL backend.
         settings = get_settings()
+        if settings.DATABASE_URL.startswith("postgresql"):
+            self.scheduler.add_job(
+                self.keepalive_ping,
+                IntervalTrigger(minutes=4),
+                id="neon_keepalive_ping",
+                name="Neon PostgreSQL keepalive ping",
+                replace_existing=True,
+            )
+            logger.info("Neon keepalive ping enabled (every 4 minutes)")
+
+        # Scheduled autonomous analysis (opt-in, Mon-Fri after market close)
         if settings.SCHEDULED_ANALYSIS_ENABLED:
             self.scheduler.add_job(
                 self.run_scheduled_autonomous_analysis,
@@ -788,6 +942,7 @@ class ETLOrchestrator:
             "daily_theme_decay",
             "daily_feature_computation",
             "daily_earnings_refresh",
+            "refresh_investor_feeds",
             "daily_lifecycle_check",
         ]
         if settings.SCHEDULED_ANALYSIS_ENABLED:

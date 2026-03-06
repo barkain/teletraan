@@ -162,11 +162,11 @@ def _configure_llm_env() -> None:
 
 
 class ClientPool:
-    """Async pool of reusable ClaudeSDKClient instances.
+    """Concurrency-limited pool for ClaudeSDKClient instances.
 
-    Clients are created lazily on first checkout. When returned, they stay
-    connected for reuse. If a client errors during use, it is discarded
-    and a fresh one is created.
+    Each checkout creates a fresh client and destroys it after use to
+    prevent conversation bleed (the SDK subprocess carries conversation
+    history). The pool enforces a max concurrency limit via slot count.
 
     Usage:
         pool = get_client_pool()
@@ -218,33 +218,37 @@ class ClientPool:
     async def checkout(self) -> AsyncGenerator[ClaudeSDKClient, None]:
         """Check out a client from the pool.
 
-        Creates a new client if the slot was empty (lazy init).
-        On successful use, returns client to pool.
-        On error, discards client and puts a fresh slot back.
+        Each checkout creates a fresh client to avoid conversation bleed
+        (the SDK subprocess carries conversation history, so reusing a
+        client causes the LLM to treat new prompts as follow-ups).
+        The pool still enforces concurrency limits via its slot count.
         """
         await self.initialize()
 
         # Block until a slot is available (this IS the concurrency control)
         client_or_none = await self._available.get()
 
+        # Always discard any cached client — we need a fresh conversation
+        if client_or_none is not None:
+            await self._destroy_client(client_or_none)
+
         client: ClaudeSDKClient | None = None
         try:
-            if client_or_none is None:
-                client = await self._create_client()
-            else:
-                client = client_or_none
+            client = await self._create_client()
 
             self._total_queries += 1
             yield client
 
-            # Success -- return client to pool for reuse
-            await self._available.put(client)
+            # Destroy after use to prevent conversation bleed
+            await self._destroy_client(client)
+            client = None
+            await self._available.put(None)  # Return empty slot
 
         except Exception:
-            # Error -- discard this client and put a None placeholder back
+            # Error -- discard this client and put a fresh slot back
             if client is not None:
                 await self._destroy_client(client)
-            await self._available.put(None)  # Fresh slot for next checkout
+            await self._available.put(None)
             raise
 
     async def shutdown(self) -> None:

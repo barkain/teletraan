@@ -10,7 +10,6 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, Float, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -27,6 +26,7 @@ class PatternType(str, enum.Enum):
     EARNINGS_PATTERN = "EARNINGS_PATTERN"  # e.g., pre-earnings drift
     SEASONALITY = "SEASONALITY"  # e.g., January effect
     CROSS_ASSET = "CROSS_ASSET"  # e.g., bond/equity correlation
+    SUPPLY_CHAIN = "SUPPLY_CHAIN"
 
 
 class KnowledgePattern(TimestampMixin, Base):
@@ -60,10 +60,10 @@ class KnowledgePattern(TimestampMixin, Base):
 
     __tablename__ = "knowledge_patterns"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    id: Mapped[str] = mapped_column(
+        String(36),
         primary_key=True,
-        default=uuid.uuid4,
+        default=lambda: str(uuid.uuid4()),
     )
 
     # Pattern identification

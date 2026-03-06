@@ -21,6 +21,7 @@ from api.routes.search import router as search_router
 from api.routes.settings import router as settings_router
 from api.routes.statistical_features import router as statistical_features_router
 from api.routes.stocks import router as stocks_router
+from api.routes.thematic_insights import router as thematic_insights_router
 
 # Combined router for all routes
 router = APIRouter()
@@ -45,5 +46,6 @@ router.include_router(reports_router, prefix="/reports", tags=["reports"])
 router.include_router(research_router, tags=["research"])
 router.include_router(runs_router, prefix="/runs", tags=["runs"])
 router.include_router(export_router)
+router.include_router(thematic_insights_router, prefix="/thematic-insights", tags=["thematic-insights"])
 
 __all__ = ["router"]

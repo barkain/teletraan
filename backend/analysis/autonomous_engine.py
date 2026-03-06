@@ -635,7 +635,7 @@ class AutonomousDeepEngine:
                                         catalyst_timeline=thread.catalyst_timeline,
                                     )
                                 except Exception as track_err:
-                                    logger.warning("Failed to start tracking for superseding theme: %s", track_err)
+                                    logger.warning("Failed to start tracking for superseding theme: %s", track_err, exc_info=True)
 
                             logger.info(
                                 "Superseded thematic insight %s with %s (confidence diverged %.2f)",
@@ -673,7 +673,7 @@ class AutonomousDeepEngine:
                                     catalyst_timeline=thread.catalyst_timeline,
                                 )
                             except Exception as track_err:
-                                logger.warning("Failed to start tracking for new theme: %s", track_err)
+                                logger.warning("Failed to start tracking for new theme: %s", track_err, exc_info=True)
 
                         logger.info(
                             "Created new thematic insight %s: %s",
@@ -681,7 +681,7 @@ class AutonomousDeepEngine:
                         )
 
                 except Exception as e:
-                    logger.warning("Failed to persist thematic thread %s: %s", thread.theme_name, e)
+                    logger.warning("Failed to persist thematic thread %s: %s", thread.theme_name, e, exc_info=True)
                     await session.rollback()
                     continue
 
@@ -884,7 +884,7 @@ class AutonomousDeepEngine:
                         self._thematic_result, task_id=task_id
                     )
                 except Exception as thematic_persist_err:
-                    logger.warning("Failed to persist thematic insights: %s", thematic_persist_err)
+                    logger.warning("Failed to persist thematic insights: %s", thematic_persist_err, exc_info=True)
 
             # --- Handle Phase 2 (heatmap fetch) result ---
             metrics.end_phase("heatmap_fetch")
@@ -1077,13 +1077,19 @@ class AutonomousDeepEngine:
             # Fetch yfinance business summaries in parallel
             biz_summaries = await self._fetch_business_summaries(symbols_to_analyze)
 
+            if not biz_summaries:
+                logger.warning(
+                    "Phase 3.5: All yfinance summaries empty for %s — skipping enrichment",
+                    symbols_to_analyze,
+                )
+
             if biz_summaries:
                 # Build macro/thematic context for the LLM
                 macro_themes = [t.name for t in macro_result.themes[:3]] if macro_result else []
                 thematic_threads = []
                 _tr = self._thematic_result
                 if _tr is not None and _tr.threads:
-                    thematic_threads = [t.theme for t in _tr.threads[:5]]
+                    thematic_threads = [t.theme_name for t in _tr.threads[:5]]
 
                 # Single batched LLM call for all stocks
                 self._stock_descriptions, self._stock_clusters = await self._enrich_stock_descriptions(
@@ -1819,6 +1825,19 @@ class AutonomousDeepEngine:
 
         return None
 
+    @staticmethod
+    def _dump_synthesis_debug(response: str) -> None:
+        """Dump full synthesis response to a file for post-mortem debugging."""
+        try:
+            from pathlib import Path
+            debug_dir = Path(__file__).resolve().parent.parent / "data"
+            debug_dir.mkdir(exist_ok=True)
+            debug_file = debug_dir / "synthesis_debug_last.txt"
+            debug_file.write_text(response)
+            logger.warning("[AUTO] Full synthesis response dumped to %s", debug_file)
+        except Exception as dump_err:
+            logger.debug("Failed to dump synthesis debug file: %s", dump_err)
+
     async def _run_cluster_analysis(
         self,
         clusters: list[dict[str, Any]],
@@ -1981,6 +2000,36 @@ class AutonomousDeepEngine:
                         f"(vs cluster: {p['vs_cluster_avg']:+.1f}%){flag}"
                     )
         return lines
+
+    @staticmethod
+    def _enforce_portfolio_sell_rules(
+        insights: list[dict[str, Any]],
+        portfolio_holdings: dict[str, dict[str, float]] | None,
+    ) -> list[dict[str, Any]]:
+        """Convert SELL/STRONG_SELL to AVOID for stocks not in portfolio.
+
+        This is a hard validation layer ensuring sell recommendations only
+        apply to stocks the user actually owns.
+
+        Args:
+            insights: Parsed insight dicts from synthesis.
+            portfolio_holdings: Dict of {symbol: {shares, total_cost}} or None.
+
+        Returns:
+            The same list with actions corrected in-place.
+        """
+        if not insights:
+            return insights
+        held_symbols = set((portfolio_holdings or {}).keys())
+        for insight in insights:
+            action = insight.get("action", "")
+            symbol = insight.get("primary_symbol", "")
+            if action in ("SELL", "STRONG_SELL") and symbol and symbol.upper() not in held_symbols:
+                logger.info(
+                    f"[AUTO] Converting {action} → AVOID for {symbol} (not in portfolio)"
+                )
+                insight["action"] = "AVOID"
+        return insights
 
     def _build_heatmap_discovery_context(
         self,
@@ -2156,9 +2205,13 @@ class AutonomousDeepEngine:
                     "[AUTO] Synthesis returned 0 insights. Response preview (first 1000 chars): %s",
                     response[:1000]
                 )
+                self._dump_synthesis_debug(response)
         except Exception as parse_err:
             logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:1000]}")
+            self._dump_synthesis_debug(response)
             insights = []
+
+        insights = self._enforce_portfolio_sell_rules(insights, portfolio_holdings)
 
         # Adjust confidence based on historical track record
         try:
@@ -2281,6 +2334,10 @@ class AutonomousDeepEngine:
             "- Pattern confirmation from deep dive",
             "- Multiple analyst agreement",
             "- Clear risk/reward profiles",
+            "",
+            "CRITICAL: Respond with ONLY the JSON object as specified in the system instructions. "
+            "No prose, no commentary, no markdown code fences, no // comments inside JSON values. "
+            "Start your response with { and end with }.",
         ])
 
         return "\n".join(lines)
@@ -2505,6 +2562,7 @@ class AutonomousDeepEngine:
                     thesis=data.get("thesis", ""),
                     primary_symbol=primary_symbol,
                     related_symbols=data.get("related_symbols", []),
+                    secondary_plays=data.get("secondary_plays"),
                     supporting_evidence=data.get("supporting_evidence", []),
                     confidence=float(data.get("confidence", 0.5)),
                     time_horizon=data.get("time_horizon", "medium_term"),
@@ -2546,8 +2604,16 @@ class AutonomousDeepEngine:
                 continue
 
         if stored:
-            await session.commit()
-            logger.info(f"Stored {len(stored)} insights to database")
+            try:
+                await session.commit()
+                logger.info(f"Stored {len(stored)} insights to database")
+            except Exception as commit_err:
+                logger.error(f"DB commit failed for {len(stored)} insights: {commit_err}")
+                await session.rollback()
+                self._dump_synthesis_debug(
+                    f"COMMIT_ERROR: {commit_err}\n\nInsights data:\n{json.dumps(insights_data, indent=2, default=str)}"
+                )
+                return []
 
             # Fire-and-forget pattern extraction in background (uses LLM calls
             # per insight, so running in background avoids blocking the pipeline).
@@ -3441,9 +3507,13 @@ class AutonomousDeepEngine:
                     "[AUTO] Synthesis returned 0 insights. Response preview (first 1000 chars): %s",
                     response[:1000]
                 )
+                self._dump_synthesis_debug(response)
         except Exception as parse_err:
             logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:1000]}")
+            self._dump_synthesis_debug(response)
             insights = []
+
+        insights = self._enforce_portfolio_sell_rules(insights, portfolio_holdings)
 
         # Adjust confidence based on historical track record
         try:
@@ -3694,6 +3764,7 @@ class AutonomousDeepEngine:
                     thesis=data.get("thesis", ""),
                     primary_symbol=data.get("primary_symbol"),
                     related_symbols=data.get("related_symbols", []),
+                    secondary_plays=data.get("secondary_plays"),
                     supporting_evidence=data.get("supporting_evidence", []),
                     confidence=float(data.get("confidence", 0.5)),
                     time_horizon=data.get("time_horizon", "medium_term"),
@@ -3734,8 +3805,16 @@ class AutonomousDeepEngine:
                 continue
 
         if stored:
-            await session.commit()
-            logger.info(f"Stored {len(stored)} insights to database")
+            try:
+                await session.commit()
+                logger.info(f"Stored {len(stored)} insights to database")
+            except Exception as commit_err:
+                logger.error(f"DB commit failed for {len(stored)} insights (legacy): {commit_err}")
+                await session.rollback()
+                self._dump_synthesis_debug(
+                    f"COMMIT_ERROR_LEGACY: {commit_err}\n\nInsights data:\n{json.dumps(insights_data, indent=2, default=str)}"
+                )
+                return []
 
             # Fire-and-forget pattern extraction in background (same as heatmap pipeline)
             _stored_dicts_legacy = [

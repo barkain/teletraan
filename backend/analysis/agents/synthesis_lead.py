@@ -60,11 +60,12 @@ class DeepInsightData:
     """Structured data for a single deep insight."""
 
     insight_type: str  # opportunity, risk, rotation, macro, divergence, correlation
-    action: str  # STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL, WATCH
+    action: str  # STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL, WATCH, AVOID
     title: str
     thesis: str
     primary_symbol: str | None = None
     related_symbols: list[str] = field(default_factory=list)
+    secondary_plays: str | None = None
     supporting_evidence: list[SupportingEvidence] = field(default_factory=list)
     confidence: float = 0.5
     time_horizon: str = "medium_term"  # short_term, medium_term, long_term
@@ -82,6 +83,7 @@ class DeepInsightData:
             "thesis": self.thesis,
             "primary_symbol": self.primary_symbol,
             "related_symbols": self.related_symbols,
+            "secondary_plays": self.secondary_plays,
             "supporting_evidence": [e.to_dict() for e in self.supporting_evidence],
             "confidence": round(self.confidence, 4),
             "time_horizon": self.time_horizon,
@@ -106,6 +108,7 @@ class DeepInsightData:
             thesis=data.get("thesis", ""),
             primary_symbol=data.get("primary_symbol"),
             related_symbols=data.get("related_symbols", []),
+            secondary_plays=data.get("secondary_plays"),
             supporting_evidence=evidence,
             confidence=float(data.get("confidence", 0.5)),
             time_horizon=data.get("time_horizon", "medium_term"),
@@ -242,12 +245,13 @@ Return JSON:
   "analyst": "synthesis",
   "insights": [
     {
-      "insight_type": "opportunity",  // opportunity, risk, rotation, macro, divergence, correlation
-      "action": "BUY",  // STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL, WATCH
+      "insight_type": "opportunity",
+      "action": "BUY",
       "title": "NVDA Breakout on AI Capex Acceleration and Rate Cut Tailwinds",
       "thesis": "NVIDIA is the strongest individual play on the AI infrastructure buildout. Technical breakout above $890 resistance confirmed by declining yields and Fed pivot signals. Superior to AMD and AVGO due to 80%+ data center GPU market share and 3x revenue growth...",
       "primary_symbol": "NVDA",
       "related_symbols": ["AMD", "AVGO", "MSFT"],
+      "secondary_plays": "AMD offers similar AI GPU exposure at lower valuation (25x vs 35x forward); AVGO benefits from custom ASIC demand as hyperscalers diversify beyond NVIDIA; MSFT is the largest cloud AI spender, creating demand tailwind",
       "entry_zone": "$880-900",
       "target": "$1050 within 2-3 months",
       "stop_loss": "$830 (below 50-day SMA)",
@@ -257,7 +261,7 @@ Return JSON:
         {"analyst": "macro", "finding": "Fed signaling rate cuts benefits growth/tech", "confidence": 0.7, "data_points": ["Dot plot median lower", "Real rates declining"]}
       ],
       "confidence": 0.78,
-      "time_horizon": "medium_term",  // short_term (<1mo), medium_term (1-3mo), long_term (>3mo)
+      "time_horizon": "medium_term",
       "risk_factors": ["Earnings season volatility", "China export restrictions"],
       "invalidation_trigger": "Close below $830 on high volume or loss of 50-day SMA",
       "historical_precedent": "Similar breakout in Oct 2023 led to 40% rally over 3 months",
@@ -270,6 +274,7 @@ Return JSON:
       "thesis": "Gold futures are breaking out above $2100 resistance as real rates decline and central bank buying accelerates. This is a first-class macro hedge that also offers upside. Preferable to gold miners due to no operational risk...",
       "primary_symbol": "GC=F",
       "related_symbols": ["SLV", "NEM", "GLD"],
+      "secondary_plays": "SLV (silver) offers leveraged precious metals exposure with industrial demand kicker; NEM is the largest gold miner with operational leverage to gold prices; GLD ETF provides liquid, low-cost gold exposure for smaller allocations",
       "entry_zone": "$2080-2120",
       "target": "$2300 within 3-4 months",
       "stop_loss": "$2020 (below breakout level)",
@@ -290,7 +295,7 @@ Return JSON:
     "total_analysts": 5,
     "agreeing_analysts": 4,
     "conflicting_signals": ["Technical bullish but risk analyst warns of elevated VIX"],
-    "overall_market_bias": "bullish",  // bullish, bearish, neutral, mixed
+    "overall_market_bias": "bullish",
     "key_themes": ["Fed pivot", "AI infrastructure buildout", "Commodity supercycle"]
   }
 }
@@ -303,13 +308,22 @@ Return JSON:
 - **divergence**: Unusual relationship breakdown with specific tradeable symbols to exploit it
 - **correlation**: Cross-asset relationship insight with specific trade recommendations
 
+## Secondary Plays (Derived Insights)
+For each insight with `related_symbols`, you MUST also provide a `secondary_plays` string explaining WHY each related symbol matters and what it offers relative to the primary symbol. This turns related tickers into actionable intelligence:
+- Explain the relationship (peer, ETF, supplier, beneficiary, hedge, etc.)
+- Note any advantage the secondary play offers (lower valuation, less volatility, diversified exposure, etc.)
+- Keep it concise: one sentence per related symbol, separated by semicolons.
+
 ## Action Levels
 - **STRONG_BUY**: High conviction, multiple confirming signals, favorable risk/reward
 - **BUY**: Positive setup with moderate confidence
 - **HOLD**: Maintain position, no clear action signal
-- **SELL**: Exit or reduce position
-- **STRONG_SELL**: High conviction bearish, urgent action recommended
+- **SELL**: Exit or reduce position — **ONLY for stocks listed in Portfolio Holdings**
+- **STRONG_SELL**: High conviction bearish, urgent action recommended — **ONLY for stocks listed in Portfolio Holdings**
 - **WATCH**: Interesting setup but needs confirmation
+- **AVOID**: Bearish view on a stock NOT in the portfolio — use instead of SELL/STRONG_SELL for non-held stocks
+
+**CRITICAL RULE**: SELL and STRONG_SELL actions are EXCLUSIVELY for stocks the user currently owns (listed in Portfolio Holdings). If you have a bearish thesis on a stock NOT in the portfolio, use AVOID instead. BUY, STRONG_BUY, HOLD, and WATCH can be used for any stock.
 
 ## Confidence Scoring
 - 0.8-1.0: Multiple analysts agree with high individual confidence
@@ -329,6 +343,20 @@ When prediction market and/or sentiment data is available, include an alignment 
 - Strong alignment -> higher conviction, but watch for crowded trade risk
 
 Include a brief "Alternative Data Summary" in your synthesis noting the alignment/divergence of these signals.
+
+## Thematic Analysis Integration
+When THEMATIC ANALYSIS context is provided:
+- Reference identified themes and their supply chain implications in your synthesis
+- Validate whether individual stock analyses align with or contradict the macro themes
+- Highlight any stocks that benefit from multiple reinforcing themes
+- Note any tension between thematic outlook and individual stock technicals
+
+## Investor Intelligence Integration
+When INVESTOR INTELLIGENCE context is provided:
+- Note significant consensus or divergence among notable investors
+- Flag stocks where smart money positioning aligns with your technical analysis
+- Highlight contrarian signals where notable investors disagree with market consensus
+- Do NOT let investor positioning override your independent analysis — use it as confirming/disconfirming evidence
 
 ## Guidelines
 - Generate 3-7 insights per synthesis (quality over quantity)
@@ -377,23 +405,23 @@ These will be added to our pattern library for future reference.
 
 Add any new patterns to the output JSON in a "new_patterns" array:
 ```json
-{{
+{
   "analyst": "synthesis",
   "insights": [...],
-  "summary": {{...}},
+  "summary": {...},
   "new_patterns": [
-    {{
+    {
       "pattern_name": "Short descriptive name",
-      "pattern_type": "TECHNICAL_SETUP",  // TECHNICAL_SETUP, MACRO_CORRELATION, SECTOR_ROTATION, EARNINGS_PATTERN, SEASONALITY, CROSS_ASSET
-      "trigger_conditions": {{
+      "pattern_type": "TECHNICAL_SETUP",
+      "trigger_conditions": {
         "condition_key": "measurable_value"
-      }},
+      },
       "expected_outcome": "What typically happens when triggered",
       "confidence": 0.6,
       "description": "Full description of the pattern"
-    }}
+    }
   ]
-}}
+}
 ```
 """
 
@@ -894,6 +922,7 @@ def parse_synthesis_response_full(response: str) -> SynthesisParseResult:
             "thesis": insight.get("thesis", ""),
             "primary_symbol": insight.get("primary_symbol"),
             "related_symbols": insight.get("related_symbols", []),
+            "secondary_plays": insight.get("secondary_plays"),
             "supporting_evidence": insight.get("supporting_evidence", []),
             "confidence": float(insight.get("confidence", 0.5)),
             "time_horizon": insight.get("time_horizon", "medium_term"),
@@ -990,6 +1019,29 @@ def _parse_new_patterns(patterns_data: list[Any]) -> list[dict[str, Any]]:
     return valid_patterns
 
 
+def _strip_json_comments(text: str) -> str:
+    """Remove JavaScript-style // comments from JSON text."""
+    return re.sub(r'//[^\n]*', '', text)
+
+
+def _try_parse_json(text: str) -> dict[str, Any] | None:
+    """Try to parse text as JSON, stripping comments if needed."""
+    try:
+        result = json.loads(text.strip())
+        if isinstance(result, dict):
+            return result
+    except json.JSONDecodeError:
+        pass
+    # Retry after stripping // comments
+    try:
+        result = json.loads(_strip_json_comments(text).strip())
+        if isinstance(result, dict):
+            return result
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
 def _extract_json(text: str) -> dict[str, Any] | None:
     """Extract JSON from text that may contain other content.
 
@@ -997,6 +1049,7 @@ def _extract_json(text: str) -> dict[str, Any] | None:
     - Pure JSON
     - JSON in code blocks (```json ... ```)
     - JSON embedded in text
+    - JSON with JavaScript-style // comments
 
     Args:
         text: Text that may contain JSON.
@@ -1005,20 +1058,18 @@ def _extract_json(text: str) -> dict[str, Any] | None:
         Parsed JSON dictionary or None if not found.
     """
     # First, try to parse the entire text as JSON
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        pass
+    result = _try_parse_json(text)
+    if result is not None:
+        return result
 
     # Try to find JSON in code blocks
     code_block_pattern = r"```(?:json)?\s*([\s\S]*?)```"
     matches = re.findall(code_block_pattern, text)
 
     for match in matches:
-        try:
-            return json.loads(match.strip())
-        except json.JSONDecodeError:
-            continue
+        result = _try_parse_json(match)
+        if result is not None:
+            return result
 
     # Try to find JSON object in the text
     # Look for content between first { and last }
@@ -1027,10 +1078,9 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 
     if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
         potential_json = text[start_idx : end_idx + 1]
-        try:
-            return json.loads(potential_json)
-        except json.JSONDecodeError:
-            pass
+        result = _try_parse_json(potential_json)
+        if result is not None:
+            return result
 
     return None
 
@@ -1402,7 +1452,7 @@ Rotation: {rotation_from} -> {rotation_to}
 Produce {max_insights} HIGH-CONVICTION investment insights. For each:
 
 1. **SYMBOL**: Ticker symbol
-2. **ACTION**: BUY / SELL / HOLD / WATCH
+2. **ACTION**: BUY / SELL / HOLD / WATCH / AVOID
 3. **TITLE**: Compelling, specific headline (not generic)
 4. **THESIS**: 2-3 sentences explaining WHY this is a compelling opportunity NOW
 5. **ENTRY ZONE**: Price range for entry (e.g., "$150-155")
@@ -1412,6 +1462,8 @@ Produce {max_insights} HIGH-CONVICTION investment insights. For each:
 9. **CONFIDENCE**: 0.0-1.0 (be calibrated, not overconfident)
 10. **KEY RISKS**: Top 2 risks to this thesis
 11. **ALIGNMENT SCORE**: How well does this align with macro/sector themes? (1-10)
+12. **RELATED SYMBOLS**: Other tickers related to this play (peers, ETFs, beneficiaries)
+13. **SECONDARY PLAYS**: For each related symbol, explain WHY it matters and what it offers vs the primary (one sentence per symbol, separated by semicolons)
 
 ### Selection Criteria:
 - Prioritize opportunities that ALIGN with macro themes and sector rotation
@@ -1440,7 +1492,9 @@ Respond in JSON format:
             "timeframe": "position",
             "confidence": 0.78,
             "key_risks": ["Valuation stretched at 35x forward", "China revenue exposure"],
-            "alignment_score": 9
+            "alignment_score": 9,
+            "related_symbols": ["AMD", "AVGO", "SMH"],
+            "secondary_plays": "AMD offers similar AI GPU exposure at lower valuation; AVGO benefits from custom ASIC diversification trend; SMH ETF provides broad semiconductor exposure with less single-stock risk"
         }}
     ],
     "market_summary": "Brief summary of overall market view",
@@ -1673,9 +1727,10 @@ def parse_autonomous_insights(
             "insight_type": "opportunity",
             "time_horizon": _timeframe_to_horizon(insight.get("timeframe", "position")),
             "primary_symbol": insight.get("symbol", "").upper(),
-            "related_symbols": [],
+            "related_symbols": insight.get("related_symbols") or [],
+            "secondary_plays": insight.get("secondary_plays"),
             "risk_factors": insight.get("key_risks", [])[:5],
-            "analysts_involved": ["technical", "macro", "sector", "risk", "correlation"],
+            "analysts_involved": insight.get("analysts_involved") or ["technical", "macro", "sector", "risk", "correlation"],
         }
 
         validated.append(parsed)
@@ -1701,7 +1756,7 @@ def _normalize_action(action: str) -> str:
         Normalized action string.
     """
     action = action.upper().strip()
-    valid_actions = {"STRONG_BUY", "BUY", "HOLD", "SELL", "STRONG_SELL", "WATCH"}
+    valid_actions = {"STRONG_BUY", "BUY", "HOLD", "SELL", "STRONG_SELL", "WATCH", "AVOID"}
 
     if action in valid_actions:
         return action
@@ -1713,6 +1768,8 @@ def _normalize_action(action: str) -> str:
         return "SELL"
     elif action in {"MONITOR", "WATCHING"}:
         return "WATCH"
+    elif action in {"CAUTION", "STEER_CLEAR", "STAY_AWAY"}:
+        return "AVOID"
 
     return "HOLD"
 
@@ -1807,7 +1864,7 @@ def _extract_insights_from_text(response: str, max_insights: int) -> list[dict[s
 
     # Basic pattern matching for symbols and actions
     symbol_pattern = r"\b([A-Z]{1,5})\b"
-    action_pattern = r"\b(BUY|SELL|HOLD|WATCH|STRONG_BUY|STRONG_SELL)\b"
+    action_pattern = r"\b(BUY|SELL|HOLD|WATCH|STRONG_BUY|STRONG_SELL|AVOID)\b"
 
     symbols = re.findall(symbol_pattern, response)
     actions = re.findall(action_pattern, response, re.IGNORECASE)
@@ -1867,6 +1924,7 @@ class AutonomousInsightData:
     insight_type: str = "opportunity"
     time_horizon: str = "medium_term"
     related_symbols: list[str] = field(default_factory=list)
+    secondary_plays: str | None = None
     supporting_evidence: list[SupportingEvidence] = field(default_factory=list)
     risk_factors: list[str] = field(default_factory=list)
     invalidation_trigger: str | None = None
@@ -1891,6 +1949,7 @@ class AutonomousInsightData:
             "time_horizon": self.time_horizon,
             "primary_symbol": self.symbol,
             "related_symbols": self.related_symbols,
+            "secondary_plays": self.secondary_plays,
             "supporting_evidence": [e.to_dict() for e in self.supporting_evidence],
             "risk_factors": self.risk_factors,
             "invalidation_trigger": self.invalidation_trigger,
@@ -1921,6 +1980,7 @@ class AutonomousInsightData:
             insight_type=data.get("insight_type", "opportunity"),
             time_horizon=data.get("time_horizon", "medium_term"),
             related_symbols=data.get("related_symbols", []),
+            secondary_plays=data.get("secondary_plays"),
             supporting_evidence=evidence,
             risk_factors=data.get("risk_factors", data.get("key_risks", [])),
             invalidation_trigger=data.get("invalidation_trigger"),

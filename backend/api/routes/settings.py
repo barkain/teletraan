@@ -196,6 +196,28 @@ async def test_llm_connection(
     return LLMTestResult(**result)
 
 
+@router.get("/investors")
+async def get_investor_watchlist(
+    service: SettingsService = Depends(get_service),
+):
+    """Get the investor watchlist for tracking notable investor positions."""
+    investors = await service.get_setting("investor_watchlist")
+    if investors is None:
+        from data.adapters.investor_feeds import DEFAULT_INVESTORS
+        investors = DEFAULT_INVESTORS
+    return {"investors": investors}
+
+
+@router.put("/investors")
+async def update_investor_watchlist(
+    body: dict,
+    service: SettingsService = Depends(get_service),
+):
+    """Update the investor watchlist."""
+    await service.set_setting("investor_watchlist", body.get("investors", []))
+    return {"investors": body.get("investors", [])}
+
+
 @router.get("/{key}")
 async def get_setting(
     key: str,
