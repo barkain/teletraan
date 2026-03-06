@@ -573,37 +573,77 @@ class AutonomousDeepEngine:
 
             for thread in thematic_result.threads:
                 try:
-                    fingerprint = ThematicInsight.compute_fingerprint(
-                        thread.category, thread.primary_symbols
-                    )
-
-                    # Check for existing active theme with same fingerprint
-                    existing_query = (
-                        select(ThematicInsight)
-                        .where(
-                            ThematicInsight.theme_fingerprint == fingerprint,
-                            ThematicInsight.lifecycle_state == LifecycleState.ACTIVE.value,
+                    async with session.begin_nested():
+                        fingerprint = ThematicInsight.compute_fingerprint(
+                            thread.category, thread.primary_symbols
                         )
-                    )
-                    existing_result = await session.execute(existing_query)
-                    existing = existing_result.scalar_one_or_none()
 
-                    if existing:
-                        confidence_diff = abs(existing.confidence - thread.confidence)
-                        if confidence_diff <= 0.2:
-                            # Same theme, similar confidence: update run_count
-                            existing.run_count += 1
-                            existing.confidence = thread.confidence
-                            existing.effective_confidence = existing.compute_effective_confidence()
-                            existing.thesis = thread.thesis
-                            existing.counter_thesis = thread.counter_thesis
-                            logger.info(
-                                "Updated existing thematic insight %s (run_count=%d)",
-                                existing.id, existing.run_count,
+                        # Check for existing active theme with same fingerprint
+                        existing_query = (
+                            select(ThematicInsight)
+                            .where(
+                                ThematicInsight.theme_fingerprint == fingerprint,
+                                ThematicInsight.lifecycle_state == LifecycleState.ACTIVE.value,
                             )
+                        )
+                        existing_result = await session.execute(existing_query)
+                        existing = existing_result.scalar_one_or_none()
+
+                        if existing:
+                            confidence_diff = abs(existing.confidence - thread.confidence)
+                            if confidence_diff <= 0.2:
+                                # Same theme, similar confidence: update run_count
+                                existing.run_count += 1
+                                existing.confidence = thread.confidence
+                                existing.effective_confidence = existing.compute_effective_confidence()
+                                existing.thesis = thread.thesis
+                                existing.counter_thesis = thread.counter_thesis
+                                logger.info(
+                                    "Updated existing thematic insight %s (run_count=%d)",
+                                    existing.id, existing.run_count,
+                                )
+                            else:
+                                # Confidence diverged: supersede old, create new
+                                existing.lifecycle_state = LifecycleState.SUPERSEDED.value
+                                new_insight = ThematicInsight(
+                                    theme_name=thread.theme_name,
+                                    category=thread.category,
+                                    theme_fingerprint=fingerprint,
+                                    direction=thread.direction,
+                                    confidence=thread.confidence,
+                                    thesis=thread.thesis,
+                                    counter_thesis=thread.counter_thesis,
+                                    meta_narrative=thematic_result.meta_narrative,
+                                    primary_symbols=thread.primary_symbols,
+                                    affected_sectors=thread.affected_sectors,
+                                    supply_chain_links=thread.supply_chain_links,
+                                    catalyst_timeline=thread.catalyst_timeline,
+                                    theme_interactions=thematic_result.theme_interactions,
+                                    analysis_task_id=task_id,
+                                    effective_confidence=thread.confidence,
+                                )
+                                session.add(new_insight)
+                                await session.flush()
+                                existing.superseded_by_id = new_insight.id
+
+                                # Start tracking for new insight
+                                if thread.primary_symbols:
+                                    try:
+                                        await tracker.start_tracking(
+                                            insight_id=new_insight.id,
+                                            symbols=thread.primary_symbols,
+                                            predicted_direction=thread.direction,
+                                            catalyst_timeline=thread.catalyst_timeline,
+                                        )
+                                    except Exception as track_err:
+                                        logger.warning("Failed to start tracking for superseding theme: %s", track_err, exc_info=True)
+
+                                logger.info(
+                                    "Superseded thematic insight %s with %s (confidence diverged %.2f)",
+                                    existing.id, new_insight.id, confidence_diff,
+                                )
                         else:
-                            # Confidence diverged: supersede old, create new
-                            existing.lifecycle_state = LifecycleState.SUPERSEDED.value
+                            # New theme
                             new_insight = ThematicInsight(
                                 theme_name=thread.theme_name,
                                 category=thread.category,
@@ -623,9 +663,8 @@ class AutonomousDeepEngine:
                             )
                             session.add(new_insight)
                             await session.flush()
-                            existing.superseded_by_id = new_insight.id
 
-                            # Start tracking for new insight
+                            # Start tracking
                             if thread.primary_symbols:
                                 try:
                                     await tracker.start_tracking(
@@ -635,54 +674,15 @@ class AutonomousDeepEngine:
                                         catalyst_timeline=thread.catalyst_timeline,
                                     )
                                 except Exception as track_err:
-                                    logger.warning("Failed to start tracking for superseding theme: %s", track_err, exc_info=True)
+                                    logger.warning("Failed to start tracking for new theme: %s", track_err, exc_info=True)
 
                             logger.info(
-                                "Superseded thematic insight %s with %s (confidence diverged %.2f)",
-                                existing.id, new_insight.id, confidence_diff,
+                                "Created new thematic insight %s: %s",
+                                new_insight.id, thread.theme_name,
                             )
-                    else:
-                        # New theme
-                        new_insight = ThematicInsight(
-                            theme_name=thread.theme_name,
-                            category=thread.category,
-                            theme_fingerprint=fingerprint,
-                            direction=thread.direction,
-                            confidence=thread.confidence,
-                            thesis=thread.thesis,
-                            counter_thesis=thread.counter_thesis,
-                            meta_narrative=thematic_result.meta_narrative,
-                            primary_symbols=thread.primary_symbols,
-                            affected_sectors=thread.affected_sectors,
-                            supply_chain_links=thread.supply_chain_links,
-                            catalyst_timeline=thread.catalyst_timeline,
-                            theme_interactions=thematic_result.theme_interactions,
-                            analysis_task_id=task_id,
-                            effective_confidence=thread.confidence,
-                        )
-                        session.add(new_insight)
-                        await session.flush()
-
-                        # Start tracking
-                        if thread.primary_symbols:
-                            try:
-                                await tracker.start_tracking(
-                                    insight_id=new_insight.id,
-                                    symbols=thread.primary_symbols,
-                                    predicted_direction=thread.direction,
-                                    catalyst_timeline=thread.catalyst_timeline,
-                                )
-                            except Exception as track_err:
-                                logger.warning("Failed to start tracking for new theme: %s", track_err, exc_info=True)
-
-                        logger.info(
-                            "Created new thematic insight %s: %s",
-                            new_insight.id, thread.theme_name,
-                        )
 
                 except Exception as e:
                     logger.warning("Failed to persist thematic thread %s: %s", thread.theme_name, e, exc_info=True)
-                    await session.rollback()
                     continue
 
             await session.commit()

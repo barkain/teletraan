@@ -155,7 +155,7 @@ class ThematicInsight(TimestampMixin, Base):
         Returns:
             16-char hex digest for dedup matching.
         """
-        top_3 = sorted(s.upper() for s in primary_symbols[:3])
+        top_3 = sorted(s.upper() for s in primary_symbols)[:3]
         raw = f"{category.lower()}|{'|'.join(top_3)}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 

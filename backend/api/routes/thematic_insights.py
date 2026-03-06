@@ -2,7 +2,7 @@
 
 import logging
 from typing import Optional
-from uuid import UUID
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -116,11 +116,14 @@ async def get_thematic_track_record(
     lookback_days: int = Query(default=180, ge=1, le=730),
 ) -> ThematicTrackRecordResponse:
     """Get thematic track record for confidence display."""
+    cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+
     # Get completed outcomes with insights
     completed_query = (
         select(ThematicOutcome, ThematicInsight)
         .join(ThematicInsight, ThematicOutcome.thematic_insight_id == ThematicInsight.id)
         .where(ThematicOutcome.tracking_status == TrackingStatus.COMPLETED.value)
+        .where(ThematicOutcome.created_at >= cutoff)
     )
     result = await db.execute(completed_query)
     rows = result.all()
@@ -292,7 +295,7 @@ async def check_thematic_outcomes(
 
 @router.get("/{insight_id}", response_model=ThematicInsightResponse)
 async def get_thematic_insight(
-    insight_id: UUID,
+    insight_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> ThematicInsightResponse:
     """Get a specific thematic insight."""
@@ -304,7 +307,7 @@ async def get_thematic_insight(
 
 @router.get("/{insight_id}/outcome", response_model=ThematicOutcomeResponse)
 async def get_thematic_insight_outcome(
-    insight_id: UUID,
+    insight_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> ThematicOutcomeResponse:
     """Get the outcome for a specific thematic insight."""
