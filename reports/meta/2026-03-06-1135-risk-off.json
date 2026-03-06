@@ -1,0 +1,39 @@
+{
+  "filename": "2026-03-06-1135-risk-off.html",
+  "task_id": "e4d2a864-d9e6-42dc-9a11-f06ffd47fd34",
+  "market_regime": "Risk-Off",
+  "discovery_summary": "## How These Opportunities Were Discovered\n\n**Market Regime:** Risk-Off\n\n**Key Macro Themes:**\n- Energy Supply Shock / Geopolitical Risk: Crude oil futures surged +32.82% over 20 days—an extraordinary move suggesting supply disruption or ...\n- Inflation Resurgence / Fed Hawkish Pivot: Treasury yields rising across the curve (10Y up, 30Y up, 5Y up) despite equity selloff indicates bon...\n- Flight to Hard Assets / Dollar Strength: Gold futures at $5,104 (+3.09% over 20D) reaching extreme levels suggests inflation hedge demand and...\n\n**Heatmap Analysis:** Pre-market session reveals a sharp risk-off rotation with defensive Energy (+0.52%) and Technology (+0.24%) holding up while cyclical sectors face heavy selling pressure—Industrials (-2.22%), Materials (-2.10%), and Consumer Staples (-2.01%) leading declines. The heatmap shows clear bifurcation: quality defensive positioning in energy and select tech versus broad-based weakness in economically sensitive names. This aligns with the macro backdrop of elevated VIX (24.57), geopolitical risk driving energy supply concerns, and inflation fears pressuring rate-sensitive sectors.\n\n**Sectors Scanned:**\n- Technology: +0.2% (1D), breadth 50%\n- Financials: -0.5% (1D), breadth 50%\n- Energy: +0.5% (1D), breadth 50%\n- Healthcare: -2.0% (1D), breadth 50%\n- Industrials: -2.2% (1D), breadth 50%\n- Consumer Staples: -2.0% (1D), breadth 50%\n- Consumer Discretionary: +0.1% (1D), breadth 50%\n- Utilities: -0.8% (1D), breadth 50%\n- Communication Services: -0.3% (1D), breadth 50%\n- Real Estate: -1.0% (1D), breadth 50%\n- Materials: -2.1% (1D), breadth 50%\n\n**Stocks in Universe:** 0\n**Stocks Selected for Deep Dive:** 15\n\n**Key Patterns Identified:**\n- Energy sector isolation: XLE +0.52% 1D and +6.07% 20D, dramatically outperforming while all other cyclicals (Industrials, Materials) sink\n- Defensive sector collapse: Consumer Staples (-2.01%), Healthcare (-2.00%), and Utilities (-0.78%) all declining despite risk-off conditions\n- Technology showing resilience (+0.24% 1D) despite being rate-sensitive in a rising rate environment",
+  "top_sectors": [
+    "Utilities +8.2%",
+    "Energy +6.1%",
+    "Financials -5.6%",
+    "Real Estate +3.2%",
+    "Consumer Staples -2.9%",
+    "Healthcare -2.4%"
+  ],
+  "insights_count": 6,
+  "symbols": [
+    "CAT",
+    "GC=F",
+    "GLW",
+    "JPM",
+    "NVDA",
+    "XOM"
+  ],
+  "action_counts": {
+    "SELL": 2,
+    "STRONG_BUY": 1,
+    "BUY": 1,
+    "HOLD": 2
+  },
+  "avg_confidence": 0.8,
+  "insight_types": [
+    "divergence",
+    "opportunity",
+    "risk"
+  ],
+  "created_at": "2026-03-06T11:35:16.087235",
+  "started_at": "2026-03-06T11:35:17.676871",
+  "completed_at": "2026-03-06T11:54:01.184071",
+  "elapsed_seconds": 1121.975336
+}
