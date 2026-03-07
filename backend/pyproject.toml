@@ -6,7 +6,8 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "aiohttp>=3.9.0",
-    "aiosqlite",
+    "aiosqlite>=0.19",
+    "asyncpg>=0.29",
     "apscheduler>=3.10",
     "claude-agent-sdk",
     "fastapi>=0.109.0",
@@ -27,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "aiosqlite",
     "pytest",
     "pytest-asyncio",
     "httpx",

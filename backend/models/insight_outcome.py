@@ -162,6 +162,8 @@ class InsightOutcome(TimestampMixin, Base):
     __table_args__ = (
         Index("ix_insight_outcomes_status_end_date", "tracking_status", "tracking_end_date"),
         Index("ix_insight_outcomes_created_at", "created_at"),
+        Index("ix_insight_outcomes_thesis_validated", "thesis_validated"),
+        Index("ix_insight_outcomes_outcome_category", "outcome_category"),
     )
 
     def __repr__(self) -> str:

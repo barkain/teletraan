@@ -17,10 +17,10 @@ backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from sqlalchemy import select, func  # type: ignore[import-not-found]
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert  # type: ignore[import-not-found]
+from db_utils import dialect_insert  # type: ignore[import-not-found]
 
 from config import get_settings  # type: ignore[import-not-found]
-from database import async_session_factory, init_db  # type: ignore[import-not-found]
+from database import async_session_factory, engine, init_db  # type: ignore[import-not-found]
 from data.adapters.yahoo import YahooFinanceAdapter, YahooFinanceError  # type: ignore[import-not-found]
 from models.stock import Stock  # type: ignore[import-not-found]
 from models.price import PriceHistory  # type: ignore[import-not-found]
@@ -73,7 +73,7 @@ async def seed_stock(
             info = await adapter.get_stock_info(symbol)
 
             # Step 2: Insert or update stock record
-            stmt = sqlite_insert(Stock).values(
+            stmt = dialect_insert(engine)(Stock).values(
                 symbol=info["symbol"],
                 name=info.get("name", symbol),
                 sector=info.get("sector"),
@@ -111,7 +111,7 @@ async def seed_stock(
                 if price_data.get("close") is None or price_data.get("date") is None:
                     continue
 
-                stmt = sqlite_insert(PriceHistory).values(
+                stmt = dialect_insert(engine)(PriceHistory).values(
                     stock_id=stock.id,
                     date=price_data["date"],
                     open=price_data.get("open", 0),

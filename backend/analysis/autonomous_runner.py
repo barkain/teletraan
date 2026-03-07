@@ -8,11 +8,11 @@ auto-publish) without duplicating logic.
 import logging
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select  # type: ignore[import-not-found]
 
-from database import async_session_factory
-from models.analysis_task import AnalysisTask, AnalysisTaskStatus
-from analysis.autonomous_engine import get_autonomous_engine
+from database import async_session_factory  # type: ignore[import-not-found]
+from models.analysis_task import AnalysisTask, AnalysisTaskStatus  # type: ignore[import-not-found]
+from analysis.autonomous_engine import get_autonomous_engine  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,10 @@ async def run_autonomous_analysis_pipeline(
                 task.phases_completed = analysis_result.phases_completed
                 task.phase_summaries = analysis_result.phase_summaries
 
+                # Persist pipeline errors so they're visible via the API
+                if analysis_result.errors:
+                    task.error_message = " | ".join(analysis_result.errors)
+
                 # Market regime
                 if analysis_result.macro_result:
                     task.market_regime = (
@@ -139,6 +143,10 @@ async def run_autonomous_analysis_pipeline(
                         )
                     if analysis_result.catalyst_data:
                         supp["catalyst_data"] = analysis_result.catalyst_data
+                    if analysis_result.thematic_analysis:
+                        supp["thematic_analysis"] = analysis_result.thematic_analysis
+                    if analysis_result.investor_intelligence:
+                        supp["investor_intelligence"] = analysis_result.investor_intelligence
                     if supp:
                         task.supplementary_data = _json.dumps(supp)
                 except Exception as supp_err:
@@ -155,7 +163,7 @@ async def run_autonomous_analysis_pipeline(
 
                 # Auto-publish (best-effort, never breaks pipeline)
                 try:
-                    from api.routes.deep_insights import _auto_publish_report
+                    from api.routes.deep_insights import _auto_publish_report  # type: ignore[import-not-found]
 
                     await _auto_publish_report(task_id)
                 except Exception as pub_err:

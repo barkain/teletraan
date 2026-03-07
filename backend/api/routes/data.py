@@ -7,7 +7,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from database import engine
+from db_utils import dialect_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from analysis.engine import AnalysisEngine
@@ -83,7 +84,7 @@ async def refresh_single_symbol(
         info = await adapter.get_stock_info(symbol)
 
         # Step 2: Insert or update stock record
-        stmt = sqlite_insert(Stock).values(
+        stmt = dialect_insert(engine)(Stock).values(
             symbol=info["symbol"],
             name=info.get("name", symbol),
             sector=info.get("sector"),
@@ -120,7 +121,7 @@ async def refresh_single_symbol(
             if price_data.get("close") is None or price_data.get("date") is None:
                 continue
 
-            stmt = sqlite_insert(PriceHistory).values(
+            stmt = dialect_insert(engine)(PriceHistory).values(
                 stock_id=stock.id,
                 date=price_data["date"],
                 open=price_data.get("open", 0),

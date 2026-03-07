@@ -57,8 +57,9 @@ class ConfidenceAdjuster:
     """
 
     # Weight constants for confidence adjustment formula
-    BASE_WEIGHT = 0.7  # Weight for analyst's original confidence
-    HISTORICAL_WEIGHT = 0.3  # Weight for historical track record
+    BASE_WEIGHT = 0.6  # Weight for analyst's original confidence
+    HISTORICAL_WEIGHT = 0.2  # Weight for historical track record
+    THEMATIC_WEIGHT = 0.1  # Weight for thematic track record (when available)
 
     # Pattern boost thresholds
     PATTERN_SUCCESS_THRESHOLD = 0.6  # Minimum pattern success rate for boost
@@ -166,6 +167,20 @@ class ConfidenceAdjuster:
                 f"Historical accuracy of {historical_accuracy:.1%} "
                 f"from {total_insights} similar insights."
             )
+
+        # Blend in thematic track record if available
+        try:
+            thematic_record = await self.get_thematic_accuracy()
+            thematic_total = thematic_record.get("total", 0)
+            if thematic_total >= 3:
+                thematic_accuracy = thematic_record.get("accuracy", 0.5)
+                adjusted += thematic_accuracy * self.THEMATIC_WEIGHT
+                reasoning_parts.append(
+                    f"Thematic track record of {thematic_accuracy:.1%} "
+                    f"from {thematic_total} completed themes."
+                )
+        except Exception as thematic_err:
+            logger.debug("Thematic track record unavailable: %s", thematic_err)
 
         # Apply symbol-specific adjustment if available and significant
         if symbol_accuracy is not None and symbol_total >= 3:
@@ -452,6 +467,31 @@ class ConfidenceAdjuster:
             "avg_return_when_successful": round(avg_return_success, 4),
             "avg_return_when_failed": round(avg_return_failed, 4),
         }
+
+    async def get_thematic_accuracy(
+        self,
+        category: str | None = None,
+        lookback_days: int = 180,
+    ) -> dict[str, Any]:
+        """Get thematic track record accuracy for confidence blending.
+
+        Queries completed ThematicOutcome records to calculate the thematic
+        thesis validation rate, used to blend into the confidence formula.
+
+        Args:
+            category: Optional theme category filter.
+            lookback_days: Number of days to look back (default 180).
+
+        Returns:
+            Dictionary with total, validated, accuracy, avg_composite.
+        """
+        from analysis.thematic_outcome_tracker import ThematicOutcomeTracker
+
+        tracker = ThematicOutcomeTracker(self.db)
+        return await tracker.get_thematic_accuracy(
+            category=category,
+            lookback_days=lookback_days,
+        )
 
     async def calculate_pattern_boost(
         self,

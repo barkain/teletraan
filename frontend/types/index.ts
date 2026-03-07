@@ -391,6 +391,14 @@ export interface HoldingUpdate {
   notes?: string;
 }
 
+export interface ImportResult {
+  imported: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  warnings: string[];
+}
+
 export interface PortfolioImpact {
   portfolio_value: number;
   affected_holdings: Array<{

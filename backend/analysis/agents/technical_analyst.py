@@ -342,6 +342,8 @@ def format_technical_context(market_data: dict[str, Any]) -> str:
             context_parts.append(f"## {symbol} - {stock_info.get('name', symbol)}")
             if stock_info.get("sector"):
                 context_parts.append(f"Sector: {stock_info.get('sector')}")
+            if stock_info.get("thematic_description"):
+                context_parts.append(f"Thematic Profile: {stock_info['thematic_description']}")
 
             # Current price from most recent data
             current_price: float = 0.0

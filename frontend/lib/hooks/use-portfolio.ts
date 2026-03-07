@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact } from '@/types';
+import type { Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, ImportResult } from '@/types';
 
 // Query keys for portfolio
 export const portfolioKeys = {
@@ -58,6 +58,34 @@ export function useUpdateHolding() {
 
   return useMutation<PortfolioHolding, Error, { holdingId: number; data: HoldingUpdate }>({
     mutationFn: ({ holdingId, data }) => api.portfolio.updateHolding(holdingId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
+    },
+  });
+}
+
+/**
+ * Custom hook for importing holdings from a CSV file
+ */
+export function useImportHoldings() {
+  const queryClient = useQueryClient();
+
+  return useMutation<ImportResult, Error, File>({
+    mutationFn: (file) => api.portfolio.importCsv(file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
+    },
+  });
+}
+
+/**
+ * Custom hook for deleting all holdings
+ */
+export function useDeleteAllHoldings() {
+  const queryClient = useQueryClient();
+
+  return useMutation<{ deleted_count: number }, Error, void>({
+    mutationFn: () => api.portfolio.deleteAllHoldings(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
     },

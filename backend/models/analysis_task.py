@@ -213,6 +213,8 @@ class AnalysisTask(TimestampMixin, Base):
 
     __table_args__ = (
         Index("ix_analysis_tasks_status_created", "status", "created_at"),
+        Index("ix_analysis_tasks_started_at", "started_at"),
+        Index("ix_analysis_tasks_completed_at", "completed_at"),
     )
 
     def __repr__(self) -> str:

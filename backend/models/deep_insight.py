@@ -79,6 +79,11 @@ class DeepInsight(TimestampMixin, Base):
         nullable=True,
     )  # ["NVDA", "SMH", "XLK"]
 
+    # Derived insight rationale for related symbols
+    secondary_plays: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None,
+    )  # "AMD offers lower valuation; AVGO benefits from ASIC trend; ..."
+
     # Evidence from analysts
     supporting_evidence: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSON,
@@ -218,6 +223,8 @@ class DeepInsight(TimestampMixin, Base):
     __table_args__ = (
         Index("ix_deep_insights_type_action", "insight_type", "action"),
         Index("ix_deep_insights_created_at", "created_at"),
+        Index("ix_deep_insights_lifecycle_state", "lifecycle_state"),
+        Index("ix_deep_insights_confidence", "confidence"),
     )
 
     def compute_effective_confidence(self) -> float:

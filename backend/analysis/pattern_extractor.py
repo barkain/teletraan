@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import uuid
 from typing import Any
 from uuid import UUID
 
@@ -305,8 +304,9 @@ class PatternExtractor:
 
                     if research_context:
                         existing_ids = list(research_context.identified_pattern_ids or [])
-                        if pattern.id not in existing_ids:
-                            existing_ids.append(pattern.id)
+                        pattern_id_str = str(pattern.id)
+                        if pattern_id_str not in existing_ids:
+                            existing_ids.append(pattern_id_str)
                             research_context.identified_pattern_ids = existing_ids
                             await self.db.flush()
                             logger.info(
@@ -350,7 +350,7 @@ class PatternExtractor:
             return 0
 
         merged_count = 0
-        patterns_to_delete: set[uuid.UUID] = set()
+        patterns_to_delete: set[str] = set()
 
         # Compare each pair of patterns
         for i, pattern_a in enumerate(patterns):

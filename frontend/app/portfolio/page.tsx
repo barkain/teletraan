@@ -1,9 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { HoldingsTable } from '@/components/portfolio/holdings-table';
 import { HoldingDialog } from '@/components/portfolio/holding-dialog';
 import { PortfolioSummary } from '@/components/portfolio/portfolio-summary';
@@ -14,12 +25,16 @@ import {
   useAddHolding,
   useUpdateHolding,
   useDeleteHolding,
+  useImportHoldings,
+  useDeleteAllHoldings,
   portfolioKeys,
 } from '@/lib/hooks/use-portfolio';
+import { api } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import type { PortfolioHolding, HoldingCreate, HoldingUpdate } from '@/types';
-import { Briefcase, Plus, RefreshCw } from 'lucide-react';
+import { Briefcase, Download, Loader2, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { ConnectionError } from '@/components/ui/empty-state';
+import { toast } from 'sonner';
 
 function PortfolioSkeleton() {
   return (
@@ -52,22 +67,40 @@ function PortfolioSkeleton() {
   );
 }
 
-function EmptyState({ onAdd }: { onAdd: () => void }) {
+function EmptyState({ onAdd, onImport, isImporting }: { onAdd: () => void; onImport: () => void; isImporting: boolean }) {
   return (
     <Card className="py-12">
       <CardContent className="flex flex-col items-center justify-center text-center">
-        <div className="rounded-full bg-muted p-4 mb-4">
-          <Briefcase className="h-8 w-8 text-muted-foreground" />
-        </div>
-        <CardTitle className="text-lg mb-2">No Holdings Yet</CardTitle>
-        <CardDescription className="max-w-sm mb-6">
-          Add your first holding to get started. Track your portfolio performance
-          and see how AI insights impact your investments.
-        </CardDescription>
-        <Button onClick={onAdd} className="gap-2">
-          <Plus className="h-4 w-4" />
-          Add Your First Holding
-        </Button>
+        {isImporting ? (
+          <>
+            <svg className="animate-spin h-12 w-12 text-primary mb-4" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <CardTitle className="text-lg">Importing holdings...</CardTitle>
+          </>
+        ) : (
+          <>
+            <div className="rounded-full bg-muted p-4 mb-4">
+              <Briefcase className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <CardTitle className="text-lg mb-2">No Holdings Yet</CardTitle>
+            <CardDescription className="max-w-sm mb-6">
+              Add your first holding to get started, or import from a CSV file.
+              Track your portfolio performance and see how AI insights impact your investments.
+            </CardDescription>
+            <div className="flex items-center gap-2">
+              <Button onClick={onAdd} className="gap-2">
+                <Plus className="h-4 w-4" />
+                Add Your First Holding
+              </Button>
+              <Button variant="outline" onClick={onImport} className="gap-2">
+                <Upload className="h-4 w-4" />
+                Import CSV
+              </Button>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
@@ -77,6 +110,7 @@ export default function PortfolioPage() {
   const [holdingDialogOpen, setHoldingDialogOpen] = useState(false);
   const [editingHolding, setEditingHolding] = useState<PortfolioHolding | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const queryClient = useQueryClient();
 
@@ -89,6 +123,8 @@ export default function PortfolioPage() {
   const addHolding = useAddHolding();
   const updateHolding = useUpdateHolding();
   const deleteHolding = useDeleteHolding();
+  const importHoldings = useImportHoldings();
+  const deleteAllHoldings = useDeleteAllHoldings();
 
   const isMutating = addHolding.isPending || updateHolding.isPending;
 
@@ -110,6 +146,43 @@ export default function PortfolioPage() {
 
   const handleDeleteHolding = (holdingId: number) => {
     deleteHolding.mutate(holdingId);
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    importHoldings.mutate(file, {
+      onSuccess: (result) => {
+        toast.success(`Imported ${result.imported} holdings (${result.created} new, ${result.updated} updated)`);
+        if (result.warnings.length > 0) {
+          toast.warning(`${result.skipped} rows skipped`);
+        }
+      },
+      onError: (err) => {
+        toast.error(`Import failed: ${err.message}`);
+      },
+    });
+    // Reset so the same file can be re-selected
+    e.target.value = '';
+  };
+
+  const handleExport = () => {
+    window.open(api.portfolio.exportCsvUrl(), '_blank');
+  };
+
+  const handleDeleteAll = () => {
+    deleteAllHoldings.mutate(undefined, {
+      onSuccess: (result) => {
+        toast.success(`Deleted ${result.deleted_count} holdings`);
+      },
+      onError: (err) => {
+        toast.error(`Delete failed: ${err.message}`);
+      },
+    });
   };
 
   const handleDialogSubmit = (data: HoldingCreate | HoldingUpdate) => {
@@ -154,6 +227,36 @@ export default function PortfolioPage() {
         </div>
         {hasHoldings && (
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleImportClick} disabled={importHoldings.isPending}>
+              {importHoldings.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+              {importHoldings.isPending ? 'Importing...' : 'Import'}
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={deleteAllHoldings.isPending}>
+                  {deleteAllHoldings.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                  {deleteAllHoldings.isPending ? 'Deleting...' : 'Delete All'}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete all holdings?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete all {portfolio?.holdings?.length ?? 0} holdings from your portfolio. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDeleteAll} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                    Delete All
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isRefreshing}>
               <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
               Update Prices
@@ -172,7 +275,7 @@ export default function PortfolioPage() {
       ) : error ? (
         <ConnectionError error={error} />
       ) : !portfolio || !hasHoldings ? (
-        <EmptyState onAdd={handleOpenAddDialog} />
+        <EmptyState onAdd={handleOpenAddDialog} onImport={handleImportClick} isImporting={importHoldings.isPending} />
       ) : (
         <>
           {/* Portfolio Summary */}
@@ -193,6 +296,15 @@ export default function PortfolioPage() {
           <PortfolioImpact impact={impact} isLoading={impactLoading} />
         </>
       )}
+
+      {/* Hidden file input for CSV import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv"
+        className="hidden"
+        onChange={handleFileChange}
+      />
 
       {/* Holding Dialog */}
       <HoldingDialog

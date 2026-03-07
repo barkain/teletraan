@@ -106,6 +106,22 @@ from llm.client_pool import pool_query_llm, LLMQueryResult  # type: ignore[impor
 # Optional alternative data sources (availability flags)
 _HAS_PREDICTIONS = importlib.util.find_spec("data.adapters.prediction_markets") is not None
 _HAS_SENTIMENT = importlib.util.find_spec("data.adapters.reddit_sentiment") is not None
+_HAS_INVESTOR_FEEDS = importlib.util.find_spec("data.adapters.investor_feeds") is not None
+
+from analysis.agents.thematic_analyst import (  # type: ignore[import-not-found]
+    format_thematic_context,
+    parse_thematic_response,
+    format_thematic_for_downstream,
+    ThematicAnalysisResult,
+    THEMATIC_ANALYST_PROMPT,
+)
+from analysis.agents.investor_sentiment import (  # type: ignore[import-not-found]
+    format_investor_context,
+    parse_investor_response,
+    format_investor_for_synthesis,
+    InvestorIntelligenceResult,
+    INVESTOR_SENTIMENT_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +187,8 @@ class AutonomousAnalysisResult:
     factor_scores: dict[str, Any] = field(default_factory=dict)
     correlation_highlights: dict[str, Any] = field(default_factory=dict)
     catalyst_data: list[dict[str, Any]] = field(default_factory=list)
+    thematic_analysis: dict[str, Any] = field(default_factory=dict)
+    investor_intelligence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
@@ -387,6 +405,16 @@ class AutonomousDeepEngine:
 
         self._last_analysis_time: datetime | None = None
 
+        # Thematic and investor intelligence results (populated during Phase 1.5)
+        self._thematic_result: ThematicAnalysisResult | None = None
+        self._investor_result: InvestorIntelligenceResult | None = None
+        self._investor_data: dict = {}
+
+        # Stock thematic descriptions (populated during Phase 3.5)
+        self._stock_descriptions: dict[str, str] = {}
+        self._stock_clusters: list[dict[str, Any]] = []
+        self._cluster_analyses: list[dict[str, Any]] = []
+
     async def _get_portfolio_holdings(self) -> dict[str, dict[str, float]]:
         """Fetch portfolio holdings from the database.
 
@@ -463,6 +491,205 @@ class AutonomousDeepEngine:
         except Exception as e:
             logger.warning(f"Failed to pre-fetch sentiment data: {e}")
             return {}
+
+    async def _prefetch_investor_data(self) -> dict:
+        """Pre-fetch investor positions and commentary (I/O phase)."""
+        try:
+            if not _HAS_INVESTOR_FEEDS:
+                return {}
+            from data.adapters.investor_feeds import get_investor_feed_adapter  # type: ignore[import-not-found]
+            adapter = get_investor_feed_adapter()
+            # Load custom investor list from settings if available
+            custom_investors = None
+            try:
+                from services.settings_service import get_settings_service  # type: ignore[import-not-found]
+                svc = get_settings_service()
+                custom_investors = await svc.get_setting("investor_watchlist")
+            except Exception as settings_err:
+                logger.debug("Could not load investor_watchlist setting: %s", settings_err)
+            return await adapter.get_all_intelligence(investors=custom_investors)
+        except Exception as e:
+            logger.warning("Investor data pre-fetch failed: %s", e)
+            return {}
+
+    async def _run_thematic_analysis(self, macro_result: MacroScanResult) -> ThematicAnalysisResult | None:
+        """Run thematic analysis on macro scan results."""
+        try:
+            macro_dict = macro_result.to_dict() if hasattr(macro_result, 'to_dict') else macro_result
+            prompt = format_thematic_context(macro_dict)
+            response = await self._query_llm(
+                THEMATIC_ANALYST_PROMPT,
+                prompt,
+                "thematic_analyst",
+                "thematic_analysis",
+            )
+            if not response:
+                return None
+            return parse_thematic_response(response)
+        except Exception as e:
+            logger.warning("Thematic analysis failed: %s", e)
+            return None
+
+    async def _run_investor_intelligence(self, investor_data: dict, macro_result: MacroScanResult) -> InvestorIntelligenceResult | None:
+        """Run investor intelligence analysis."""
+        try:
+            if not investor_data:
+                return None
+            macro_dict = macro_result.to_dict() if hasattr(macro_result, 'to_dict') else macro_result
+            prompt = format_investor_context(investor_data, macro_dict)
+            response = await self._query_llm(
+                INVESTOR_SENTIMENT_PROMPT,
+                prompt,
+                "investor_sentiment",
+                "investor_intelligence",
+            )
+            if not response:
+                return None
+            return parse_investor_response(response)
+        except Exception as e:
+            logger.warning("Investor intelligence analysis failed: %s", e)
+            return None
+
+    async def _persist_thematic_insights(
+        self,
+        thematic_result: ThematicAnalysisResult,
+        task_id: str | None = None,
+    ) -> None:
+        """Persist thematic threads to DB with dedup and outcome tracking.
+
+        For each ThematicThread in the result:
+        - Compute fingerprint, check for existing active theme
+        - If exists + confidence within 0.2: update run_count, refresh confidence
+        - If exists + confidence diverges >0.2: supersede old, create new
+        - If new: create ThematicInsight + start ThematicOutcome tracking
+        """
+        from sqlalchemy import select
+
+        from analysis.thematic_outcome_tracker import ThematicOutcomeTracker
+        from models.thematic_insight import LifecycleState, ThematicInsight
+
+        async with async_session_factory() as session:
+            tracker = ThematicOutcomeTracker(session)
+
+            for thread in thematic_result.threads:
+                try:
+                    async with session.begin_nested():
+                        fingerprint = ThematicInsight.compute_fingerprint(
+                            thread.category, thread.primary_symbols
+                        )
+
+                        # Check for existing active theme with same fingerprint
+                        existing_query = (
+                            select(ThematicInsight)
+                            .where(
+                                ThematicInsight.theme_fingerprint == fingerprint,
+                                ThematicInsight.lifecycle_state == LifecycleState.ACTIVE.value,
+                            )
+                        )
+                        existing_result = await session.execute(existing_query)
+                        existing = existing_result.scalar_one_or_none()
+
+                        if existing:
+                            confidence_diff = abs(existing.confidence - thread.confidence)
+                            if confidence_diff <= 0.2:
+                                # Same theme, similar confidence: update run_count
+                                existing.run_count += 1
+                                existing.confidence = thread.confidence
+                                existing.effective_confidence = existing.compute_effective_confidence()
+                                existing.thesis = thread.thesis
+                                existing.counter_thesis = thread.counter_thesis
+                                logger.info(
+                                    "Updated existing thematic insight %s (run_count=%d)",
+                                    existing.id, existing.run_count,
+                                )
+                            else:
+                                # Confidence diverged: supersede old, create new
+                                existing.lifecycle_state = LifecycleState.SUPERSEDED.value
+                                new_insight = ThematicInsight(
+                                    theme_name=thread.theme_name,
+                                    category=thread.category,
+                                    theme_fingerprint=fingerprint,
+                                    direction=thread.direction,
+                                    confidence=thread.confidence,
+                                    thesis=thread.thesis,
+                                    counter_thesis=thread.counter_thesis,
+                                    meta_narrative=thematic_result.meta_narrative,
+                                    primary_symbols=thread.primary_symbols,
+                                    affected_sectors=thread.affected_sectors,
+                                    supply_chain_links=thread.supply_chain_links,
+                                    catalyst_timeline=thread.catalyst_timeline,
+                                    theme_interactions=thematic_result.theme_interactions,
+                                    analysis_task_id=task_id,
+                                    effective_confidence=thread.confidence,
+                                )
+                                session.add(new_insight)
+                                await session.flush()
+                                existing.superseded_by_id = new_insight.id
+
+                                # Start tracking for new insight
+                                if thread.primary_symbols:
+                                    try:
+                                        await tracker.start_tracking(
+                                            insight_id=new_insight.id,
+                                            symbols=thread.primary_symbols,
+                                            predicted_direction=thread.direction,
+                                            catalyst_timeline=thread.catalyst_timeline,
+                                        )
+                                    except Exception as track_err:
+                                        logger.warning("Failed to start tracking for superseding theme: %s", track_err, exc_info=True)
+
+                                logger.info(
+                                    "Superseded thematic insight %s with %s (confidence diverged %.2f)",
+                                    existing.id, new_insight.id, confidence_diff,
+                                )
+                        else:
+                            # New theme
+                            new_insight = ThematicInsight(
+                                theme_name=thread.theme_name,
+                                category=thread.category,
+                                theme_fingerprint=fingerprint,
+                                direction=thread.direction,
+                                confidence=thread.confidence,
+                                thesis=thread.thesis,
+                                counter_thesis=thread.counter_thesis,
+                                meta_narrative=thematic_result.meta_narrative,
+                                primary_symbols=thread.primary_symbols,
+                                affected_sectors=thread.affected_sectors,
+                                supply_chain_links=thread.supply_chain_links,
+                                catalyst_timeline=thread.catalyst_timeline,
+                                theme_interactions=thematic_result.theme_interactions,
+                                analysis_task_id=task_id,
+                                effective_confidence=thread.confidence,
+                            )
+                            session.add(new_insight)
+                            await session.flush()
+
+                            # Start tracking
+                            if thread.primary_symbols:
+                                try:
+                                    await tracker.start_tracking(
+                                        insight_id=new_insight.id,
+                                        symbols=thread.primary_symbols,
+                                        predicted_direction=thread.direction,
+                                        catalyst_timeline=thread.catalyst_timeline,
+                                    )
+                                except Exception as track_err:
+                                    logger.warning("Failed to start tracking for new theme: %s", track_err, exc_info=True)
+
+                            logger.info(
+                                "Created new thematic insight %s: %s",
+                                new_insight.id, thread.theme_name,
+                            )
+
+                except Exception as e:
+                    logger.warning("Failed to persist thematic thread %s: %s", thread.theme_name, e, exc_info=True)
+                    continue
+
+            await session.commit()
+            logger.info(
+                "Persisted %d thematic threads from analysis",
+                len(thematic_result.threads),
+            )
 
     def _build_portfolio_synthesis_context(
         self,
@@ -571,8 +798,9 @@ class AutonomousDeepEngine:
             heatmap_coro = self._run_heatmap_fetch()
             prediction_coro = self._prefetch_prediction_data()
             sentiment_coro = self._prefetch_sentiment_data()
-            phase1_result, phase2_result, prediction_data, sentiment_data = await asyncio.gather(
-                macro_coro, heatmap_coro, prediction_coro, sentiment_coro,
+            investor_coro = self._prefetch_investor_data()
+            phase1_result, phase2_result, prediction_data, sentiment_data, investor_data = await asyncio.gather(
+                macro_coro, heatmap_coro, prediction_coro, sentiment_coro, investor_coro,
                 return_exceptions=True,
             )
 
@@ -583,10 +811,14 @@ class AutonomousDeepEngine:
             if isinstance(sentiment_data, BaseException):
                 logger.warning(f"Sentiment pre-fetch failed: {sentiment_data}")
                 sentiment_data = {}
+            if isinstance(investor_data, BaseException):
+                logger.warning(f"Investor data pre-fetch failed: {investor_data}")
+                investor_data = {}
 
             # Store pre-fetched data on instance for downstream access
             self._prediction_data = prediction_data
             self._sentiment_data = sentiment_data
+            self._investor_data = investor_data
 
             # Build pre-fetch phase summary
             prediction_count = len(prediction_data) if isinstance(prediction_data, dict) else 0
@@ -616,6 +848,43 @@ class AutonomousDeepEngine:
             if risk_names:
                 macro_summary_parts.append(f"Top risks: {', '.join(risk_names)}.")
             result.phase_summaries["macro_scan"] = " ".join(macro_summary_parts)
+
+            # ===== PHASE 1.5: Thematic + Investor Intelligence (parallel) =====
+            self._thematic_result = None
+            self._investor_result = None
+            try:
+                thematic_coro = self._run_thematic_analysis(macro_result)
+                investor_intel_coro = self._run_investor_intelligence(
+                    self._investor_data, macro_result
+                )
+                phase_1_5_results = await asyncio.gather(
+                    thematic_coro, investor_intel_coro, return_exceptions=True
+                )
+                if not isinstance(phase_1_5_results[0], BaseException):
+                    self._thematic_result = phase_1_5_results[0]
+                else:
+                    logger.warning("Thematic analysis raised: %s", phase_1_5_results[0])
+                if not isinstance(phase_1_5_results[1], BaseException):
+                    self._investor_result = phase_1_5_results[1]
+                else:
+                    logger.warning("Investor intelligence raised: %s", phase_1_5_results[1])
+            except Exception as phase_1_5_err:
+                logger.warning("Phase 1.5 failed: %s", phase_1_5_err)
+
+            # Store results on the analysis result object
+            if self._thematic_result:
+                result.thematic_analysis = self._thematic_result.to_dict()
+            if self._investor_result:
+                result.investor_intelligence = self._investor_result.to_dict()
+
+            # Persist thematic insights to DB (non-blocking)
+            if self._thematic_result and self._thematic_result.threads:
+                try:
+                    await self._persist_thematic_insights(
+                        self._thematic_result, task_id=task_id
+                    )
+                except Exception as thematic_persist_err:
+                    logger.warning("Failed to persist thematic insights: %s", thematic_persist_err, exc_info=True)
 
             # --- Handle Phase 2 (heatmap fetch) result ---
             metrics.end_phase("heatmap_fetch")
@@ -792,6 +1061,78 @@ class AutonomousDeepEngine:
                     f"to deep dive: {portfolio_additions}"
                 )
 
+        # Phase 3.5: Stock Description Enrichment (non-fatal)
+        self._stock_descriptions = {}
+        self._stock_clusters = []
+        self._cluster_analyses = []
+        try:
+            logger.info(f"Phase 3.5: Enriching {len(symbols_to_analyze)} stocks with thematic descriptions...")
+            await self._update_task_progress(
+                task_id, "stock_enrichment", 52,
+                f"Generating thematic profiles for {len(symbols_to_analyze)} stocks..."
+            )
+            if self._run_metrics:
+                self._run_metrics.start_phase("stock_enrichment")
+
+            # Fetch yfinance business summaries in parallel
+            biz_summaries = await self._fetch_business_summaries(symbols_to_analyze)
+
+            if not biz_summaries:
+                logger.warning(
+                    "Phase 3.5: All yfinance summaries empty for %s — skipping enrichment",
+                    symbols_to_analyze,
+                )
+
+            if biz_summaries:
+                # Build macro/thematic context for the LLM
+                macro_themes = [t.name for t in macro_result.themes[:3]] if macro_result else []
+                thematic_threads = []
+                _tr = self._thematic_result
+                if _tr is not None and _tr.threads:
+                    thematic_threads = [t.theme_name for t in _tr.threads[:5]]
+
+                # Single batched LLM call for all stocks
+                self._stock_descriptions, self._stock_clusters = await self._enrich_stock_descriptions(
+                    symbols_to_analyze, biz_summaries, macro_themes, thematic_threads,
+                )
+
+                # Compute cluster-relative performance for anomaly detection
+                if self._stock_clusters:
+                    try:
+                        self._stock_clusters = self._compute_cluster_performance(
+                            self._stock_clusters, heatmap_data,
+                        )
+                    except Exception as perf_err:
+                        logger.warning(f"Phase 3.5: Cluster performance computation failed (non-fatal): {perf_err}")
+
+                # Persist to Stock.thematic_description in DB
+                if self._stock_descriptions:
+                    if self._stock_clusters:
+                        logger.info(
+                            f"Phase 3.5: Identified {len(self._stock_clusters)} thematic clusters"
+                        )
+                    async with async_session_factory() as enrich_session:
+                        from sqlalchemy import update  # type: ignore[import-not-found]
+                        from models.stock import Stock  # type: ignore[import-not-found]
+                        for sym, desc in self._stock_descriptions.items():
+                            await enrich_session.execute(
+                                update(Stock)
+                                .where(Stock.symbol == sym)
+                                .values(thematic_description=desc)
+                            )
+                        await enrich_session.commit()
+                    logger.info(
+                        f"Phase 3.5: Persisted thematic descriptions for "
+                        f"{len(self._stock_descriptions)} stocks"
+                    )
+
+            if self._run_metrics:
+                self._run_metrics.end_phase("stock_enrichment")
+        except Exception as enrich_err:
+            logger.warning(f"Phase 3.5: Stock enrichment failed (non-fatal): {enrich_err}")
+            if self._run_metrics:
+                self._run_metrics.end_phase("stock_enrichment")
+
         logger.info(f"Phase 4: Deep diving into {symbols_to_analyze}...")
         await self._update_task_progress(
             task_id, "deep_dive", 55,
@@ -802,7 +1143,9 @@ class AutonomousDeepEngine:
 
         # Build discovery context using macro result and heatmap analysis
         discovery_context = self._build_heatmap_discovery_context(
-            macro_result, heatmap_analysis_result, factor_scores=factor_scores
+            macro_result, heatmap_analysis_result, factor_scores=factor_scores,
+            thematic_result=getattr(self, '_thematic_result', None),
+            stock_descriptions=self._stock_descriptions or None,
         )
 
         # Run all symbols concurrently (semaphore gates actual LLM calls)
@@ -955,6 +1298,41 @@ class AutonomousDeepEngine:
                 logger.info(f"[AUTO] Captured {len(result.catalyst_data)} catalyst events for report")
         except Exception as cat_capture_err:
             logger.debug(f"[AUTO] Catalyst data capture for report failed (non-fatal): {cat_capture_err}")
+
+        # ===== PHASE 4.7: Cluster-Level Analysis (non-fatal) =====
+        self._cluster_analyses = []
+        if self._stock_clusters:
+            try:
+                logger.info(f"Phase 4.7: Analyzing {len(self._stock_clusters)} thematic clusters...")
+                await self._update_task_progress(
+                    task_id, "cluster_analysis", 87,
+                    f"Analyzing {len(self._stock_clusters)} thematic clusters..."
+                )
+                if self._run_metrics:
+                    self._run_metrics.start_phase("cluster_analysis")
+
+                macro_themes = [t.name for t in macro_result.themes[:3]] if macro_result else []
+
+                self._cluster_analyses = await self._run_cluster_analysis(
+                    self._stock_clusters, analyst_reports, macro_themes,
+                )
+
+                if self._cluster_analyses:
+                    result.phases_completed.append("cluster_analysis")
+                    result.phase_summaries["cluster_analysis"] = (
+                        f"Analyzed {len(self._cluster_analyses)} thematic clusters"
+                    )
+                    logger.info(
+                        f"Phase 4.7: Completed cluster analysis for "
+                        f"{len(self._cluster_analyses)} clusters"
+                    )
+
+                if self._run_metrics:
+                    self._run_metrics.end_phase("cluster_analysis")
+            except Exception as cluster_err:
+                logger.warning(f"Phase 4.7: Cluster analysis failed (non-fatal): {cluster_err}")
+                if self._run_metrics:
+                    self._run_metrics.end_phase("cluster_analysis")
 
         # ===== PHASE 5: Synthesis =====
         logger.info("Phase 5: Synthesizing insights...")
@@ -1217,11 +1595,449 @@ class AutonomousDeepEngine:
 
         return analyst_reports
 
+    # -----------------------------------------------------------------
+    # Phase 3.5 helpers: Stock Description Enrichment
+    # -----------------------------------------------------------------
+
+    async def _fetch_business_summaries(
+        self,
+        symbols: list[str],
+    ) -> dict[str, str]:
+        """Fetch yfinance longBusinessSummary for each symbol in parallel.
+
+        Uses ThreadPoolExecutor (8 workers) and truncates to 500 chars.
+        Returns dict mapping symbol -> summary text.
+        """
+        import yfinance as yf  # type: ignore[import-untyped]
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _get_summary(sym: str) -> tuple[str, str]:
+            try:
+                info = yf.Ticker(sym).info
+                summary = (info or {}).get("longBusinessSummary", "")
+                return sym, (summary[:500] if summary else "")
+            except Exception:
+                return sym, ""
+
+        loop = asyncio.get_event_loop()
+
+        def _fetch_all() -> list[tuple[str, str]]:
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                return list(executor.map(_get_summary, symbols))
+
+        results = await loop.run_in_executor(None, _fetch_all)
+        return {sym: summary for sym, summary in results if summary}
+
+    async def _enrich_stock_descriptions(
+        self,
+        symbols: list[str],
+        biz_summaries: dict[str, str],
+        macro_themes: list[str],
+        thematic_threads: list[str],
+    ) -> tuple[dict[str, str], list[dict[str, Any]]]:
+        """Generate thematic descriptions and clusters via a single batched LLM call.
+
+        Args:
+            symbols: Stock symbols to describe.
+            biz_summaries: yfinance business summaries per symbol.
+            macro_themes: Current macro theme names.
+            thematic_threads: Current thematic thread names.
+
+        Returns:
+            Tuple of (descriptions dict, thematic clusters list).
+        """
+        # Build the batch prompt
+        stock_lines = []
+        for sym in symbols:
+            summary = biz_summaries.get(sym, "No summary available")
+            stock_lines.append(f"- {sym}: {summary}")
+
+        theme_context = ""
+        if macro_themes:
+            theme_context += f"\nCurrent macro themes: {', '.join(macro_themes)}"
+        if thematic_threads:
+            theme_context += f"\nThematic threads: {', '.join(thematic_threads)}"
+
+        system_prompt = (
+            "You are a thematic stock analyst. Your task has two parts:\n\n"
+            "PART 1 — Per-stock descriptions:\n"
+            "For each stock, write a concise thematic description (15-25 words) that captures:\n"
+            "1. The company's investment angle and niche positioning\n"
+            "2. Cross-stock thematic connections (e.g. 'AI infrastructure', "
+            "'pick-and-shovel play')\n"
+            "3. Use investment-relevant language, not corporate boilerplate\n\n"
+            "PART 2 — Thematic clusters:\n"
+            "Group stocks that share a thematic connection. Each cluster should have:\n"
+            "- A short theme name (e.g. 'AI Optical Infrastructure')\n"
+            "- The symbols that belong to this cluster\n"
+            "- A brief rationale explaining the connection\n"
+            "A stock can appear in multiple clusters. Only create clusters with 2+ stocks.\n\n"
+            "Return ONLY valid JSON with this structure:\n"
+            "{\n"
+            '  "descriptions": {"SYMBOL": "description", ...},\n'
+            '  "clusters": [\n'
+            '    {"theme": "Theme Name", "symbols": ["SYM1", "SYM2"], "rationale": "Why these are connected"}\n'
+            "  ]\n"
+            "}\n"
+            "No markdown, no code blocks, just the JSON object."
+        )
+
+        user_prompt = (
+            f"Generate thematic descriptions for these stocks:{theme_context}\n\n"
+            f"Stock summaries:\n" + "\n".join(stock_lines)
+        )
+
+        response = await self._query_llm(
+            system_prompt, user_prompt,
+            agent_name="stock_enrichment",
+            phase="stock_enrichment",
+        )
+
+        # Parse JSON from response
+        descriptions: dict[str, str] = {}
+        clusters: list[dict[str, Any]] = []
+        parsed = self._parse_json_response(response)
+        if parsed:
+            if "descriptions" in parsed:
+                raw_desc = parsed["descriptions"]
+                if isinstance(raw_desc, dict):
+                    descriptions = raw_desc
+                clusters = parsed.get("clusters", [])
+                if not isinstance(clusters, list):
+                    clusters = []
+            else:
+                # Fallback: flat dict (old format)
+                descriptions = parsed
+        else:
+            logger.warning("Phase 3.5: Could not parse LLM response as JSON")
+
+        # Filter to expected symbols and cap at 200 chars
+        valid_symbols = set(symbols)
+        filtered_descriptions = {
+            sym: desc[:200]
+            for sym, desc in descriptions.items()
+            if sym in valid_symbols and isinstance(desc, str)
+        }
+        # Filter clusters to only include valid symbols
+        filtered_clusters = []
+        for cluster in clusters:
+            if isinstance(cluster, dict) and isinstance(cluster.get("symbols"), list):
+                valid_syms = [s for s in cluster["symbols"] if s in valid_symbols]
+                if len(valid_syms) >= 2:
+                    filtered_clusters.append({
+                        "theme": str(cluster.get("theme", "Unknown"))[:100],
+                        "symbols": valid_syms,
+                        "rationale": str(cluster.get("rationale", ""))[:200],
+                    })
+        return filtered_descriptions, filtered_clusters
+
+    def _compute_cluster_performance(
+        self,
+        clusters: list[dict[str, Any]],
+        heatmap_data: HeatmapData,
+    ) -> list[dict[str, Any]]:
+        """Compute cluster-relative performance for anomaly detection.
+
+        Uses already-fetched heatmap data (Phase 2) to avoid redundant
+        yfinance calls. Flags laggards/outperformers vs cluster average.
+
+        Args:
+            clusters: List of cluster dicts with 'theme', 'symbols', 'rationale'.
+            heatmap_data: Heatmap data from Phase 2 with per-stock metrics.
+
+        Returns:
+            Enriched cluster list with 'performance' key added to each cluster.
+        """
+        # Build returns lookup from already-fetched heatmap data
+        returns: dict[str, float] = {}
+        for stock in heatmap_data.stocks:
+            if stock.change_20d is not None:
+                returns[stock.symbol] = stock.change_20d
+
+        if not returns:
+            return clusters
+
+        # Enrich each cluster with performance data
+        enriched = []
+        for cluster in clusters:
+            cluster_copy = dict(cluster)
+            syms = cluster.get("symbols", [])
+            sym_returns = {s: returns[s] for s in syms if s in returns}
+
+            if len(sym_returns) >= 2:
+                avg_return = sum(sym_returns.values()) / len(sym_returns)
+                performance = []
+                for sym, ret in sorted(sym_returns.items(), key=lambda x: x[1], reverse=True):
+                    delta = ret - avg_return
+                    flag = ""
+                    if delta < -10:
+                        flag = "LAGGARD"
+                    elif delta > 10:
+                        flag = "OUTPERFORMER"
+                    performance.append({
+                        "symbol": sym,
+                        "return_20d": round(ret, 1),
+                        "vs_cluster_avg": round(delta, 1),
+                        "flag": flag,
+                    })
+                cluster_copy["performance"] = performance
+                cluster_copy["cluster_avg_return"] = round(avg_return, 1)
+
+            enriched.append(cluster_copy)
+
+        return enriched
+
+    @staticmethod
+    def _parse_json_response(text: str) -> dict[str, Any] | None:
+        """Extract JSON dict from an LLM response.
+
+        Handles pure JSON, JSON in code blocks, and JSON embedded in prose.
+        """
+        import re
+
+        # Try full text as JSON
+        try:
+            result = json.loads(text.strip())
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
+
+        # Try code blocks
+        for match in re.findall(r"```(?:json)?\s*([\s\S]*?)```", text):
+            try:
+                result = json.loads(match.strip())
+                if isinstance(result, dict):
+                    return result
+            except json.JSONDecodeError:
+                continue
+
+        # Try first { to last }
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end > start:
+            try:
+                result = json.loads(text[start:end + 1])
+                if isinstance(result, dict):
+                    return result
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    @staticmethod
+    def _dump_synthesis_debug(response: str) -> None:
+        """Dump full synthesis response to a file for post-mortem debugging."""
+        try:
+            from pathlib import Path
+            debug_dir = Path(__file__).resolve().parent.parent / "data"
+            debug_dir.mkdir(exist_ok=True)
+            debug_file = debug_dir / "synthesis_debug_last.txt"
+            debug_file.write_text(response)
+            logger.warning("[AUTO] Full synthesis response dumped to %s", debug_file)
+        except Exception as dump_err:
+            logger.debug("Failed to dump synthesis debug file: %s", dump_err)
+
+    async def _run_cluster_analysis(
+        self,
+        clusters: list[dict[str, Any]],
+        analyst_reports: dict[str, dict[str, Any]],
+        macro_themes: list[str],
+    ) -> list[dict[str, Any]]:
+        """Run Phase 4.7: Cluster-level analysis across thematic groups.
+
+        For each cluster with 2+ stocks, runs a single LLM call with all
+        member stocks' analyst reports to identify cluster-level dynamics.
+
+        Args:
+            clusters: Enriched cluster dicts (with performance data).
+            analyst_reports: Per-symbol analyst reports from Phase 4.
+            macro_themes: Current macro theme names for context.
+
+        Returns:
+            List of cluster analysis dicts with theme, symbols, and analysis.
+        """
+        if not clusters:
+            return []
+
+        results: list[dict[str, Any]] = []
+
+        system_prompt = (
+            "You are a thematic cluster analyst. You receive a group of stocks "
+            "that share a thematic connection, along with their individual analyst "
+            "reports and relative performance data.\n\n"
+            "Analyze the CLUSTER as a whole — not individual stocks. Focus on:\n"
+            "1. **Laggard diagnosis**: If a stock trails its cluster peers, is it a "
+            "catch-up opportunity (delayed reaction, temporary headwind) or a "
+            "fundamental divergence (losing market share, weaker execution)?\n"
+            "2. **Cluster catalyst**: What shared demand driver or catalyst links these "
+            "stocks? How strong is the thematic connection?\n"
+            "3. **Concentration risk**: If an investor holds multiple stocks in this "
+            "cluster, what correlated risk are they exposed to?\n"
+            "4. **Trade opportunity**: Is there a pairs trade, basket trade, or "
+            "relative-value opportunity within this cluster?\n\n"
+            "Return ONLY valid JSON:\n"
+            "{\n"
+            '  "cluster_thesis": "2-3 sentence thesis about this cluster as a group",\n'
+            '  "laggard_assessment": "diagnosis of any underperformers, or null if none",\n'
+            '  "catalyst_strength": "strong|moderate|weak",\n'
+            '  "concentration_risk": "high|moderate|low",\n'
+            '  "trade_opportunity": "description of any relative-value or basket opportunity, or null",\n'
+            '  "conviction": 0.75\n'
+            "}\n"
+            "No markdown, no code blocks, just the JSON object."
+        )
+
+        async def _analyze_one_cluster(cluster: dict[str, Any]) -> dict[str, Any] | None:
+            syms = cluster.get("symbols", [])
+            if len(syms) < 2:
+                return None
+
+            # Build per-stock report summaries for this cluster
+            stock_sections = []
+            for sym in syms:
+                reports = analyst_reports.get(sym, {})
+                if not reports:
+                    stock_sections.append(f"### {sym}\nNo analyst reports available.")
+                    continue
+
+                section_lines = [f"### {sym}"]
+                # Add thematic description if available
+                desc = self._stock_descriptions.get(sym, "")
+                if desc:
+                    section_lines.append(f"Thematic Profile: {desc}")
+
+                for analyst_name, report in reports.items():
+                    if isinstance(report, dict):
+                        if report.get("error"):
+                            section_lines.append(f"{analyst_name}: Error — {report['error']}")
+                        else:
+                            summary = str(report)[:500]
+                            section_lines.append(f"{analyst_name}: {summary}")
+                stock_sections.append("\n".join(section_lines))
+
+            # Build performance context
+            perf_lines = []
+            if cluster.get("performance"):
+                avg = cluster.get("cluster_avg_return", 0)
+                perf_lines.append(f"Cluster avg 20d return: {avg:+.1f}%")
+                for p in cluster["performance"]:
+                    flag = f" {p['flag']}" if p.get("flag") else ""
+                    perf_lines.append(
+                        f"  {p['symbol']}: {p['return_20d']:+.1f}% "
+                        f"(vs cluster: {p['vs_cluster_avg']:+.1f}%){flag}"
+                    )
+
+            theme_context = ""
+            if macro_themes:
+                theme_context = f"\nMacro themes: {', '.join(macro_themes)}\n"
+
+            user_prompt = (
+                f"Cluster: {cluster.get('theme', 'Unknown')}\n"
+                f"Symbols: {', '.join(syms)}\n"
+                f"Rationale: {cluster.get('rationale', '')}\n"
+                f"{theme_context}\n"
+                f"### Performance:\n"
+                + "\n".join(perf_lines)
+                + "\n\n### Individual Analyst Reports:\n\n"
+                + "\n\n".join(stock_sections)
+            )
+
+            try:
+                response = await self._query_llm(
+                    system_prompt, user_prompt,
+                    agent_name="cluster_analyst",
+                    phase="cluster_analysis",
+                )
+
+                analysis = self._parse_json_response(response) or {}
+                if not analysis:
+                    logger.warning(f"Phase 4.7: Could not parse cluster analysis for {cluster.get('theme')}")
+                    return None
+
+                return {
+                    "theme": cluster.get("theme", "Unknown"),
+                    "symbols": syms,
+                    "analysis": analysis,
+                }
+
+            except Exception as e:
+                logger.warning(f"Phase 4.7: Cluster analysis failed for {cluster.get('theme')}: {e}")
+                return None
+
+        # Run all cluster analyses concurrently
+        gather_results = await asyncio.gather(
+            *[_analyze_one_cluster(c) for c in clusters],
+            return_exceptions=True,
+        )
+        for r in gather_results:
+            if isinstance(r, BaseException):
+                logger.warning(f"Phase 4.7: Cluster analysis error: {r}")
+            elif r is not None:
+                results.append(r)
+
+        return results
+
+    def _render_cluster_context(self) -> list[str]:
+        """Render thematic cluster data as context lines.
+
+        Includes cluster descriptions, performance data, and anomaly flags.
+        Used by both discovery and synthesis context builders.
+        """
+        if not self._stock_clusters:
+            return []
+        lines = ["", "### Thematic Clusters (Cross-Stock Connections):"]
+        for cluster in self._stock_clusters:
+            syms = ", ".join(cluster["symbols"])
+            lines.append(f"- **{cluster['theme']}** [{syms}]: {cluster['rationale']}")
+            if cluster.get("performance"):
+                avg = cluster.get("cluster_avg_return", 0)
+                lines.append(f"  Cluster avg 20d return: {avg:+.1f}%")
+                for p in cluster["performance"]:
+                    flag = f"  {p['flag']}" if p.get("flag") else ""
+                    lines.append(
+                        f"    {p['symbol']}: {p['return_20d']:+.1f}% "
+                        f"(vs cluster: {p['vs_cluster_avg']:+.1f}%){flag}"
+                    )
+        return lines
+
+    @staticmethod
+    def _enforce_portfolio_sell_rules(
+        insights: list[dict[str, Any]],
+        portfolio_holdings: dict[str, dict[str, float]] | None,
+    ) -> list[dict[str, Any]]:
+        """Convert SELL/STRONG_SELL to AVOID for stocks not in portfolio.
+
+        This is a hard validation layer ensuring sell recommendations only
+        apply to stocks the user actually owns.
+
+        Args:
+            insights: Parsed insight dicts from synthesis.
+            portfolio_holdings: Dict of {symbol: {shares, total_cost}} or None.
+
+        Returns:
+            The same list with actions corrected in-place.
+        """
+        if not insights:
+            return insights
+        held_symbols = set((portfolio_holdings or {}).keys())
+        for insight in insights:
+            action = insight.get("action", "")
+            symbol = insight.get("primary_symbol", "")
+            if action in ("SELL", "STRONG_SELL") and symbol and symbol.upper() not in held_symbols:
+                logger.info(
+                    f"[AUTO] Converting {action} → AVOID for {symbol} (not in portfolio)"
+                )
+                insight["action"] = "AVOID"
+        return insights
+
     def _build_heatmap_discovery_context(
         self,
         macro_result: MacroScanResult,
         heatmap_analysis: HeatmapAnalysis,
         factor_scores: dict[str, Any] | None = None,
+        thematic_result: ThematicAnalysisResult | None = None,
+        stock_descriptions: dict[str, str] | None = None,
     ) -> str:
         """Build discovery context for deep dive analysts using heatmap data.
 
@@ -1229,6 +2045,7 @@ class AutonomousDeepEngine:
             macro_result: Results from macro scan.
             heatmap_analysis: Results from heatmap analysis.
             factor_scores: Optional dict of symbol -> FactorScore from factor model.
+            thematic_result: Optional thematic analysis result for downstream context.
 
         Returns:
             Formatted discovery context string.
@@ -1272,6 +2089,17 @@ class AutonomousDeepEngine:
                     f"(Mom={fs.momentum_score:.0f} Vol={fs.volatility_score:.0f} "
                     f"Tech={fs.technical_score:.0f})"
                 )
+
+        if thematic_result:
+            lines.append("")
+            lines.append(format_thematic_for_downstream(thematic_result))
+
+        if stock_descriptions:
+            lines.extend(["", "### Stock Thematic Profiles:"])
+            for sym, desc in stock_descriptions.items():
+                lines.append(f"- {sym}: {desc}")
+
+        lines.extend(self._render_cluster_context())
 
         lines.extend([
             "",
@@ -1351,21 +2179,39 @@ class AutonomousDeepEngine:
             portfolio_holdings or {}
         )
 
+        # Build thematic and investor context if available
+        thematic_context = ""
+        if getattr(self, '_thematic_result', None):
+            thematic_context = "\n\n" + format_thematic_for_downstream(self._thematic_result)
+
+        investor_context = ""
+        if getattr(self, '_investor_result', None):
+            investor_context = "\n\n" + format_investor_for_synthesis(self._investor_result)
+
         # Format analyst reports for synthesis
         synthesis_context = format_synthesis_context(
             self._flatten_analyst_reports(analyst_reports)
         )
 
-        full_context = f"{autonomous_context}{portfolio_context}\n\n{synthesis_context}"
+        full_context = f"{autonomous_context}{portfolio_context}{thematic_context}{investor_context}\n\n{synthesis_context}"
 
         # Query LLM
         response = await self._query_llm(enhanced_prompt, full_context, "synthesis", "synthesis")
 
         try:
             insights = parse_synthesis_response(response)
+            if not insights:
+                logger.warning(
+                    "[AUTO] Synthesis returned 0 insights. Response preview (first 1000 chars): %s",
+                    response[:1000]
+                )
+                self._dump_synthesis_debug(response)
         except Exception as parse_err:
-            logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:500]}")
+            logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:1000]}")
+            self._dump_synthesis_debug(response)
             insights = []
+
+        insights = self._enforce_portfolio_sell_rules(insights, portfolio_holdings)
 
         # Adjust confidence based on historical track record
         try:
@@ -1451,6 +2297,32 @@ class AutonomousDeepEngine:
                 f"[{stock.opportunity_type}, {stock.priority}]"
             )
 
+        # Include thematic descriptions if available
+        if self._stock_descriptions:
+            lines.extend(["", "### Stock Thematic Profiles:"])
+            for sym, desc in self._stock_descriptions.items():
+                lines.append(f"- {sym}: {desc}")
+
+        lines.extend(self._render_cluster_context())
+
+        if self._cluster_analyses:
+            lines.extend(["", "### Cluster-Level Analysis (Phase 4.7):"])
+            for ca in self._cluster_analyses:
+                analysis = ca.get("analysis", {})
+                lines.append(f"\n**{ca['theme']}** [{', '.join(ca['symbols'])}]:")
+                if analysis.get("cluster_thesis"):
+                    lines.append(f"  Thesis: {analysis['cluster_thesis']}")
+                if analysis.get("laggard_assessment"):
+                    lines.append(f"  Laggard Assessment: {analysis['laggard_assessment']}")
+                if analysis.get("catalyst_strength"):
+                    lines.append(f"  Catalyst Strength: {analysis['catalyst_strength']}")
+                if analysis.get("concentration_risk"):
+                    lines.append(f"  Concentration Risk: {analysis['concentration_risk']}")
+                if analysis.get("trade_opportunity"):
+                    lines.append(f"  Trade Opportunity: {analysis['trade_opportunity']}")
+                if analysis.get("conviction"):
+                    lines.append(f"  Conviction: {analysis['conviction']}")
+
         lines.extend([
             "",
             f"Symbols Analyzed: {', '.join(analyst_reports.keys())}",
@@ -1458,9 +2330,14 @@ class AutonomousDeepEngine:
             f"### Target: Generate {max_insights} actionable insights",
             "Prioritize opportunities with:",
             "- Strong macro/heatmap alignment",
+            "- Thematic connections between stocks",
             "- Pattern confirmation from deep dive",
             "- Multiple analyst agreement",
             "- Clear risk/reward profiles",
+            "",
+            "CRITICAL: Respond with ONLY the JSON object as specified in the system instructions. "
+            "No prose, no commentary, no markdown code fences, no // comments inside JSON values. "
+            "Start your response with { and end with }.",
         ])
 
         return "\n".join(lines)
@@ -1685,6 +2562,7 @@ class AutonomousDeepEngine:
                     thesis=data.get("thesis", ""),
                     primary_symbol=primary_symbol,
                     related_symbols=data.get("related_symbols", []),
+                    secondary_plays=data.get("secondary_plays"),
                     supporting_evidence=data.get("supporting_evidence", []),
                     confidence=float(data.get("confidence", 0.5)),
                     time_horizon=data.get("time_horizon", "medium_term"),
@@ -1726,8 +2604,16 @@ class AutonomousDeepEngine:
                 continue
 
         if stored:
-            await session.commit()
-            logger.info(f"Stored {len(stored)} insights to database")
+            try:
+                await session.commit()
+                logger.info(f"Stored {len(stored)} insights to database")
+            except Exception as commit_err:
+                logger.error(f"DB commit failed for {len(stored)} insights: {commit_err}")
+                await session.rollback()
+                self._dump_synthesis_debug(
+                    f"COMMIT_ERROR: {commit_err}\n\nInsights data:\n{json.dumps(insights_data, indent=2, default=str)}"
+                )
+                return []
 
             # Fire-and-forget pattern extraction in background (uses LLM calls
             # per insight, so running in background avoids blocking the pipeline).
@@ -2616,9 +3502,18 @@ class AutonomousDeepEngine:
 
         try:
             insights = parse_synthesis_response(response)
+            if not insights:
+                logger.warning(
+                    "[AUTO] Synthesis returned 0 insights. Response preview (first 1000 chars): %s",
+                    response[:1000]
+                )
+                self._dump_synthesis_debug(response)
         except Exception as parse_err:
-            logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:500]}")
+            logger.error(f"[AUTO] Failed to parse synthesis response: {parse_err} | preview: {response[:1000]}")
+            self._dump_synthesis_debug(response)
             insights = []
+
+        insights = self._enforce_portfolio_sell_rules(insights, portfolio_holdings)
 
         # Adjust confidence based on historical track record
         try:
@@ -2869,6 +3764,7 @@ class AutonomousDeepEngine:
                     thesis=data.get("thesis", ""),
                     primary_symbol=data.get("primary_symbol"),
                     related_symbols=data.get("related_symbols", []),
+                    secondary_plays=data.get("secondary_plays"),
                     supporting_evidence=data.get("supporting_evidence", []),
                     confidence=float(data.get("confidence", 0.5)),
                     time_horizon=data.get("time_horizon", "medium_term"),
@@ -2909,8 +3805,16 @@ class AutonomousDeepEngine:
                 continue
 
         if stored:
-            await session.commit()
-            logger.info(f"Stored {len(stored)} insights to database")
+            try:
+                await session.commit()
+                logger.info(f"Stored {len(stored)} insights to database")
+            except Exception as commit_err:
+                logger.error(f"DB commit failed for {len(stored)} insights (legacy): {commit_err}")
+                await session.rollback()
+                self._dump_synthesis_debug(
+                    f"COMMIT_ERROR_LEGACY: {commit_err}\n\nInsights data:\n{json.dumps(insights_data, indent=2, default=str)}"
+                )
+                return []
 
             # Fire-and-forget pattern extraction in background (same as heatmap pipeline)
             _stored_dicts_legacy = [

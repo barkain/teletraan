@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 
 # Raise the soft file-descriptor limit to avoid "Too many open files" (Errno 24)
 # under the autonomous analysis pipeline (Claude SDK subprocesses + yfinance
-# ThreadPoolExecutor + SQLite connections can exceed macOS default of 256).
+# ThreadPoolExecutor + PostgreSQL connections can exceed macOS default of 256).
 # The `resource` module is Unix-only; skip on Windows.
 if sys.platform != "win32":
     try:
@@ -197,6 +197,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     # Initialize database and create tables
     await init_db()
+    # Log active database backend
+    db_url = settings.DATABASE_URL
+    if db_url.startswith("postgresql"):
+        # Mask credentials in the URL for logging
+        from urllib.parse import urlparse
+        parsed = urlparse(db_url)
+        masked_host = f"{parsed.hostname}:{parsed.port}" if parsed.port else parsed.hostname
+        db_display = f"PostgreSQL ({masked_host}/{parsed.path.lstrip('/')})"
+    else:
+        db_display = f"SQLite ({db_url.split(':///')[-1]})"
+    print(  # noqa: T201
+        f"\033[38;5;39m[Database]\033[0m {db_display}",
+        flush=True,
+    )
     # Load saved LLM settings from database into os.environ
     # (must happen after init_db so tables exist, but before LLM provider detection)
     from services.llm_settings import load_llm_settings_on_startup

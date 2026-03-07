@@ -1,10 +1,13 @@
 """Portfolio API routes for managing investment holdings."""
 
 import asyncio
+import csv
+import io
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import yfinance as yf
@@ -17,6 +20,7 @@ from schemas.portfolio import (
     HoldingCreate,
     HoldingResponse,
     HoldingUpdate,
+    ImportResult,
     PortfolioCreate,
     PortfolioImpactResponse,
     PortfolioResponse,
@@ -174,6 +178,143 @@ async def create_portfolio(
     await db.refresh(portfolio)
 
     return PortfolioResponse.model_validate(portfolio)
+
+
+@router.post("/holdings/import", response_model=ImportResult)
+async def import_holdings(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import holdings from a CSV file.
+
+    Auto-detects brokerage format (Symbol/Purchase Price/Quantity)
+    or simple format (Symbol/Shares/CostBasis). Upserts holdings.
+    """
+    content = await file.read()
+    text = content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV file is empty or has no headers")
+
+    headers_lower = {h.lower().strip(): h for h in reader.fieldnames}
+
+    # Detect format
+    if "purchase price" in headers_lower:
+        sym_col = headers_lower.get("symbol", "")
+        price_col = headers_lower.get("purchase price", "")
+        qty_col = headers_lower.get("quantity", "")
+    elif "costbasis" in headers_lower or "cost_basis" in headers_lower or "cost basis" in headers_lower:
+        sym_col = headers_lower.get("symbol", "")
+        price_col = headers_lower.get("costbasis", "") or headers_lower.get("cost_basis", "") or headers_lower.get("cost basis", "")
+        qty_col = headers_lower.get("shares", "") or headers_lower.get("quantity", "")
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Unrecognized CSV format. Expected columns: Symbol + (Purchase Price, Quantity) or (Shares, CostBasis)",
+        )
+
+    portfolio = await _get_or_create_portfolio(db)
+    created = 0
+    updated = 0
+    skipped = 0
+    warnings: list[str] = []
+
+    for i, row in enumerate(reader, start=2):
+        symbol = (row.get(sym_col) or "").strip().upper()
+        if not symbol:
+            skipped += 1
+            warnings.append(f"Row {i}: missing symbol, skipped")
+            continue
+
+        try:
+            shares = float(row.get(qty_col, "0").strip())
+            cost_basis = float(row.get(price_col, "0").strip())
+        except (ValueError, TypeError):
+            skipped += 1
+            warnings.append(f"Row {i} ({symbol}): invalid numeric value, skipped")
+            continue
+
+        if shares <= 0:
+            skipped += 1
+            warnings.append(f"Row {i} ({symbol}): zero/negative shares, skipped")
+            continue
+
+        existing = (await db.execute(
+            select(PortfolioHolding).where(
+                PortfolioHolding.portfolio_id == portfolio.id,
+                PortfolioHolding.symbol == symbol,
+            )
+        )).scalar_one_or_none()
+
+        if existing:
+            existing.shares = shares
+            existing.cost_basis = cost_basis
+            updated += 1
+        else:
+            db.add(PortfolioHolding(
+                portfolio_id=portfolio.id,
+                symbol=symbol,
+                shares=shares,
+                cost_basis=cost_basis,
+            ))
+            created += 1
+
+    await db.commit()
+
+    return ImportResult(
+        imported=created + updated,
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        warnings=warnings,
+    )
+
+
+@router.get("/holdings/export")
+async def export_holdings(db: AsyncSession = Depends(get_db)):
+    """Export holdings as CSV with enriched live price data."""
+    portfolio = await _get_or_create_portfolio(db)
+    enriched, _ = await _enrich_holdings(portfolio.holdings)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Symbol", "Shares", "Cost Basis", "Current Price",
+        "Market Value", "Gain/Loss", "Gain/Loss %", "Notes",
+    ])
+
+    for h in enriched:
+        writer.writerow([
+            h.symbol,
+            h.shares,
+            round(h.cost_basis, 2),
+            round(h.current_price, 2) if h.current_price is not None else "",
+            round(h.market_value, 2) if h.market_value is not None else "",
+            round(h.gain_loss, 2) if h.gain_loss is not None else "",
+            round(h.gain_loss_pct, 2) if h.gain_loss_pct is not None else "",
+            h.notes or "",
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=portfolio.csv"},
+    )
+
+
+@router.delete("/holdings")
+async def delete_all_holdings(db: AsyncSession = Depends(get_db)):
+    """Delete all holdings from the portfolio."""
+    portfolio = await _get_or_create_portfolio(db)
+    result = await db.execute(
+        delete(PortfolioHolding).where(
+            PortfolioHolding.portfolio_id == portfolio.id
+        )
+    )
+    await db.commit()
+    return {"deleted_count": result.rowcount}
 
 
 @router.post("/holdings", response_model=HoldingResponse)

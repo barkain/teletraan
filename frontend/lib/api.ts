@@ -355,6 +355,22 @@ export const api = {
       putApi<PortfolioHolding>(`/api/v1/portfolio/holdings/${holdingId}`, data),
     deleteHolding: (holdingId: number) =>
       deleteApi<void>(`/api/v1/portfolio/holdings/${holdingId}`),
+    importCsv: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_URL}/api/v1/portfolio/holdings/import`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) {
+        const errorBody = await res.text();
+        throw new ApiError(res.status, errorBody || res.statusText);
+      }
+      return res.json() as Promise<ImportResult>;
+    },
+    exportCsvUrl: () => `${API_URL}/api/v1/portfolio/holdings/export`,
+    deleteAllHoldings: () =>
+      deleteApi<{ deleted_count: number }>('/api/v1/portfolio/holdings'),
     impact: () =>
       fetchApi<PortfolioImpact>('/api/v1/portfolio/impact'),
   },
@@ -441,7 +457,7 @@ export const chatApi = {
 };
 
 // Import types
-import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, LLMProviderStatus, LLMProviderConfig, LLMTestRequest, LLMTestResult, RunListResponse, RunsAggregateStats, RunSummary } from '@/types';
+import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, ImportResult, LLMProviderStatus, LLMProviderConfig, LLMTestRequest, LLMTestResult, RunListResponse, RunsAggregateStats, RunSummary } from '@/types';
 import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, PatternsSummary, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
 import type { FollowUpResearch, ResearchListResponse, ResearchListParams, ResearchCreateRequest } from '@/lib/types/research';
 import type { ReportListResponse, ReportDetail, PublishResponse } from '@/lib/types/report';
