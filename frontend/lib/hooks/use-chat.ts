@@ -4,8 +4,17 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Message, ToolCall, ChatState, SendMessageOptions } from '@/types/chat';
 
 // WebSocket URL - can be configured via environment variable
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/api/v1/chat';
+const _WS_BASE = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/api/v1/chat';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+
+// Optional API key — appended as ?api_key=<key> to the WebSocket URL and sent
+// as X-API-Key header on REST requests when NEXT_PUBLIC_API_KEY is set.
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
+const WS_URL = API_KEY ? `${_WS_BASE}?api_key=${encodeURIComponent(API_KEY)}` : _WS_BASE;
+
+function apiHeaders(): HeadersInit {
+  return API_KEY ? { 'X-API-Key': API_KEY } : {};
+}
 
 // Reconnection settings
 const RECONNECT_INTERVAL = 3000;
@@ -311,7 +320,7 @@ export function useChat() {
 
     // Also clear on server
     try {
-      await fetch(`${API_URL}/chat/clear`, { method: 'POST' });
+      await fetch(`${API_URL}/chat/clear`, { method: 'POST', headers: apiHeaders() });
     } catch (error) {
       console.error('Failed to clear server chat history:', error);
     }

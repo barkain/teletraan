@@ -2,6 +2,12 @@
 const rawUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_URL = rawUrl.replace(/\/api\/v1\/?$/, '');
 
+// Optional API key injected into every request when NEXT_PUBLIC_API_KEY is set
+const _API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
+function _authHeader(): Record<string, string> {
+  return _API_KEY ? { 'X-API-Key': _API_KEY } : {};
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -36,6 +42,7 @@ export async function fetchApi<T>(
     ...fetchOptions,
     headers: {
       'Content-Type': 'application/json',
+      ..._authHeader(),
       ...fetchOptions?.headers,
     },
   });

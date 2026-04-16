@@ -3,10 +3,12 @@
 import json
 import logging
 import uuid
+from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, WebSocketException, status
 
-from llm.market_agent import get_market_agent
+from config import get_settings
+from llm.market_agent import MarketAnalysisAgent
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +67,32 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+def _check_ws_api_key(api_key: Optional[str]) -> None:
+    """Verify the API key for a WebSocket connection.
+
+    WebSocket upgrade requests cannot carry custom headers in browsers, so the
+    API key is accepted as an ``?api_key=`` query parameter instead.
+    """
+    settings = get_settings()
+    configured_key = settings.TELETRAAN_API_KEY
+    if not configured_key:
+        return  # Open access — no key configured
+    if api_key != configured_key:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+
+
 @router.websocket("/chat")
-async def chat_websocket(websocket: WebSocket) -> None:
+async def chat_websocket(
+    websocket: WebSocket,
+    api_key: Optional[str] = Query(None, alias="api_key"),
+) -> None:
     """WebSocket endpoint for streaming LLM chat responses.
+
+    Each connection gets its own isolated agent instance with independent
+    conversation history — sessions never bleed into one another.
+
+    Authentication: pass ``?api_key=<key>`` in the WebSocket URL when
+    ``TELETRAAN_API_KEY`` is configured.
 
     Message Protocol:
     - Client sends: {"id": "msg-id", "message": "user question"}
@@ -78,12 +103,13 @@ async def chat_websocket(websocket: WebSocket) -> None:
     - Server sends (done): {"type": "done"}
     - Server sends (error): {"type": "error", "error": "error message"}
     """
-    client_id = str(uuid.uuid4())
+    _check_ws_api_key(api_key)
 
+    client_id = str(uuid.uuid4())
     await manager.connect(websocket, client_id)
 
-    # Get or create agent instance for this client
-    agent = get_market_agent()
+    # Each connection gets its own agent — no shared conversation state
+    agent = MarketAnalysisAgent()
 
     try:
         while True:
@@ -168,11 +194,9 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
 @router.post("/chat/clear")
 async def clear_chat() -> dict:
-    """Clear chat history for all sessions.
+    """Clear chat history endpoint (no-op — history is now per-session).
 
     Returns:
-        Status message indicating history was cleared.
+        Status message.
     """
-    agent = get_market_agent()
-    agent.clear_history()
-    return {"status": "cleared", "message": "Chat history has been cleared"}
+    return {"status": "ok", "message": "Chat history is per-session; no global state to clear"}

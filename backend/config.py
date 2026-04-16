@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     FRED_API_KEY: Optional[str] = None
     FINNHUB_API_KEY: Optional[str] = None
 
+    # Application auth
+    # Set TELETRAAN_API_KEY to require X-API-Key header on all API routes.
+    # If unset, the API is open (suitable for local dev only).
+    TELETRAAN_API_KEY: Optional[str] = None
+
     # Application
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
