@@ -236,6 +236,7 @@ class SectorHeatmapFetcher:
                 change_1d=etf_m.get("change_1d", 0.0),
                 change_5d=etf_m.get("change_5d", 0.0),
                 change_20d=etf_m.get("change_20d", 0.0),
+                change_60d=etf_m.get("change_60d"),
                 breadth=breadth,
                 top_gainers=top_gainers,
                 top_losers=top_losers,
@@ -603,6 +604,21 @@ def format_heatmap_for_llm(data: HeatmapData) -> str:
         bar_len = int(s.breadth * 20)
         bar = "#" * bar_len + "." * (20 - bar_len)
         lines.append(f"  {s.name:25s} [{bar}] {s.breadth * 100:.0f}%")
+    lines.append("")
+
+    # --- Sector Momentum Rankings ---
+    try:
+        from analysis.sector_momentum import (  # type: ignore[import-not-found]
+            compute_sector_momentum_from_heatmap,
+            format_momentum_table,
+        )
+        momentum_data = compute_sector_momentum_from_heatmap(data.sectors)
+        momentum_table = format_momentum_table(momentum_data)
+        if momentum_table:
+            lines.append("")
+            lines.append(momentum_table)
+    except Exception:
+        pass  # Non-fatal: omit if sector momentum fails
 
     return "\n".join(lines)
 
