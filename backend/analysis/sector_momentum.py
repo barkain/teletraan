@@ -93,12 +93,8 @@ def compute_sector_momentum_from_heatmap(
         spy_5d = sum(all_5d) / len(all_5d) if all_5d else 0.0
         spy_20d = sum(all_20d) / len(all_20d) if all_20d else 0.0
 
-        class _FakeSPY:
-            change_5d = spy_5d
-            change_20d = spy_20d
-            change_60d: float | None = None
-
-        spy = _FakeSPY()  # type: ignore[assignment]
+        import types
+        spy = types.SimpleNamespace(change_5d=spy_5d, change_20d=spy_20d, change_60d=None)
 
     spy_1w = getattr(spy, "change_5d", 0.0) or 0.0
     spy_1m = getattr(spy, "change_20d", 0.0) or 0.0

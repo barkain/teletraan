@@ -608,8 +608,8 @@ def format_heatmap_for_llm(data: HeatmapData) -> str:
         if momentum_table:
             lines.append("")
             lines.append(momentum_table)
-    except Exception:
-        pass  # Non-fatal: omit if sector momentum fails
+    except Exception as exc:
+        logger.debug("sector momentum table skipped: %s", exc)  # Non-fatal: omit if unavailable
 
     return "\n".join(lines)
 

@@ -8,11 +8,14 @@ This module provides sector analysis capabilities including:
 - Actionable sector insights generation
 """
 
-from typing import Any, Optional
-from datetime import datetime
-from dataclasses import dataclass
-from enum import Enum
+import logging
 import statistics
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class SectorPhase(Enum):
@@ -108,17 +111,25 @@ async def load_sector_etfs_from_db() -> None:
                 etfs = json.loads(row.value)
                 if isinstance(etfs, dict) and etfs:
                     set_sector_etfs(etfs)
-    except Exception:
-        pass  # Non-fatal — defaults remain active
+    except Exception as exc:
+        logger.debug("sector_etfs DB load failed: %s", exc)  # Non-fatal — defaults remain active
 
 
 # Backwards-compatible alias so existing imports of SECTOR_ETFS still work.
 # Always reflects the live cache value via get_sector_etfs().
 class _SectorEtfsProxy(dict):
-    """Proxy dict that delegates all lookups to get_sector_etfs().
+    """Read-only proxy dict that delegates all lookups to get_sector_etfs().
 
-    Allows legacy ``from analysis.sectors import SECTOR_ETFS`` code to work
-    without changes while still reflecting runtime-configured values.
+    Allows ``from analysis.sectors import SECTOR_ETFS`` to keep working while
+    always reflecting the live runtime-configured value.
+
+    Intentionally omitted (not needed by any caller, would silently mutate the
+    proxy object rather than the live cache — use set_sector_etfs() instead):
+        __setitem__, __delitem__, update(), pop(), popitem(), setdefault(), clear()
+
+    Also omitted: __eq__, __hash__ — equality checks against a plain dict will
+    fall back to dict.__eq__ using the proxy's own (empty) contents, which is
+    misleading. Compare get_sector_etfs() directly if equality is needed.
     """
 
     def __getitem__(self, key: str) -> str:
