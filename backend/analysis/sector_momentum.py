@@ -22,21 +22,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from analysis.agents.heatmap_interfaces import SectorHeatmapEntry  # type: ignore[import-not-found]
 
-logger = logging.getLogger(__name__)
+from analysis.sectors import SECTOR_ETFS as SECTOR_ETF_NAMES  # noqa: F401 (live proxy, not a static copy)
 
-SECTOR_ETF_NAMES: dict[str, str] = {
-    "XLK": "Technology",
-    "XLF": "Financials",
-    "XLE": "Energy",
-    "XLV": "Healthcare",
-    "XLI": "Industrials",
-    "XLP": "Consumer Staples",
-    "XLY": "Consumer Discretionary",
-    "XLU": "Utilities",
-    "XLC": "Communication Services",
-    "XLRE": "Real Estate",
-    "XLB": "Materials",
-}
+logger = logging.getLogger(__name__)
 
 # Composite score weights
 WEIGHT_1W = 0.20

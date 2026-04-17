@@ -12,6 +12,19 @@ from models.settings import UserSettings
 # Default settings configuration
 DEFAULT_SETTINGS: dict[str, Any] = {
     "watchlist_symbols": ["AAPL", "GOOGL", "MSFT", "AMZN", "NVDA"],
+    "sector_etfs": {
+        "XLK": "Technology",
+        "XLV": "Health Care",
+        "XLF": "Financials",
+        "XLY": "Consumer Discretionary",
+        "XLP": "Consumer Staples",
+        "XLE": "Energy",
+        "XLI": "Industrials",
+        "XLB": "Materials",
+        "XLU": "Utilities",
+        "XLRE": "Real Estate",
+        "XLC": "Communication Services",
+    },
     "refresh_interval": 5,  # minutes: 1, 5, 15, 30
     "theme": "system",  # "light", "dark", "system"
     "chart_type": "candlestick",  # "candlestick", "line", "area"

@@ -216,6 +216,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from services.llm_settings import load_llm_settings_on_startup
     async with async_session_factory() as session:
         await load_llm_settings_on_startup(session)
+    # Load sector ETF configuration from database into in-memory cache
+    from analysis.sectors import load_sector_etfs_from_db
+    await load_sector_etfs_from_db()
     # Mark any leftover in-progress analysis tasks as failed
     await _cleanup_stale_analysis_tasks()
     # Start ETL scheduler for background data fetching

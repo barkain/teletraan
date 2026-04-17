@@ -48,8 +48,9 @@ class SectorMetrics:
     volatility: float = 0.0  # Standard deviation of returns
 
 
-# Sector ETF mappings
-SECTOR_ETFS: dict[str, str] = {
+# Default sector ETF mappings — overridable at runtime via settings DB.
+# Use get_sector_etfs() to read the live value throughout the codebase.
+DEFAULT_SECTOR_ETFS: dict[str, str] = {
     "XLK": "Technology",
     "XLV": "Health Care",
     "XLF": "Financials",
@@ -62,6 +63,93 @@ SECTOR_ETFS: dict[str, str] = {
     "XLRE": "Real Estate",
     "XLC": "Communication Services",
 }
+
+# In-memory cache — populated from settings DB on startup via load_sector_etfs_from_db().
+# Falls back to DEFAULT_SECTOR_ETFS if not yet loaded.
+_sector_etfs_cache: dict[str, str] | None = None
+
+
+def get_sector_etfs() -> dict[str, str]:
+    """Return the current sector ETF mapping.
+
+    Uses the in-memory cache if populated (loaded from settings DB on startup),
+    otherwise falls back to DEFAULT_SECTOR_ETFS.
+    """
+    return _sector_etfs_cache if _sector_etfs_cache is not None else DEFAULT_SECTOR_ETFS
+
+
+def set_sector_etfs(etfs: dict[str, str]) -> None:
+    """Update the in-memory sector ETF cache.
+
+    Called on startup after loading from DB, and whenever the setting is saved.
+    """
+    global _sector_etfs_cache
+    _sector_etfs_cache = etfs
+
+
+async def load_sector_etfs_from_db() -> None:
+    """Load sector ETFs from settings DB into the in-memory cache.
+
+    Should be called once on application startup. Silently falls back to
+    defaults if the setting has not been configured.
+    """
+    try:
+        from database import AsyncSessionLocal
+        from models.settings import UserSettings
+        from sqlalchemy import select
+        import json
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(UserSettings).where(UserSettings.key == "sector_etfs")
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                etfs = json.loads(row.value)
+                if isinstance(etfs, dict) and etfs:
+                    set_sector_etfs(etfs)
+    except Exception:
+        pass  # Non-fatal — defaults remain active
+
+
+# Backwards-compatible alias so existing imports of SECTOR_ETFS still work.
+# Always reflects the live cache value via get_sector_etfs().
+class _SectorEtfsProxy(dict):
+    """Proxy dict that delegates all lookups to get_sector_etfs().
+
+    Allows legacy ``from analysis.sectors import SECTOR_ETFS`` code to work
+    without changes while still reflecting runtime-configured values.
+    """
+
+    def __getitem__(self, key: str) -> str:
+        return get_sector_etfs()[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in get_sector_etfs()
+
+    def __iter__(self):
+        return iter(get_sector_etfs())
+
+    def __len__(self) -> int:
+        return len(get_sector_etfs())
+
+    def get(self, key: str, default: str | None = None) -> str | None:  # type: ignore[override]
+        return get_sector_etfs().get(key, default)
+
+    def keys(self):
+        return get_sector_etfs().keys()
+
+    def values(self):
+        return get_sector_etfs().values()
+
+    def items(self):
+        return get_sector_etfs().items()
+
+    def copy(self) -> dict[str, str]:
+        return get_sector_etfs().copy()
+
+
+SECTOR_ETFS: dict[str, str] = _SectorEtfsProxy()  # type: ignore[assignment]
 
 
 class SectorAnalyzer:

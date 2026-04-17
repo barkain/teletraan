@@ -19,26 +19,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from analysis.sectors import get_sector_etfs, SECTOR_ETFS  # noqa: F401 (re-exported for backwards compat)
+
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# SECTOR ETF MAPPINGS
-# =============================================================================
-
-SECTOR_ETFS: dict[str, str] = {
-    "XLK": "Technology",
-    "XLF": "Financials",
-    "XLE": "Energy",
-    "XLV": "Healthcare",
-    "XLI": "Industrials",
-    "XLP": "Consumer Staples",
-    "XLY": "Consumer Discretionary",
-    "XLU": "Utilities",
-    "XLC": "Communication Services",
-    "XLRE": "Real Estate",
-    "XLB": "Materials",
-}
 
 # Sector characteristics for rotation analysis
 SECTOR_CHARACTERISTICS: dict[str, dict[str, Any]] = {

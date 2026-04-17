@@ -27,6 +27,7 @@ from analysis.agents.heatmap_interfaces import (  # type: ignore[import-not-foun
     SectorHeatmapEntry,
     StockHeatmapEntry,
 )
+from analysis.sectors import get_sector_etfs
 
 logger = logging.getLogger(__name__)
 
@@ -53,20 +54,6 @@ def _set_cache(key: str, data: Any) -> None:
     _yf_cache[key] = (time.time(), data)
 
 
-# 11 GICS Sector SPDR ETFs
-SECTOR_ETFS: dict[str, str] = {
-    "XLK": "Technology",
-    "XLF": "Financials",
-    "XLE": "Energy",
-    "XLV": "Healthcare",
-    "XLI": "Industrials",
-    "XLP": "Consumer Staples",
-    "XLY": "Consumer Discretionary",
-    "XLU": "Utilities",
-    "XLC": "Communication Services",
-    "XLRE": "Real Estate",
-    "XLB": "Materials",
-}
 
 # Fallback constituent holdings when yfinance can't provide them.
 # Sourced from opportunity_hunter.SECTOR_HOLDINGS.
@@ -114,8 +101,12 @@ class SectorHeatmapFetcher:
     """
 
     def __init__(self) -> None:
-        self._sector_etfs = SECTOR_ETFS
         self._fallback_holdings = FALLBACK_HOLDINGS
+
+    @property
+    def _sector_etfs(self) -> dict[str, str]:
+        """Live sector ETF mapping — always reflects the current settings."""
+        return get_sector_etfs()
 
     # ------------------------------------------------------------------
     # Public API
