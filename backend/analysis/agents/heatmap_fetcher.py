@@ -284,7 +284,7 @@ class SectorHeatmapFetcher:
             logger.debug("Batch download cache hit (%d symbols)", len(symbols))
             return cached
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _download() -> Any:
             try:
@@ -474,7 +474,7 @@ class SectorHeatmapFetcher:
 
         Returns market cap in billions USD. Symbols that fail are omitted.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _get_single_cap(sym: str) -> tuple[str, float | None]:
             cached = _get_cached(f"mcap:{sym}")

@@ -52,10 +52,9 @@ class OptionsSignals:
 
         # Put/call ratio
         if self.put_call_ratio is not None:
-            delta = self.put_call_ratio - PC_RATIO_AVG
-            if delta < -0.2:
+            if self.put_call_ratio < PC_COMPLACENT_THRESHOLD:
                 label = f"below avg {PC_RATIO_AVG:.1f} = complacent"
-            elif delta > 0.2:
+            elif self.put_call_ratio > PC_FEARFUL_THRESHOLD:
                 label = f"above avg {PC_RATIO_AVG:.1f} = fearful/hedging"
             else:
                 label = f"near avg {PC_RATIO_AVG:.1f} = neutral"
@@ -89,7 +88,7 @@ class OptionsSignals:
             lines.append(f"- CBOE Skew: {self.skew:.0f} ({skew_label})")
 
         # VIX 52-week percentile
-        if self.vix_percentile_52w >= 0:
+        if self.vix_percentile_52w > 0:
             if self.vix_percentile_52w < 25:
                 pct_label = "low = vol complacency"
             elif self.vix_percentile_52w > 75:

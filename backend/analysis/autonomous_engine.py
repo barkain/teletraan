@@ -1398,15 +1398,13 @@ class AutonomousDeepEngine:
             HeatmapData with sector and stock heatmap entries.
         """
         fetcher = get_heatmap_fetcher()
-        # Attempt to inject dynamic holdings into the fetcher
+        dynamic_holdings = None
         try:
             from analysis.agents.heatmap_fetcher import get_dynamic_holdings  # type: ignore[import-not-found]
             dynamic_holdings = await get_dynamic_holdings()
-            if dynamic_holdings:
-                fetcher._fallback_holdings = dynamic_holdings
         except Exception as exc:
             logger.debug("Dynamic holdings unavailable for heatmap fetch: %s", exc)
-        return await fetcher.fetch_heatmap_data()
+        return await fetcher.fetch_heatmap_data(holdings=dynamic_holdings or None)
 
     async def _run_heatmap_analysis(
         self,
