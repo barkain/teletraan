@@ -2,6 +2,9 @@
 const rawUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_URL = rawUrl.replace(/\/api\/v1\/?$/, '');
 
+// Static import — avoids async overhead on every API call
+import { getAccessToken, setAccessToken } from '@/lib/auth-store';
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -9,11 +12,12 @@ export class ApiError extends Error {
   }
 }
 
-// Try to refresh the access token using the httpOnly refresh cookie.
-// Returns the new token on success, null on failure.
-async function _tryRefresh(): Promise<string | null> {
+// Singleton promise — prevents concurrent 401s from triggering multiple refreshes.
+// On page load with N parallel queries all returning 401, only one refresh is issued.
+let _refreshPromise: Promise<string | null> | null = null;
+
+async function _doRefresh(): Promise<string | null> {
   try {
-    const { setAccessToken } = await import('@/lib/auth-store');
     const res = await fetch(`${API_URL}/api/v1/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
@@ -28,6 +32,15 @@ async function _tryRefresh(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function _tryRefresh(): Promise<string | null> {
+  if (!_refreshPromise) {
+    _refreshPromise = _doRefresh().finally(() => {
+      _refreshPromise = null;
+    });
+  }
+  return _refreshPromise;
 }
 
 // Generic fetch function with query params support
@@ -54,7 +67,6 @@ export async function fetchApi<T>(
   const { params: _params, ...fetchOptions } = options || {};
 
   // Inject Bearer token if available
-  const { getAccessToken } = await import('@/lib/auth-store');
   const token = getAccessToken();
   const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 

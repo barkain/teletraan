@@ -103,6 +103,23 @@ def _print_startup_banner() -> None:
     print(banner, flush=True)  # noqa: T201 — intentional print for startup visibility
 
 
+def _warn_insecure_defaults() -> None:
+    """Log prominent warnings if auth is configured with known-insecure defaults."""
+    s = get_settings()
+    if s.JWT_SECRET_KEY == "change-me-in-production-use-secrets-token-hex-32":
+        print(  # noqa: T201
+            "\033[38;5;196m[Auth] ⚠️  WARNING: JWT_SECRET_KEY is the insecure default value. "
+            "Anyone can forge tokens. Set JWT_SECRET_KEY in .env before deploying.\033[0m",
+            flush=True,
+        )
+    if s.ADMIN_PASSWORD == "changeme":
+        print(  # noqa: T201
+            "\033[38;5;196m[Auth] ⚠️  WARNING: ADMIN_PASSWORD is 'changeme'. "
+            "Set ADMIN_PASSWORD in .env before deploying.\033[0m",
+            flush=True,
+        )
+
+
 async def _seed_admin_user() -> None:
     """Create the admin user if it doesn't already exist.
 
@@ -250,6 +267,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await load_llm_settings_on_startup(session)
     # Mark any leftover in-progress analysis tasks as failed
     await _cleanup_stale_analysis_tasks()
+    # Warn loudly if insecure defaults are still in use
+    _warn_insecure_defaults()
     # Ensure admin user exists (idempotent)
     await _seed_admin_user()
     # Start ETL scheduler for background data fetching
