@@ -48,6 +48,7 @@ import { Separator } from '@/components/ui/separator';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { cn } from '@/lib/utils';
 import { useDeepInsights } from '@/lib/hooks/use-deep-insights';
+import { useAuth } from '@/contexts/auth-context';
 
 // Mirror sidebar navigation for mobile menu
 const primaryNavItems = [
@@ -69,6 +70,7 @@ const secondaryNavItems = [
 export function Header() {
   const pathname = usePathname();
   const [dataExpanded, setDataExpanded] = useState(false);
+  const { user, logout } = useAuth();
 
   // Fetch insights for mobile menu badges
   const { data: insightsData } = useDeepInsights({ limit: 100 });
@@ -236,16 +238,23 @@ export function Header() {
               <Button variant="ghost" size="icon" className="rounded-full hover:bg-slate-100 dark:hover:bg-white/10">
                 <Avatar className="h-7 w-7 ring-1 ring-slate-200 dark:ring-white/20">
                   <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-purple-500 dark:from-cyan-500 dark:to-purple-500 text-white text-xs font-medium">
-                    U
+                    {user?.username?.[0]?.toUpperCase() ?? 'U'}
                   </AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
+              <DropdownMenuLabel>{user?.username ?? 'My Account'}</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
                 <Link href="/settings">Settings</Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => logout()}
+              >
+                Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

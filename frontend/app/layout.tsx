@@ -6,6 +6,8 @@ import { Providers } from '@/lib/providers';
 import { Header } from '@/components/layout/header';
 import { Sidebar } from '@/components/layout/sidebar';
 import { BackendReadinessGate } from '@/components/backend-readiness-gate';
+import { AuthProvider } from '@/contexts/auth-context';
+import { AuthGate } from '@/components/auth-gate';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -39,15 +41,19 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <Providers>
-            <BackendReadinessGate>
-              <div className="relative flex min-h-screen flex-col">
-                <Header />
-                <div className="flex flex-1">
-                  <Sidebar />
-                  <main className="flex-1 p-6">{children}</main>
-                </div>
-              </div>
-            </BackendReadinessGate>
+            <AuthProvider>
+              <BackendReadinessGate>
+                <AuthGate>
+                  <div className="relative flex min-h-screen flex-col">
+                    <Header />
+                    <div className="flex flex-1">
+                      <Sidebar />
+                      <main className="flex-1 p-6">{children}</main>
+                    </div>
+                  </div>
+                </AuthGate>
+              </BackendReadinessGate>
+            </AuthProvider>
           </Providers>
         </ThemeProvider>
       </body>

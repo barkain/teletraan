@@ -2,11 +2,45 @@
 const rawUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_URL = rawUrl.replace(/\/api\/v1\/?$/, '');
 
+// Static import — avoids async overhead on every API call
+import { getAccessToken, setAccessToken } from '@/lib/auth-store';
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+// Singleton promise — prevents concurrent 401s from triggering multiple refreshes.
+// On page load with N parallel queries all returning 401, only one refresh is issued.
+let _refreshPromise: Promise<string | null> | null = null;
+
+async function _doRefresh(): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/v1/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      setAccessToken(null);
+      return null;
+    }
+    const data = await res.json();
+    setAccessToken(data.access_token);
+    return data.access_token as string;
+  } catch {
+    return null;
+  }
+}
+
+function _tryRefresh(): Promise<string | null> {
+  if (!_refreshPromise) {
+    _refreshPromise = _doRefresh().finally(() => {
+      _refreshPromise = null;
+    });
+  }
+  return _refreshPromise;
 }
 
 // Generic fetch function with query params support
@@ -32,13 +66,46 @@ export async function fetchApi<T>(
 
   const { params: _params, ...fetchOptions } = options || {};
 
+  // Inject Bearer token if available
+  const token = getAccessToken();
+  const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
   const res = await fetch(url, {
     ...fetchOptions,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...authHeader,
       ...fetchOptions?.headers,
     },
   });
+
+  // On 401, attempt a token refresh and retry once
+  if (res.status === 401) {
+    const newToken = await _tryRefresh();
+    if (newToken) {
+      const retryAuthHeader = { Authorization: `Bearer ${newToken}` };
+      const retryRes = await fetch(url, {
+        ...fetchOptions,
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...retryAuthHeader,
+          ...fetchOptions?.headers,
+        },
+      });
+      if (!retryRes.ok) {
+        const errorBody = await retryRes.text();
+        throw new ApiError(retryRes.status, errorBody || retryRes.statusText);
+      }
+      return retryRes.json();
+    }
+    // Refresh failed — redirect to login
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login';
+    }
+    throw new ApiError(401, 'Session expired. Please log in again.');
+  }
 
   if (!res.ok) {
     const errorBody = await res.text();

@@ -1,8 +1,10 @@
 """API routes package - Combines all route modules."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from api.deps import get_current_user
 from api.routes.analysis import router as analysis_router
+from api.routes.auth import router as auth_router
 from api.routes.chat import router as chat_router
 from api.routes.data import router as data_router
 from api.routes.deep_insights import router as deep_insights_router
@@ -26,26 +28,31 @@ from api.routes.thematic_insights import router as thematic_insights_router
 # Combined router for all routes
 router = APIRouter()
 
-# Include route modules
+# Public routes (no auth required)
 router.include_router(health_router, tags=["health"])
-router.include_router(analysis_router)
-router.include_router(chat_router)
-router.include_router(data_router, tags=["data"])
-router.include_router(deep_insights_router, prefix="/deep-insights", tags=["deep-insights"])
-router.include_router(insight_conversations_router, tags=["insight-conversations"])
-router.include_router(insight_modifications_router, tags=["insight-modifications"])
-router.include_router(insights_router)
-router.include_router(search_router)
-router.include_router(settings_router, tags=["settings"])
-router.include_router(statistical_features_router, tags=["features"])
-router.include_router(stocks_router, tags=["stocks"])
-router.include_router(outcomes_router, tags=["outcomes"])
-router.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"])
-router.include_router(portfolio_router, prefix="/portfolio", tags=["portfolio"])
-router.include_router(reports_router, prefix="/reports", tags=["reports"])
-router.include_router(research_router, tags=["research"])
-router.include_router(runs_router, prefix="/runs", tags=["runs"])
-router.include_router(export_router)
-router.include_router(thematic_insights_router, prefix="/thematic-insights", tags=["thematic-insights"])
+router.include_router(auth_router)
+
+# Protected routes — all require a valid Bearer access token
+_auth = [Depends(get_current_user)]
+
+router.include_router(analysis_router, dependencies=_auth)
+router.include_router(chat_router, dependencies=_auth)
+router.include_router(data_router, tags=["data"], dependencies=_auth)
+router.include_router(deep_insights_router, prefix="/deep-insights", tags=["deep-insights"], dependencies=_auth)
+router.include_router(insight_conversations_router, tags=["insight-conversations"], dependencies=_auth)
+router.include_router(insight_modifications_router, tags=["insight-modifications"], dependencies=_auth)
+router.include_router(insights_router, dependencies=_auth)
+router.include_router(search_router, dependencies=_auth)
+router.include_router(settings_router, tags=["settings"], dependencies=_auth)
+router.include_router(statistical_features_router, tags=["features"], dependencies=_auth)
+router.include_router(stocks_router, tags=["stocks"], dependencies=_auth)
+router.include_router(outcomes_router, tags=["outcomes"], dependencies=_auth)
+router.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"], dependencies=_auth)
+router.include_router(portfolio_router, prefix="/portfolio", tags=["portfolio"], dependencies=_auth)
+router.include_router(reports_router, prefix="/reports", tags=["reports"], dependencies=_auth)
+router.include_router(research_router, tags=["research"], dependencies=_auth)
+router.include_router(runs_router, prefix="/runs", tags=["runs"], dependencies=_auth)
+router.include_router(export_router, dependencies=_auth)
+router.include_router(thematic_insights_router, prefix="/thematic-insights", tags=["thematic-insights"], dependencies=_auth)
 
 __all__ = ["router"]
