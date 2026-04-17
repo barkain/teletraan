@@ -55,6 +55,22 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
 
+    # --- Authentication ---
+    # Generate a strong secret: python -c "import secrets; print(secrets.token_hex(32))"
+    JWT_SECRET_KEY: str = "change-me-in-production-use-secrets-token-hex-32"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Admin credentials — set via env vars (ADMIN_USERNAME / ADMIN_PASSWORD)
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "changeme"
+
+    # --- CORS ---
+    # Comma-separated list of allowed origins for production deployment.
+    # Localhost origins are always allowed in addition to these.
+    # Example: CORS_ORIGINS=https://myapp.fly.dev,https://myapp.vercel.app
+    CORS_ORIGINS: str = ""
+
     # Data Source Integrations
     PREDICTION_MARKETS_ENABLED: bool = True
     REDDIT_SENTIMENT_ENABLED: bool = True

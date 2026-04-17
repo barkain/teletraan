@@ -24,6 +24,8 @@ dependencies = [
     "tradingview-ta>=3.3.0",
     "uvicorn[standard]",
     "yfinance",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
 ]
 
 [project.optional-dependencies]

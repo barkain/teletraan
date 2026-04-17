@@ -103,6 +103,38 @@ def _print_startup_banner() -> None:
     print(banner, flush=True)  # noqa: T201 — intentional print for startup visibility
 
 
+async def _seed_admin_user() -> None:
+    """Create the admin user if it doesn't already exist.
+
+    Credentials are taken from settings (ADMIN_USERNAME / ADMIN_PASSWORD).
+    This is idempotent — re-running on every startup is safe.
+    """
+    from sqlalchemy import select
+    from auth import hash_password
+    from models.user import User
+
+    s = get_settings()
+    async with async_session_factory() as session:
+        result = await session.execute(select(User).where(User.username == s.ADMIN_USERNAME))
+        if result.scalar_one_or_none() is None:
+            user = User(
+                username=s.ADMIN_USERNAME,
+                hashed_password=hash_password(s.ADMIN_PASSWORD),
+                is_active=True,
+            )
+            session.add(user)
+            await session.commit()
+            print(  # noqa: T201
+                f"\033[38;5;39m[Auth]\033[0m Admin user '{s.ADMIN_USERNAME}' created",
+                flush=True,
+            )
+        else:
+            print(  # noqa: T201
+                f"\033[38;5;39m[Auth]\033[0m Admin user '{s.ADMIN_USERNAME}' already exists",
+                flush=True,
+            )
+
+
 async def _cleanup_stale_analysis_tasks() -> None:
     """Mark any in-progress analysis tasks as failed on startup.
 
@@ -218,6 +250,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await load_llm_settings_on_startup(session)
     # Mark any leftover in-progress analysis tasks as failed
     await _cleanup_stale_analysis_tasks()
+    # Ensure admin user exists (idempotent)
+    await _seed_admin_user()
     # Start ETL scheduler for background data fetching
     etl_orchestrator.start()
     yield
@@ -233,11 +267,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS for frontend (allow any localhost port + Tauri desktop origins)
+# Configure CORS.
+# • In development: any localhost port + Tauri desktop origins are allowed via regex.
+# • In production: set CORS_ORIGINS (comma-separated) in .env — those origins are
+#   added as explicit allow_origins alongside the regex for local/desktop access.
 # Tauri v2 custom-protocol uses "tauri://localhost" on macOS;
 # the localhost plugin uses "http://tauri.localhost".
+_cors_origins: list[str] = (
+    [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+    if settings.CORS_ORIGINS
+    else []
+)
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=_cors_origins,
     allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$|^https?://tauri\.localhost$|^tauri://localhost$",
     allow_credentials=True,
     allow_methods=["*"],
