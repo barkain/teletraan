@@ -35,8 +35,10 @@ class SettingsService:
         result = await self.db.execute(select(UserSettings))
         stored_settings = result.scalars().all()
 
-        # Start with defaults
+        # Start with defaults — sector_etfs comes from analysis.sectors (single source)
+        from analysis.sectors import get_sector_etfs
         settings = DEFAULT_SETTINGS.copy()
+        settings["sector_etfs"] = get_sector_etfs()
 
         # Override with stored values
         for setting in stored_settings:
@@ -60,7 +62,10 @@ class SettingsService:
             except json.JSONDecodeError:
                 return setting.value
 
-        # Return default if exists
+        # Return default if exists — sector_etfs defers to analysis.sectors
+        if key == "sector_etfs":
+            from analysis.sectors import get_sector_etfs
+            return get_sector_etfs()
         return DEFAULT_SETTINGS.get(key)
 
     async def set_setting(self, key: str, value: Any) -> UserSettings:

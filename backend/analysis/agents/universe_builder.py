@@ -18,10 +18,8 @@ from typing import Any
 
 import yfinance as yf  # type: ignore[import-untyped]
 
-from analysis.agents.heatmap_fetcher import (  # type: ignore[import-not-found]
-    FALLBACK_HOLDINGS,
-    SECTOR_ETFS,
-)
+from analysis.agents.heatmap_fetcher import FALLBACK_HOLDINGS  # type: ignore[import-not-found]
+from analysis.sectors import SECTOR_ETFS
 
 logger = logging.getLogger(__name__)
 

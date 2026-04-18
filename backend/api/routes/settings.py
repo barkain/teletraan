@@ -246,6 +246,10 @@ async def update_setting(
     like /llm and /watchlist are matched first by FastAPI.
     """
     setting = await service.set_setting(key, update.value)
+    # Invalidate in-memory caches for settings that back live data structures
+    if key == "sector_etfs" and isinstance(update.value, dict):
+        from analysis.sectors import set_sector_etfs
+        set_sector_etfs(update.value)
     return {
         "key": setting.key,
         "value": json.loads(setting.value),

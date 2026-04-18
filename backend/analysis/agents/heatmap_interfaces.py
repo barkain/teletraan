@@ -114,6 +114,7 @@ class SectorHeatmapEntry:
         change_1d: 1-day sector ETF change percentage
         change_5d: 5-day sector ETF change percentage
         change_20d: 20-day sector ETF change percentage
+        change_60d: 60-day sector ETF change percentage (None if unavailable)
         breadth: Fraction of stocks in sector with positive 1d change (0.0-1.0)
         top_gainers: Symbols of top 3 gainers in sector (by 1d change)
         top_losers: Symbols of top 3 losers in sector (by 1d change)
@@ -125,6 +126,7 @@ class SectorHeatmapEntry:
     change_1d: float = 0.0
     change_5d: float = 0.0
     change_20d: float = 0.0
+    change_60d: float | None = None
     breadth: float = 0.5
     top_gainers: list[str] = field(default_factory=list)
     top_losers: list[str] = field(default_factory=list)
@@ -132,7 +134,7 @@ class SectorHeatmapEntry:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
-        return {
+        result = {
             "name": self.name,
             "etf": self.etf,
             "change_1d": round(self.change_1d, 2),
@@ -143,16 +145,21 @@ class SectorHeatmapEntry:
             "top_losers": self.top_losers,
             "stock_count": self.stock_count,
         }
+        if self.change_60d is not None:
+            result["change_60d"] = round(self.change_60d, 2)
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SectorHeatmapEntry:
         """Create from dictionary."""
+        change_60d = data.get("change_60d")
         return cls(
             name=data.get("name", "Unknown"),
             etf=data.get("etf", ""),
             change_1d=float(data.get("change_1d", 0.0)),
             change_5d=float(data.get("change_5d", 0.0)),
             change_20d=float(data.get("change_20d", 0.0)),
+            change_60d=float(change_60d) if change_60d is not None else None,
             breadth=float(data.get("breadth", 0.5)),
             top_gainers=data.get("top_gainers", []),
             top_losers=data.get("top_losers", []),

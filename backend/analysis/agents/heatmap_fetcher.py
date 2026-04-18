@@ -27,6 +27,7 @@ from analysis.agents.heatmap_interfaces import (  # type: ignore[import-not-foun
     SectorHeatmapEntry,
     StockHeatmapEntry,
 )
+from analysis.sectors import get_sector_etfs
 
 logger = logging.getLogger(__name__)
 
@@ -53,20 +54,6 @@ def _set_cache(key: str, data: Any) -> None:
     _yf_cache[key] = (time.time(), data)
 
 
-# 11 GICS Sector SPDR ETFs
-SECTOR_ETFS: dict[str, str] = {
-    "XLK": "Technology",
-    "XLF": "Financials",
-    "XLE": "Energy",
-    "XLV": "Healthcare",
-    "XLI": "Industrials",
-    "XLP": "Consumer Staples",
-    "XLY": "Consumer Discretionary",
-    "XLU": "Utilities",
-    "XLC": "Communication Services",
-    "XLRE": "Real Estate",
-    "XLB": "Materials",
-}
 
 # Fallback constituent holdings when yfinance can't provide them.
 # Sourced from opportunity_hunter.SECTOR_HOLDINGS.
@@ -114,8 +101,12 @@ class SectorHeatmapFetcher:
     """
 
     def __init__(self) -> None:
-        self._sector_etfs = SECTOR_ETFS
         self._fallback_holdings = FALLBACK_HOLDINGS
+
+    @property
+    def _sector_etfs(self) -> dict[str, str]:
+        """Live sector ETF mapping — always reflects the current settings."""
+        return get_sector_etfs()
 
     # ------------------------------------------------------------------
     # Public API
@@ -236,6 +227,7 @@ class SectorHeatmapFetcher:
                 change_1d=etf_m.get("change_1d", 0.0),
                 change_5d=etf_m.get("change_5d", 0.0),
                 change_20d=etf_m.get("change_20d", 0.0),
+                change_60d=etf_m.get("change_60d"),
                 breadth=breadth,
                 top_gainers=top_gainers,
                 top_losers=top_losers,
@@ -283,7 +275,7 @@ class SectorHeatmapFetcher:
             logger.debug("Batch download cache hit (%d symbols)", len(symbols))
             return cached
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _download() -> Any:
             try:
@@ -473,7 +465,7 @@ class SectorHeatmapFetcher:
 
         Returns market cap in billions USD. Symbols that fail are omitted.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _get_single_cap(sym: str) -> tuple[str, float | None]:
             cached = _get_cached(f"mcap:{sym}")
@@ -603,6 +595,21 @@ def format_heatmap_for_llm(data: HeatmapData) -> str:
         bar_len = int(s.breadth * 20)
         bar = "#" * bar_len + "." * (20 - bar_len)
         lines.append(f"  {s.name:25s} [{bar}] {s.breadth * 100:.0f}%")
+    lines.append("")
+
+    # --- Sector Momentum Rankings ---
+    try:
+        from analysis.sector_momentum import (  # type: ignore[import-not-found]
+            compute_sector_momentum_from_heatmap,
+            format_momentum_table,
+        )
+        momentum_data = compute_sector_momentum_from_heatmap(data.sectors)
+        momentum_table = format_momentum_table(momentum_data)
+        if momentum_table:
+            lines.append("")
+            lines.append(momentum_table)
+    except Exception as exc:
+        logger.debug("sector momentum table skipped: %s", exc)  # Non-fatal: omit if unavailable
 
     return "\n".join(lines)
 

@@ -116,6 +116,14 @@ Return your analysis as valid JSON:
   }}
 }}
 
+## Options Sentiment Signals
+When OPTIONS SENTIMENT data is available in the market data above, incorporate these forward-looking indicators:
+- **VIX Term Structure**: Contango (VIX3M > VIX) = market calm; Backwardation = acute stress
+- **CBOE Skew Index**: Elevated (>130) = tail-risk hedging; even calm VIX + high Skew = hidden fear
+- **Put/Call Ratio**: Below 0.7 = complacency (contrarian bearish); above 1.2 = fear (contrarian bullish)
+- **VIX Percentile**: Low (<25%) = complacency; High (>75%) = fear/potential capitulation
+Options data often leads price action — use it to validate or challenge signals from other data.
+
 ## Prediction Market Signals
 When prediction market data is available, incorporate market-implied probabilities into your macro assessment:
 - Federal Reserve rate expectations (hold/cut/hike probabilities per meeting)
@@ -364,7 +372,9 @@ class MacroScanner:
     }
 
     VOLATILITY_SYMBOLS = {
-        "^VIX": "CBOE Volatility Index",
+        "^VIX": "CBOE Volatility Index (30-day)",
+        "^VIX3M": "CBOE 3-Month Volatility Index",
+        "^SKEW": "CBOE Skew Index",
     }
 
     CURRENCY_SYMBOLS = {
@@ -447,13 +457,34 @@ class MacroScanner:
         scan_start = datetime.utcnow()
         logger.info("Starting macro environment scan...")
 
-        # Step 1: Fetch macro data
-        logger.info("Fetching macro data from yfinance...")
-        macro_data = await self._fetch_macro_data()
+        # Step 1: Fetch macro data + options signals in parallel
+        logger.info("Fetching macro data and options signals from yfinance...")
+        from analysis.agents.options_signals import fetch_options_signals  # type: ignore[import-not-found]
+        macro_data_result, options_signals = await asyncio.gather(
+            self._fetch_macro_data(),
+            fetch_options_signals(self.data_adapter),
+            return_exceptions=True,
+        )
+
+        if isinstance(macro_data_result, Exception):
+            logger.error(f"Macro data fetch failed: {macro_data_result}")
+            raise macro_data_result
+        macro_data = macro_data_result
+
+        if isinstance(options_signals, Exception):
+            logger.warning(f"Options signals fetch failed: {options_signals}")
+            from analysis.agents.options_signals import OptionsSignals  # type: ignore[import-not-found]
+            options_signals = OptionsSignals()
+
         logger.info(f"Fetched data for {len(macro_data)} categories")
 
         # Step 2: Format data for LLM
         formatted_data = self._format_macro_data(macro_data)
+
+        # Step 2a: Append options sentiment block
+        options_block = options_signals.format_block()
+        if options_block:
+            formatted_data = formatted_data + "\n\n" + options_block
         logger.info(f"Formatted macro data: {len(formatted_data)} chars")
 
         # Step 2b: Append prediction/sentiment context if available

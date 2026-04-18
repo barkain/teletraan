@@ -19,26 +19,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from analysis.sectors import get_sector_etfs, SECTOR_ETFS  # noqa: F401 (re-exported for backwards compat)
+
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# SECTOR ETF MAPPINGS
-# =============================================================================
-
-SECTOR_ETFS: dict[str, str] = {
-    "XLK": "Technology",
-    "XLF": "Financials",
-    "XLE": "Energy",
-    "XLV": "Healthcare",
-    "XLI": "Industrials",
-    "XLP": "Consumer Staples",
-    "XLY": "Consumer Discretionary",
-    "XLU": "Utilities",
-    "XLC": "Communication Services",
-    "XLRE": "Real Estate",
-    "XLB": "Materials",
-}
 
 # Sector characteristics for rotation analysis
 SECTOR_CHARACTERISTICS: dict[str, dict[str, Any]] = {
@@ -421,6 +404,15 @@ Return JSON:
 }
 
 IMPORTANT: The key_stocks field is REQUIRED for every top_sectors entry. Each must contain 2-3 specific tradeable symbols (individual stocks or commodity futures like GC=F, CL=F, SI=F). Never put sector ETFs in key_stocks.
+
+## Quantitative Momentum Rankings
+When SECTOR MOMENTUM RANKINGS data is provided, use it as the primary quantitative basis for your analysis:
+- **Momentum Score**: Composite relative-strength metric (1W×20% + 1M×40% + 3M×40%) — positive = outperforming SPY
+- **ACCELERATING**: Score > 2.0 — sustained relative outperformance; overweight bias
+- **STEADY**: Score 0.3–2.0 — moderate momentum; neutral-to-overweight
+- **DECELERATING**: Score −1.5–0.3 — losing momentum; neutral-to-underweight
+- **LAGGING**: Score < −1.5 — sustained underperformance; underweight bias
+- Use the quartile rankings to identify rotation opportunities (Q4→Q3 = improving; Q1→Q2 = deteriorating)
 
 ## Guidelines
 - Focus on momentum and relative strength metrics
