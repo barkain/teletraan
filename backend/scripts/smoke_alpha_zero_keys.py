@@ -40,7 +40,7 @@ from database import async_session_factory, engine, init_db  # type: ignore[impo
 from db_utils import dialect_insert  # type: ignore[import-not-found]
 from analysis.context_builder import MarketContextBuilder  # type: ignore[import-not-found]
 from analysis.alpha_engine import (  # type: ignore[import-not-found]
-    build_market_universe,
+    MarketUniverse,
     detect_market_regime,
     run_daily_factor_scoring,
 )
@@ -48,7 +48,7 @@ from models.alpha_engine import AnalysisRun, AnalysisRunStatus  # type: ignore[i
 from models.price import PriceHistory  # type: ignore[import-not-found]
 from models.stock import Stock  # type: ignore[import-not-found]
 from data.adapters.yahoo import YahooFinanceAdapter  # type: ignore[import-not-found]
-from sqlalchemy import func, select  # type: ignore[import-not-found]
+from sqlalchemy import select  # type: ignore[import-not-found]
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -94,12 +94,11 @@ async def _deterministic_build_context(self, *args, **kwargs):
 
 
 async def _seed_smoke_data(db) -> int:
-    """Seed a small market universe so the smoke test yields real candidates."""
-    count_result = await db.execute(select(func.count()).select_from(Stock))
-    existing = int(count_result.scalar() or 0)
-    if existing >= len(SMOKE_SEED_SYMBOLS):
-        return existing
+    """Seed price history for all smoke symbols so scoring produces real candidates.
 
+    Always re-seeds price history (upsert) regardless of existing stock count,
+    because the DB may have stocks from a previous full run without price records.
+    """
     adapter = YahooFinanceAdapter()
     seeded = 0
     for symbol in SMOKE_SEED_SYMBOLS:
@@ -227,9 +226,12 @@ async def _run(top_n: int) -> None:
     MarketContextBuilder.build_context = _deterministic_build_context  # type: ignore[assignment]
     await init_db()
 
-    async with async_session_factory() as db:
-        seeded = await _seed_smoke_data(db)
+    async with async_session_factory() as seed_db:
+        seeded = await _seed_smoke_data(seed_db)
+        await seed_db.commit()
         logger.info("Seeded %d smoke symbols", seeded)
+
+    async with async_session_factory() as db:
         run = AnalysisRun(
             run_type="smoke_zero_keys",
             status=AnalysisRunStatus.RUNNING.value,
@@ -238,7 +240,16 @@ async def _run(top_n: int) -> None:
         db.add(run)
         await db.flush()
 
-        universe = await build_market_universe(db)
+        # Use only the seeded symbols so scoring has price history for all of them.
+        # build_market_universe() would return the full DB (264+ stocks) most of
+        # which have no PriceHistory rows, causing the scorer to skip them all.
+        universe = MarketUniverse(
+            as_of=datetime.now(NY_TZ),
+            all_symbols=list(SMOKE_SEED_SYMBOLS),
+            categories={"smoke": list(SMOKE_SEED_SYMBOLS)},
+            portfolio_symbols=[],
+            active_stock_symbols=list(SMOKE_SEED_SYMBOLS),
+        )
         regime = await detect_market_regime()
         scoring = await run_daily_factor_scoring(db, run, universe, regime)
 
