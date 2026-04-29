@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -27,6 +28,9 @@ from zoneinfo import ZoneInfo
 # Add backend directory to path for imports
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
+
+# Use a temp DB so the smoke test never touches the production database
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./data/smoke_test.db")
 
 from config import get_settings  # type: ignore[import-not-found]
 from database import async_session_factory, init_db  # type: ignore[import-not-found]

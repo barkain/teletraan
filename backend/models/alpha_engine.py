@@ -88,8 +88,8 @@ class MarketSnapshot(TimestampMixin, Base):
         nullable=False,
         index=True,
     )
-    market_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    regime_name: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    market_date: Mapped[date] = mapped_column(Date, nullable=False)
+    regime_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     regime_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     benchmark_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     sector_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
