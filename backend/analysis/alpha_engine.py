@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from analysis.agents.universe_builder import get_screening_universe
 from analysis.context_builder import ContextBuilder
+from analysis.alpha_synthesis import synthesize_alpha_run
 from analysis.sectors import SECTOR_ETFS
 from data.adapters.yahoo import yahoo_adapter
 from models.alpha_engine import (
@@ -1196,6 +1197,30 @@ async def create_daily_alpha_run(db: AsyncSession) -> dict[str, Any]:
     snapshot.portfolio_snapshot = scoring["portfolio_overlay"]
     snapshot.notes = "Phase 2 factor-ranked snapshot with portfolio overlay."
 
+    synthesis = await synthesize_alpha_run(
+        db,
+        run=run,
+        candidates=scoring["candidate_rows"],
+        portfolio_overlay=scoring["portfolio_overlay"],
+        regime=regime,
+        market_snapshot={
+            "market_date": market_date.isoformat(),
+            "market_regime": regime.name,
+            "market_confidence": regime.confidence,
+            "universe_size": len(universe.all_symbols),
+            "portfolio_symbols": len(universe.portfolio_symbols),
+        },
+    )
+    run.analysis_metadata = {
+        **(run.analysis_metadata or {}),
+        "synthesis": {
+            "summary": synthesis.get("summary"),
+            "deep_insights_seeded": synthesis.get("deep_insights_seeded", 0),
+            "tracked": synthesis.get("tracked", 0),
+            "data_gaps": synthesis.get("data_gaps", []),
+        },
+    }
+
     run.status = AnalysisRunStatus.COMPLETED.value
     run.completed_at = datetime.now(NY_TZ)
     await db.flush()
@@ -1217,6 +1242,12 @@ async def create_daily_alpha_run(db: AsyncSession) -> dict[str, Any]:
             for c in scoring["candidate_rows"]
         ],
         "portfolio_overlay": scoring["portfolio_overlay"],
+        "synthesis": {
+            "summary": synthesis.get("summary"),
+            "deep_insights_seeded": synthesis.get("deep_insights_seeded", 0),
+            "tracked": synthesis.get("tracked", 0),
+            "data_gaps": synthesis.get("data_gaps", []),
+        },
     }
 
 
