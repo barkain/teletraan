@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from analysis.agents.universe_builder import get_screening_universe
-from analysis.context_builder import ContextBuilder
+from analysis.context_builder import MarketContextBuilder as ContextBuilder
 from analysis.alpha_synthesis import synthesize_alpha_run
 from analysis.sectors import SECTOR_ETFS
 from data.adapters.yahoo import yahoo_adapter
