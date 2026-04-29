@@ -85,6 +85,13 @@ from schemas.outcome import (
     OutcomeSummaryResponse,
     StartTrackingRequest,
 )
+from schemas.alpha_engine import (
+    AnalysisRunSchema,
+    CandidateIdeaSchema,
+    InsightOutcomeSchema,
+    MarketSnapshotSchema,
+    SecuritySignalSchema,
+)
 from schemas.portfolio import (
     AffectedHolding,
     HoldingBase,
@@ -179,6 +186,12 @@ __all__ = [
     "InsightOutcomeResponse",
     "OutcomeSummaryResponse",
     "StartTrackingRequest",
+    # Alpha engine schemas
+    "AnalysisRunSchema",
+    "MarketSnapshotSchema",
+    "SecuritySignalSchema",
+    "CandidateIdeaSchema",
+    "InsightOutcomeSchema",
     # Knowledge schemas
     "ConversationThemeListResponse",
     "ConversationThemeResponse",
