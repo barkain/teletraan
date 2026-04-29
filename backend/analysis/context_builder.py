@@ -167,6 +167,7 @@ class MarketContextBuilder:
         include_sentiment: bool = False,
         include_fundamentals: bool = False,
         include_options_flow: bool = False,
+        include_short_interest: bool = False,
         price_history_days: int = 60,
     ) -> dict[str, Any]:
         """Build full market context for analysis.
@@ -191,6 +192,9 @@ class MarketContextBuilder:
                 Gracefully degrades if data is unavailable.
             include_options_flow: Whether to include symbol-level options flow
                 proxies from yfinance (volume, open interest, IV, skew).
+                Gracefully degrades if data is unavailable.
+            include_short_interest: Whether to include public short-interest
+                proxies (short ratio, shares short, short % of float).
                 Gracefully degrades if data is unavailable.
             price_history_days: Number of days of price history to include.
 
@@ -222,6 +226,7 @@ class MarketContextBuilder:
             include_sentiment,
             include_fundamentals,
             include_options_flow,
+            include_short_interest,
             price_history_days,
         )
 
@@ -301,6 +306,9 @@ class MarketContextBuilder:
         if include_options_flow:
             context["options_flow"] = await self._get_options_flow_data(symbols)
 
+        if include_short_interest:
+            context["short_interest"] = await self._get_short_interest_data(symbols)
+
         self._last_context = context
         self._last_build_time = datetime.utcnow()
 
@@ -332,6 +340,10 @@ class MarketContextBuilder:
         if context.get("options_flow"):
             logger.info(
                 f"Context built: {len(context['options_flow'])} symbols with options flow data"
+            )
+        if context.get("short_interest"):
+            logger.info(
+                f"Context built: {len(context['short_interest'])} symbols with short interest data"
             )
 
         return context
@@ -565,6 +577,24 @@ class MarketContextBuilder:
             return await adapter.get_symbol_flows(target_symbols)
         except Exception:
             logger.warning("Failed to fetch options flow data", exc_info=True)
+            return {}
+
+    async def _get_short_interest_data(
+        self,
+        symbols: list[str] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch short-interest proxies for symbols."""
+        try:
+            from data.adapters.short_interest import get_short_interest_adapter
+
+            target_symbols = [s.upper() for s in symbols] if symbols else []
+            if not target_symbols:
+                return {}
+
+            adapter = get_short_interest_adapter()
+            return await adapter.get_symbol_short_interests(target_symbols)
+        except Exception:
+            logger.warning("Failed to fetch short-interest data", exc_info=True)
             return {}
 
     async def _get_stocks_data(

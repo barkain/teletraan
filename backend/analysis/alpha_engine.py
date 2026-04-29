@@ -855,6 +855,7 @@ async def run_daily_factor_scoring(
         include_sentiment=True,
         include_fundamentals=True,
         include_options_flow=True,
+        include_short_interest=True,
         price_history_days=90,
     )
 
@@ -863,6 +864,7 @@ async def run_daily_factor_scoring(
     rich_technical = context.get("rich_technical", {}) or {}
     fundamentals = context.get("fundamentals", {}) or {}
     options_flow = context.get("options_flow", {}) or {}
+    short_interest = context.get("short_interest", {}) or {}
     sector_performance = context.get("sector_performance", {}) or {}
     sentiment_lookup = _sentiment_lookup(context.get("sentiment"))
     market_summary = context.get("market_summary", {}) or {}
@@ -883,6 +885,7 @@ async def run_daily_factor_scoring(
         sector_history = price_history.get(sector_etf, []) if sector_etf else []
         fundamental_data = fundamentals.get(symbol, {})
         options_flow_data = options_flow.get(symbol, {})
+        short_interest_data = short_interest.get(symbol, {})
         rich_data = rich_technical.get(symbol, {})
         technical_data = technical_indicators.get(symbol, {})
 
@@ -901,8 +904,11 @@ async def run_daily_factor_scoring(
         macro_score = _macro_alignment_score(regime.name, sector)
 
         options_flow_score = float(options_flow_data.get("signal_score") or 0.0) if isinstance(options_flow_data, dict) else 0.0
+        short_interest_score = float(short_interest_data.get("squeeze_score") or 0.0) if isinstance(short_interest_data, dict) else 0.0
         if options_flow_score > 0:
             flow_proxy = _clamp((flow_proxy + options_flow_score) / 2.0, 0.0, 100.0)
+        if short_interest_score > 0:
+            catalyst_score = _clamp((catalyst_score + short_interest_score) / 2.0, 0.0, 100.0)
 
         prediction_boost = 0.0
         predictions = context.get("predictions") or {}
@@ -920,6 +926,7 @@ async def run_daily_factor_scoring(
             bool(rich_data),
             bool(fundamental_data),
             bool(options_flow_data),
+            bool(short_interest_data),
             _volume_ratio(history, 20) is not None,
             symbol in sentiment_lookup,
             bool(fundamental_data.get("target_mean_price") if isinstance(fundamental_data, dict) else None),
@@ -995,6 +1002,7 @@ async def run_daily_factor_scoring(
             f"val:{valuation_score:.0f}",
             f"flow:{flow_proxy:.0f}",
             f"optflow:{options_flow_score:.0f}",
+            f"short:{short_interest_score:.0f}",
             f"sent:{sentiment_score:.0f}",
             f"macro:{macro_score:.0f}",
             f"catalyst:{catalyst_score:.0f}",
@@ -1011,6 +1019,7 @@ async def run_daily_factor_scoring(
                 "notes": fundamental_notes,
             },
             "options_flow": options_flow_data,
+            "short_interest": short_interest_data,
             "sentiment": sentiment_evidence,
             "market_summary": market_summary.get("market_index", {}),
             "sector_performance": sector_performance.get(sector_etf, {}) if sector_etf else {},
@@ -1024,6 +1033,7 @@ async def run_daily_factor_scoring(
             "valuation": round(valuation_score, 2),
             "flow": round(flow_proxy, 2),
             "options_flow": round(options_flow_score, 2),
+            "short_interest": round(short_interest_score, 2),
             "sentiment": round(sentiment_score, 2),
             "macro": round(macro_score, 2),
             "catalyst": round(catalyst_score, 2),
