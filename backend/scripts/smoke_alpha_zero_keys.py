@@ -29,22 +29,136 @@ from zoneinfo import ZoneInfo
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
-# Use a temp DB so the smoke test never touches the production database
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+db_path = backend_dir.parent / "data" / "market-analyzer.db"
+if db_path.exists():
+    os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
+else:
+    os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 from config import get_settings  # type: ignore[import-not-found]
-from database import async_session_factory, init_db  # type: ignore[import-not-found]
+from database import async_session_factory, engine, init_db  # type: ignore[import-not-found]
+from db_utils import dialect_insert  # type: ignore[import-not-found]
+from analysis.context_builder import MarketContextBuilder  # type: ignore[import-not-found]
 from analysis.alpha_engine import (  # type: ignore[import-not-found]
     build_market_universe,
     detect_market_regime,
     run_daily_factor_scoring,
 )
 from models.alpha_engine import AnalysisRun, AnalysisRunStatus  # type: ignore[import-not-found]
+from models.price import PriceHistory  # type: ignore[import-not-found]
+from models.stock import Stock  # type: ignore[import-not-found]
+from data.adapters.yahoo import YahooFinanceAdapter  # type: ignore[import-not-found]
+from sqlalchemy import func, select  # type: ignore[import-not-found]
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 NY_TZ = ZoneInfo("America/New_York")
+SMOKE_SEED_SYMBOLS = [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "XLK",
+    "XLF",
+    "XLE",
+    "XLV",
+    "XLY",
+    "XLI",
+    "XLP",
+    "XLU",
+    "XLC",
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMZN",
+    "META",
+    "JPM",
+    "UNH",
+    "XOM",
+]
+
+
+_ORIGINAL_BUILD_CONTEXT = MarketContextBuilder.build_context
+
+
+async def _deterministic_build_context(self, *args, **kwargs):
+    """Force the no-paid-keys smoke path to stay on free/deterministic inputs."""
+    kwargs["include_rich_technical"] = False
+    kwargs["include_predictions"] = False
+    kwargs["include_sentiment"] = False
+    kwargs["include_fundamentals"] = False
+    kwargs["include_options_flow"] = False
+    kwargs["include_short_interest"] = False
+    kwargs["include_analyst_revisions"] = False
+    return await _ORIGINAL_BUILD_CONTEXT(self, *args, **kwargs)
+
+
+async def _seed_smoke_data(db) -> int:
+    """Seed a small market universe so the smoke test yields real candidates."""
+    count_result = await db.execute(select(func.count()).select_from(Stock))
+    existing = int(count_result.scalar() or 0)
+    if existing >= len(SMOKE_SEED_SYMBOLS):
+        return existing
+
+    adapter = YahooFinanceAdapter()
+    seeded = 0
+    for symbol in SMOKE_SEED_SYMBOLS:
+        try:
+            info = await adapter.get_stock_info(symbol)
+            stmt = dialect_insert(engine)(Stock).values(
+                symbol=info["symbol"],
+                name=info.get("name", symbol),
+                sector=info.get("sector"),
+                industry=info.get("industry"),
+                market_cap=info.get("market_cap"),
+                is_active=True,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["symbol"],
+                set_={
+                    "name": stmt.excluded.name,
+                    "sector": stmt.excluded.sector,
+                    "industry": stmt.excluded.industry,
+                    "market_cap": stmt.excluded.market_cap,
+                    "is_active": True,
+                },
+            )
+            await db.execute(stmt)
+
+            stock_result = await db.execute(select(Stock).where(Stock.symbol == symbol.upper()))
+            stock = stock_result.scalar_one()
+
+            prices = await adapter.get_price_history(symbol, period="3mo")
+            for price_data in prices:
+                if price_data.get("close") is None or price_data.get("date") is None:
+                    continue
+                stmt = dialect_insert(engine)(PriceHistory).values(
+                    stock_id=stock.id,
+                    date=price_data["date"],
+                    open=price_data.get("open", 0),
+                    high=price_data.get("high", 0),
+                    low=price_data.get("low", 0),
+                    close=price_data["close"],
+                    volume=price_data.get("volume", 0),
+                    adjusted_close=price_data.get("adjusted_close"),
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["stock_id", "date"],
+                    set_={
+                        "open": stmt.excluded.open,
+                        "high": stmt.excluded.high,
+                        "low": stmt.excluded.low,
+                        "close": stmt.excluded.close,
+                        "volume": stmt.excluded.volume,
+                        "adjusted_close": stmt.excluded.adjusted_close,
+                    },
+                )
+                await db.execute(stmt)
+            seeded += 1
+        except Exception as exc:
+            logger.warning("Smoke seed failed for %s: %s", symbol, exc)
+    await db.flush()
+    return seeded
 
 
 def _format_value(value: Any) -> str:
@@ -110,9 +224,12 @@ async def _run(top_n: int) -> None:
     logger.info("FRED_API_KEY set: %s", bool(settings.FRED_API_KEY))
     logger.info("FINNHUB_API_KEY set: %s", bool(settings.FINNHUB_API_KEY))
 
+    MarketContextBuilder.build_context = _deterministic_build_context  # type: ignore[assignment]
     await init_db()
 
     async with async_session_factory() as db:
+        seeded = await _seed_smoke_data(db)
+        logger.info("Seeded %d smoke symbols", seeded)
         run = AnalysisRun(
             run_type="smoke_zero_keys",
             status=AnalysisRunStatus.RUNNING.value,
@@ -126,7 +243,7 @@ async def _run(top_n: int) -> None:
         scoring = await run_daily_factor_scoring(db, run, universe, regime)
 
         run.status = AnalysisRunStatus.COMPLETED.value
-        await db.commit()
+        await db.flush()
 
     print("\nZero-paid-keys alpha smoke test")
     print("=" * 120)
