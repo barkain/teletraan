@@ -446,18 +446,18 @@ Daily runs should be safe to rerun for the same market date:
 7. ✓ Done Add candidate persistence
 
 ### Phase 3 — Data enrichment
-8. Integrate SEC / insider / institutional sources
-9. Integrate options flow / short interest
-10. Add richer fundamentals and estimate revisions
+8. ✓ Done Integrate SEC / insider / institutional sources
+9. ✓ Done Integrate options flow / short interest
+10. ✓ Done Add richer fundamentals and estimate revisions
 11. Add any alt-data providers that are available and reliable
 
 ### Phase 4 — LLM synthesis
-12. Refactor agent prompts so LLM explains ranked candidates
-13. Make synthesis cite factor outputs and evidence
-14. Separate market-wide ideas from portfolio-specific actions
+12. ✓ Done Refactor agent prompts so LLM explains ranked candidates
+13. ✓ Done Make synthesis cite factor outputs and evidence
+14. ✓ Done Separate market-wide ideas from portfolio-specific actions
 
 ### Phase 5 — Outcome loop
-15. Persist outcomes
+15. ✓ Done Persist outcomes
 16. Score model performance by horizon and thesis type
 17. Reweight factors / confidence from realized results
 
