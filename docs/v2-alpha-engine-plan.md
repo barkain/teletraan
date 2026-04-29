@@ -15,6 +15,18 @@ Turn Teletraan from a prompt-heavy analysis app into a **ranked alpha discovery 
 
 The main output should be a **short, high-conviction list** of stocks, baskets, and relative-value trades with explicit evidence and expected horizon.
 
+## Status
+
+- ✓ Done Phase 1 — Foundation
+  - ✓ Done analysis models and schemas
+  - ✓ Done market-wide universe builder
+  - ✓ Done market regime detection
+  - ✓ Done daily scheduler wiring
+- ✓ Done Phase 2 — Factor engine
+  - ✓ Done deterministic scoring
+  - ✓ Done portfolio-aware overlay
+  - ✓ Done ranked candidate persistence
+
 ---
 
 ## Design Principles
@@ -423,15 +435,15 @@ Daily runs should be safe to rerun for the same market date:
 ## Recommended Implementation Order
 
 ### Phase 1 — Foundation
-1. Add new analysis models / schemas
-2. Add the market-wide universe builder
-3. Add market regime detection
-4. Add daily scheduler wiring
+1. ✓ Done Add new analysis models / schemas
+2. ✓ Done Add the market-wide universe builder
+3. ✓ Done Add market regime detection
+4. ✓ Done Add daily scheduler wiring
 
 ### Phase 2 — Factor engine
-5. Implement deterministic scoring
-6. Add portfolio-aware overlay
-7. Add candidate persistence
+5. ✓ Done Implement deterministic scoring
+6. ✓ Done Add portfolio-aware overlay
+7. ✓ Done Add candidate persistence
 
 ### Phase 3 — Data enrichment
 8. Integrate SEC / insider / institutional sources
