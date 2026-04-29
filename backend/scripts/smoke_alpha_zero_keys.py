@@ -30,7 +30,7 @@ backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 # Use a temp DB so the smoke test never touches the production database
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./data/smoke_test.db")
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
 from config import get_settings  # type: ignore[import-not-found]
 from database import async_session_factory, init_db  # type: ignore[import-not-found]

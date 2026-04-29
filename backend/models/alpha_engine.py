@@ -154,9 +154,9 @@ class CandidateIdea(TimestampMixin, Base):
         nullable=False,
         index=True,
     )
-    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    rank: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    thesis_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    thesis_type: Mapped[str] = mapped_column(String(32), nullable=False)
     overall_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     expected_horizon_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
