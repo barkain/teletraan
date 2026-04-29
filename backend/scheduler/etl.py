@@ -524,25 +524,35 @@ class ETLOrchestrator:
         """
         try:
             from data.adapters.investor_feeds import get_investor_feed_adapter  # type: ignore[import-not-found]
+            from data.adapters.sec_filings import get_sec_filings_adapter  # type: ignore[import-not-found]
 
             adapter = get_investor_feed_adapter()
+            sec_adapter = get_sec_filings_adapter()
             data = await adapter.get_all_intelligence()
             positions = len(data.get("positions", []))
             commentary = len(data.get("commentary", []))
+            sec_signals = await sec_adapter.get_symbol_signals(self.DEFAULT_SYMBOLS)
+            sec_filings = sum(
+                int(payload.get("recent_filing_count", 0))
+                for payload in sec_signals.values()
+            )
             logger.info(
-                "Investor feeds refreshed: %d positions, %d commentary items",
+                "Investor feeds refreshed: %d positions, %d commentary items, %d SEC filings",
                 positions,
                 commentary,
+                sec_filings,
             )
             return {
                 "positions": positions,
                 "commentary": commentary,
+                "sec_filings": sec_filings,
             }
         except Exception as e:
             logger.warning("Investor feed refresh failed: %s", e)
             return {
                 "positions": 0,
                 "commentary": 0,
+                "sec_filings": 0,
             }
 
     async def refresh_earnings_calendar(self) -> dict[str, Any]:

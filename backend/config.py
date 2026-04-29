@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # API Keys (optional data sources)
     FRED_API_KEY: Optional[str] = None
     FINNHUB_API_KEY: Optional[str] = None
+    SEC_USER_AGENT: Optional[str] = None
 
     # Application
     DEBUG: bool = False
