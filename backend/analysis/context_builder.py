@@ -168,6 +168,7 @@ class MarketContextBuilder:
         include_fundamentals: bool = False,
         include_options_flow: bool = False,
         include_short_interest: bool = False,
+        include_analyst_revisions: bool = False,
         price_history_days: int = 60,
     ) -> dict[str, Any]:
         """Build full market context for analysis.
@@ -195,6 +196,9 @@ class MarketContextBuilder:
                 Gracefully degrades if data is unavailable.
             include_short_interest: Whether to include public short-interest
                 proxies (short ratio, shares short, short % of float).
+                Gracefully degrades if data is unavailable.
+            include_analyst_revisions: Whether to include analyst revision
+                momentum (recommendation trend, target upside, rating changes).
                 Gracefully degrades if data is unavailable.
             price_history_days: Number of days of price history to include.
 
@@ -227,6 +231,7 @@ class MarketContextBuilder:
             include_fundamentals,
             include_options_flow,
             include_short_interest,
+            include_analyst_revisions,
             price_history_days,
         )
 
@@ -309,6 +314,9 @@ class MarketContextBuilder:
         if include_short_interest:
             context["short_interest"] = await self._get_short_interest_data(symbols)
 
+        if include_analyst_revisions:
+            context["analyst_revisions"] = await self._get_analyst_revisions_data(symbols)
+
         self._last_context = context
         self._last_build_time = datetime.utcnow()
 
@@ -344,6 +352,10 @@ class MarketContextBuilder:
         if context.get("short_interest"):
             logger.info(
                 f"Context built: {len(context['short_interest'])} symbols with short interest data"
+            )
+        if context.get("analyst_revisions"):
+            logger.info(
+                f"Context built: {len(context['analyst_revisions'])} symbols with analyst revision data"
             )
 
         return context
@@ -595,6 +607,24 @@ class MarketContextBuilder:
             return await adapter.get_symbol_short_interests(target_symbols)
         except Exception:
             logger.warning("Failed to fetch short-interest data", exc_info=True)
+            return {}
+
+    async def _get_analyst_revisions_data(
+        self,
+        symbols: list[str] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch analyst revision momentum data."""
+        try:
+            from data.adapters.analyst_revisions import get_analyst_revision_adapter
+
+            target_symbols = [s.upper() for s in symbols] if symbols else []
+            if not target_symbols:
+                return {}
+
+            adapter = get_analyst_revision_adapter()
+            return await adapter.get_symbol_revisions(target_symbols)
+        except Exception:
+            logger.warning("Failed to fetch analyst revisions data", exc_info=True)
             return {}
 
     async def _get_stocks_data(
@@ -1841,6 +1871,39 @@ def format_fundamental_context(fundamentals: dict[str, dict[str, Any]]) -> str:
         if bs_parts:
             lines.append(f"Balance Sheet: {', '.join(bs_parts)}")
 
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_analyst_revision_context(revisions: dict[str, dict[str, Any]]) -> str:
+    """Format analyst revision momentum data as readable markdown."""
+    if not revisions:
+        return ""
+
+    lines: list[str] = ["## Analyst Revision Momentum", ""]
+
+    for symbol in sorted(revisions.keys()):
+        data = revisions[symbol]
+        if not any(v is not None for v in data.values()):
+            continue
+
+        lines.append(f"=== ANALYST REVISIONS: {symbol} ===")
+        parts: list[str] = []
+        if data.get("revision_score") is not None:
+            parts.append(f"Revision Score {data['revision_score']:.1f}/100")
+        if data.get("recommendation_key") is not None:
+            parts.append(f"Rating {str(data['recommendation_key']).title()}")
+        if data.get("recommendation_mean") is not None:
+            parts.append(f"Mean {data['recommendation_mean']:.2f}")
+        if data.get("target_upside_pct") is not None:
+            parts.append(f"Target Upside {data['target_upside_pct']:+.1f}%")
+        if data.get("trend_history"):
+            parts.append(f"Trend Months {len(data['trend_history'])}")
+        if parts:
+            lines.append(", ".join(parts))
+        if data.get("notes"):
+            lines.append(f"Notes: {', '.join(str(note) for note in data['notes'])}")
         lines.append("")
 
     return "\n".join(lines)

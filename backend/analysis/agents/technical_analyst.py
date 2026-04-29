@@ -546,6 +546,14 @@ def format_technical_context(market_data: dict[str, Any]) -> str:
             context_parts.append("")
             context_parts.append(fundamental_text)
 
+    revisions = market_data.get("analyst_revisions")
+    if revisions:
+        from analysis.context_builder import format_analyst_revision_context
+        revision_text = format_analyst_revision_context(revisions)
+        if revision_text:
+            context_parts.append("")
+            context_parts.append(revision_text)
+
     return "\n".join(context_parts)
 
 
