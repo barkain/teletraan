@@ -166,6 +166,7 @@ class MarketContextBuilder:
         include_predictions: bool = False,
         include_sentiment: bool = False,
         include_fundamentals: bool = False,
+        include_options_flow: bool = False,
         price_history_days: int = 60,
     ) -> dict[str, Any]:
         """Build full market context for analysis.
@@ -187,6 +188,9 @@ class MarketContextBuilder:
                 Requires reddit_sentiment adapter; silently degrades otherwise.
             include_fundamentals: Whether to include fundamental/valuation data
                 from yfinance (P/E, margins, growth, analyst targets, etc.).
+                Gracefully degrades if data is unavailable.
+            include_options_flow: Whether to include symbol-level options flow
+                proxies from yfinance (volume, open interest, IV, skew).
                 Gracefully degrades if data is unavailable.
             price_history_days: Number of days of price history to include.
 
@@ -217,6 +221,7 @@ class MarketContextBuilder:
             include_predictions,
             include_sentiment,
             include_fundamentals,
+            include_options_flow,
             price_history_days,
         )
 
@@ -292,6 +297,10 @@ class MarketContextBuilder:
         if include_fundamentals:
             context["fundamentals"] = await self._get_fundamental_data(symbols, context)
 
+        # Symbol-level options flow proxies from yfinance
+        if include_options_flow:
+            context["options_flow"] = await self._get_options_flow_data(symbols)
+
         self._last_context = context
         self._last_build_time = datetime.utcnow()
 
@@ -319,6 +328,10 @@ class MarketContextBuilder:
         if context.get("fundamentals"):
             logger.info(
                 f"Context built: {len(context['fundamentals'])} symbols with fundamental data"
+            )
+        if context.get("options_flow"):
+            logger.info(
+                f"Context built: {len(context['options_flow'])} symbols with options flow data"
             )
 
         return context
@@ -534,6 +547,24 @@ class MarketContextBuilder:
             return await get_fundamental_data(target_symbols)
         except Exception:
             logger.warning("Failed to fetch fundamental data", exc_info=True)
+            return {}
+
+    async def _get_options_flow_data(
+        self,
+        symbols: list[str] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch options flow proxies for symbols via the options_flow adapter."""
+        try:
+            from data.adapters.options_flow import get_options_flow_adapter
+
+            target_symbols = [s.upper() for s in symbols] if symbols else []
+            if not target_symbols:
+                return {}
+
+            adapter = get_options_flow_adapter()
+            return await adapter.get_symbol_flows(target_symbols)
+        except Exception:
+            logger.warning("Failed to fetch options flow data", exc_info=True)
             return {}
 
     async def _get_stocks_data(
