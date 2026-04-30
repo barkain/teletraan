@@ -98,6 +98,90 @@ _SUPPLEMENTAL_SYMBOLS: dict[str, list[str]] = {
 # Map ETF ticker -> sector name (reverse of SECTOR_ETFS for convenience)
 _ETF_TO_SECTOR: dict[str, str] = SECTOR_ETFS  # already etf -> sector
 
+# High-conviction innovation universe: companies with strong technology moats,
+# high upside potential, and defensible competitive positions in emerging categories.
+# These are intentionally excluded from ETF-based universe (too small/new) but
+# represent exactly the kind of under-priced technology opportunities worth screening.
+INNOVATION_UNIVERSE: dict[str, list[str]] = {
+    "Quantum Computing": [
+        "RGTI",   # Rigetti Computing — superconducting qubit hardware
+        "QUBT",   # Quantum Computing Inc — cloud-based quantum access
+        "QBTS",   # D-Wave Quantum — quantum annealing, first commercial
+        "ARQQ",   # Arqit Quantum — satellite quantum encryption
+    ],
+    "AI Infrastructure": [
+        "ALAB",   # Astera Labs — PCIe/CXL connectivity for AI data centers
+        "AMBA",   # Ambarella — edge AI vision SoCs (automotive, surveillance)
+        "AEHR",   # Aehr Test Systems — near-monopoly in SiC wafer burn-in
+        "ONTO",   # Onto Innovation — advanced packaging / wafer inspection
+        "ENTG",   # Entegris — specialty materials for semis (ASML-class moat)
+        "KLIC",   # Kulicke & Soffa — advanced wire bonding / flip chip
+        "ACLS",   # Axcelis Technologies — ion implant systems
+        "MPWR",   # Monolithic Power — high-margin analog/power ICs
+        "SMTC",   # Semtech — LoRa IoT, LVDS, high-speed analog
+        "SITM",   # SiTime — precision timing silicon (MEMS)
+        "MTSI",   # MACOM Technology — RF/microwave chips (defense + telecom)
+        "ALGM",   # Allegro MicroSystems — magnetic sensor ICs
+    ],
+    "Silicon Carbide & Power Electronics": [
+        "WOLF",   # Wolfspeed — SiC substrates + power devices (dominant moat)
+        "SWKS",   # Skyworks — RF semiconductors for 5G
+        "MCHP",   # Microchip Technology — embedded control ecosystem
+        "SLAB",   # Silicon Laboratories — IoT chips
+        "CAMT",   # Camtek — advanced semiconductor inspection
+    ],
+    "Optical Networking": [
+        "CIEN",   # Ciena — carrier-grade optical transport (deep moat)
+        "VIAV",   # Viavi Solutions — network test instruments + optical
+        "INFN",   # Infinera — vertical integration in optical semiconductors
+    ],
+    "Space Technology": [
+        "ASTS",   # AST SpaceMobile — direct-to-cell LEO constellation
+        "LUNR",   # Intuitive Machines — NASA lunar logistics (CLPS contract)
+        "BKSY",   # BlackSky — SAR+optical satellites + AI analytics
+        "RDW",    # Redwire — space infrastructure / manufacturing
+    ],
+    "Clean Energy & Storage": [
+        "ENPH",   # Enphase Energy — microinverter monopoly + energy management
+        "FLNC",   # Fluence Energy — grid-scale storage software/systems
+        "STEM",   # Stem Inc — AI-driven energy storage dispatch
+        "ARRY",   # Array Technologies — solar tracker leader
+        "PLUG",   # Plug Power — hydrogen fuel cell ecosystem
+        "BLDP",   # Ballard Power — PEM fuel cells for heavy transport
+        "ERII",   # Energy Recovery — pressure exchanger (desalination monopoly)
+        "HASI",   # Hannon Armstrong — sustainable infrastructure investment
+    ],
+    "Cybersecurity Platform": [
+        "S",      # SentinelOne — AI-native XDR/endpoint (hyper-growth)
+        "NET",    # Cloudflare — global edge network / zero-trust platform
+        "DDOG",   # Datadog — observability + security, strong data moat
+        "OKTA",   # Okta — identity management, high switching costs
+        "CYBR",   # CyberArk — privileged access management (compliance moat)
+        "VRNS",   # Varonis — data security analytics
+        "TENB",   # Tenable — exposure/vulnerability management
+        "QLYS",   # Qualys — cloud security compliance SaaS
+    ],
+    "Genomics & Bio Platform": [
+        "CRSP",   # CRISPR Therapeutics — gene editing platform
+        "BEAM",   # Beam Therapeutics — base editing (more precise than CRISPR)
+        "RXRX",   # Recursion Pharma — AI + biology drug discovery platform
+        "TWST",   # Twist Bioscience — synthetic DNA manufacturing platform
+        "PACB",   # Pacific Biosciences — long-read sequencing
+        "NTLA",   # Intellia Therapeutics — in vivo gene editing
+        "ARWR",   # Arrowhead Pharma — RNAi therapeutics platform
+    ],
+    "High-Moat Platform": [
+        "AXON",   # Axon Enterprise — law enforcement AI ecosystem (Evidence.com)
+        "VEEV",   # Veeva Systems — pharma cloud (extreme switching costs)
+        "GTLB",   # GitLab — DevSecOps platform (open core moat)
+        "CSGP",   # CoStar Group — commercial RE data monopoly
+        "GLBE",   # Global-E Online — cross-border e-commerce infrastructure
+        "MNDY",   # Monday.com — work OS platform (network effects)
+        "HUBS",   # HubSpot — CRM + marketing platform
+        "BILL",   # Bill.com — SMB finance automation (network of suppliers)
+    ],
+}
+
 # ---------------------------------------------------------------------------
 # Module-level cache (1-hour TTL)
 # ---------------------------------------------------------------------------
@@ -376,6 +460,14 @@ async def get_screening_universe() -> dict[str, list[str]]:
             universe.update(movers)
     except Exception as exc:
         logger.warning("Top movers fetch failed: %s", exc)
+
+    # 5. Add innovation/high-moat universe (quantum, AI infra, space, clean energy, etc.)
+    for category, symbols in INNOVATION_UNIVERSE.items():
+        existing = set(universe.get(category, []))
+        for sym in symbols:
+            if sym not in existing:
+                universe.setdefault(category, []).append(sym)
+                existing.add(sym)
 
     # Fallback: if no dynamic data at all, use FALLBACK_HOLDINGS
     if not dynamic_succeeded:
