@@ -5,7 +5,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -100,6 +100,7 @@ async def _run_alpha_engine_background(task_id: str) -> None:
 
         except Exception as exc:
             logger.exception("Alpha engine failed for task %s", task_id)
+            await session.rollback()
             task.status = AnalysisTaskStatus.FAILED.value
             task.error_message = str(exc)
             task.completed_at = datetime.utcnow()

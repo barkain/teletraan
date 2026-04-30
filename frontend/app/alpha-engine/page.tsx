@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,11 +14,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
 import {
   Play,
   AlertCircle,
@@ -190,9 +185,8 @@ function CandidatesTable({ candidates }: { candidates: AlphaCandidate[] }) {
           </TableHeader>
           <TableBody>
             {candidates.map((c) => (
-              <>
+              <React.Fragment key={c.id}>
                 <TableRow
-                  key={c.id}
                   className="cursor-pointer"
                   onClick={() => setExpanded(expanded === c.id ? null : c.id)}
                 >
@@ -232,7 +226,7 @@ function CandidatesTable({ candidates }: { candidates: AlphaCandidate[] }) {
                   </TableCell>
                 </TableRow>
                 {expanded === c.id && (
-                  <TableRow key={`${c.id}-detail`}>
+                  <TableRow>
                     <TableCell colSpan={8} className="bg-muted/30 p-4">
                       <div className="grid gap-3 text-sm">
                         {c.bull_case && (
@@ -272,7 +266,7 @@ function CandidatesTable({ candidates }: { candidates: AlphaCandidate[] }) {
                     </TableCell>
                   </TableRow>
                 )}
-              </>
+              </React.Fragment>
             ))}
           </TableBody>
         </Table>
