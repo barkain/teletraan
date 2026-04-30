@@ -133,7 +133,6 @@ INNOVATION_UNIVERSE: dict[str, list[str]] = {
     "Optical Networking": [
         "CIEN",   # Ciena — carrier-grade optical transport (deep moat)
         "VIAV",   # Viavi Solutions — network test instruments + optical
-        "INFN",   # Infinera — vertical integration in optical semiconductors
     ],
     "Space Technology": [
         "ASTS",   # AST SpaceMobile — direct-to-cell LEO constellation
@@ -156,7 +155,6 @@ INNOVATION_UNIVERSE: dict[str, list[str]] = {
         "NET",    # Cloudflare — global edge network / zero-trust platform
         "DDOG",   # Datadog — observability + security, strong data moat
         "OKTA",   # Okta — identity management, high switching costs
-        "CYBR",   # CyberArk — privileged access management (compliance moat)
         "VRNS",   # Varonis — data security analytics
         "TENB",   # Tenable — exposure/vulnerability management
         "QLYS",   # Qualys — cloud security compliance SaaS
