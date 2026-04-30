@@ -164,6 +164,14 @@ class RedditSentimentAdapter:
                             await asyncio.sleep(delay)
                             delay *= _BACKOFF_FACTOR
                             continue
+                        if 400 <= resp.status < 500:
+                            # Client error — retrying won't help
+                            logger.warning(
+                                "HTTP %d from %s — client error, skipping retries",
+                                resp.status,
+                                url,
+                            )
+                            return None
                         logger.warning(
                             "HTTP %d from %s (attempt %d/%d)",
                             resp.status,
@@ -285,6 +293,7 @@ class RedditSentimentAdapter:
                 ticker,
                 subreddit,
             )
+            self._set_cached(cache_key, [], _ARCTIC_SHIFT_TTL)
             return []
 
         # Arctic Shift wraps posts in a "data" key
