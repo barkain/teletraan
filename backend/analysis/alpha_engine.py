@@ -964,6 +964,15 @@ async def run_daily_factor_scoring(
             fundamental_score = _clamp((fundamental_score * 0.7) + (revision_score * 0.3), 0.0, 100.0)
             catalyst_score = _clamp((catalyst_score * 0.8) + (revision_score * 0.2), 0.0, 100.0)
 
+        # For high-quality growth companies, absence of retail flow is not a negative signal.
+        # Floor at 35 (neutral) so WSB silence doesn't sink fundamentally strong innovators.
+        if (
+            "growth_mode" in fundamental_notes
+            and fundamental_score >= 65
+            and flow_proxy < 35.0
+        ):
+            flow_proxy = 35.0
+
         prediction_boost = 0.0
         predictions = context.get("predictions") or {}
         if isinstance(predictions, dict):
