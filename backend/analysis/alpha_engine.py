@@ -472,25 +472,16 @@ def _score_fundamentals(
                 return y0 + ratio * (y1 - y0)
         return thresholds[-1][1]
 
-    growth_scores = []
-    for key in ("revenue_growth", "earnings_growth", "earnings_quarterly_growth"):
-        val = f.get(key)
-        if val is not None:
-            score = norm_low(float(val), [(-0.50, 20.0), (0.0, 45.0), (0.10, 70.0), (0.25, 90.0), (0.50, 100.0)])
-            if score is not None:
-                growth_scores.append(score)
-    if growth_scores:
-        notes.append("growth")
+    rev_growth_raw = f.get("revenue_growth")
+    gross_margin_raw = f.get("gross_margins")
+    rev_growth_val = float(rev_growth_raw) if rev_growth_raw is not None else None
+    gross_margin_val = float(gross_margin_raw) if gross_margin_raw is not None else None
 
-    margin_scores = []
-    for key in ("gross_margins", "operating_margins", "profit_margins"):
-        val = f.get(key)
-        if val is not None:
-            score = norm_low(float(val), [(-0.20, 15.0), (0.0, 40.0), (0.10, 65.0), (0.25, 85.0), (0.40, 95.0)])
-            if score is not None:
-                margin_scores.append(score)
-    if margin_scores:
-        notes.append("margins")
+    # Growth company: high revenue growth + strong gross margins → score on unit economics
+    is_growth_company = (
+        rev_growth_val is not None and rev_growth_val > 0.20
+        and gross_margin_val is not None and gross_margin_val > 0.50
+    )
 
     balance_scores = []
     current_ratio = f.get("current_ratio")
@@ -502,14 +493,51 @@ def _score_fundamentals(
         balance_scores.append(
             100.0 if dte <= 0 else 80.0 if dte <= 50 else 60.0 if dte <= 100 else 40.0 if dte <= 200 else 20.0
         )
-    if balance_scores:
-        notes.append("balance")
-
     fcf = f.get("free_cashflow")
     if fcf is not None:
         balance_scores.append(80.0 if float(fcf) > 0 else 20.0)
+    if balance_scores:
+        notes.append("balance")
 
-    fundamental_score = _safe_mean([*(growth_scores or []), *(margin_scores or []), *(balance_scores or [])]) or 50.0
+    if is_growth_company:
+        # Growth path: gross margin + revenue acceleration dominate; net profitability not penalised
+        notes.append("growth_mode")
+        gm_score = norm_low(gross_margin_val, [(0.0, 20.0), (0.40, 55.0), (0.55, 72.0), (0.65, 85.0), (0.75, 95.0), (0.85, 100.0)])
+        rev_score = norm_low(rev_growth_val, [(0.0, 40.0), (0.15, 62.0), (0.25, 78.0), (0.40, 90.0), (0.60, 100.0)])
+        growth_mode_scores: list[float] = []
+        if gm_score is not None:
+            growth_mode_scores += [gm_score, gm_score]  # double-weight gross margin
+        if rev_score is not None:
+            growth_mode_scores.append(rev_score)
+        # Earnings growth bonus (expanding margins signal)
+        eg = f.get("earnings_growth")
+        if eg is not None and float(eg) > (rev_growth_val or 0):
+            growth_mode_scores.append(75.0)
+        # Balance sheet: cash runway matters more than FCF for growth names
+        if balance_scores:
+            growth_mode_scores.append(_safe_mean(balance_scores) or 50.0)
+        fundamental_score = _safe_mean(growth_mode_scores) or 50.0
+    else:
+        # Value/mature path: all three margin types + balance sheet
+        notes.append("growth")
+        growth_scores = []
+        for key in ("revenue_growth", "earnings_growth", "earnings_quarterly_growth"):
+            val = f.get(key)
+            if val is not None:
+                score = norm_low(float(val), [(-0.50, 20.0), (0.0, 45.0), (0.10, 70.0), (0.25, 90.0), (0.50, 100.0)])
+                if score is not None:
+                    growth_scores.append(score)
+
+        margin_scores = []
+        notes.append("margins")
+        for key in ("gross_margins", "operating_margins", "profit_margins"):
+            val = f.get(key)
+            if val is not None:
+                score = norm_low(float(val), [(-0.20, 15.0), (0.0, 40.0), (0.10, 65.0), (0.25, 85.0), (0.40, 95.0)])
+                if score is not None:
+                    margin_scores.append(score)
+
+        fundamental_score = _safe_mean([*(growth_scores or []), *(margin_scores or []), *(balance_scores or [])]) or 50.0
 
     forward_pe = f.get("forward_pe")
     trailing_pe = f.get("trailing_pe")
