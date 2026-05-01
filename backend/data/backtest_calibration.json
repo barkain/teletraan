@@ -1,0 +1,302 @@
+{
+  "as_of": "2026-05-01",
+  "symbols_tested": 206,
+  "snapshots": 17,
+  "snapshot_dates": [
+    "2024-08-02",
+    "2024-09-03",
+    "2024-10-02",
+    "2024-10-31",
+    "2024-12-02",
+    "2025-01-02",
+    "2025-02-04",
+    "2025-03-06",
+    "2025-04-04",
+    "2025-05-06",
+    "2025-06-05",
+    "2025-07-08",
+    "2025-08-06",
+    "2025-09-05",
+    "2025-10-06",
+    "2025-11-04",
+    "2025-12-04"
+  ],
+  "trading_days_available": 501,
+  "horizons": {
+    "20d": {
+      "signal_ics": {
+        "ret_20": -0.0006,
+        "ret_60": -0.0772,
+        "rel_strength": 0.0266,
+        "accel": -0.078,
+        "vol_ratio": 0.0848,
+        "above_ma": -0.065,
+        "volatility": 0.0897,
+        "tech_score": -0.0015
+      },
+      "quintiles": {
+        "Q1": {
+          "mean_return": 3.656,
+          "mean_excess": 1.056,
+          "hit_rate": 0.462,
+          "n": 697
+        },
+        "Q2": {
+          "mean_return": 2.723,
+          "mean_excess": -0.115,
+          "hit_rate": 0.428,
+          "n": 697
+        },
+        "Q3": {
+          "mean_return": 3.162,
+          "mean_excess": 0.482,
+          "hit_rate": 0.446,
+          "n": 697
+        },
+        "Q4": {
+          "mean_return": 2.628,
+          "mean_excess": 0.566,
+          "hit_rate": 0.446,
+          "n": 697
+        },
+        "Q5": {
+          "mean_return": 6.009,
+          "mean_excess": 3.836,
+          "hit_rate": 0.481,
+          "n": 697
+        }
+      },
+      "observations": 3485,
+      "calibrated_weights": {
+        "rel_strength": 0.1323,
+        "vol_ratio": 0.4217,
+        "volatility": 0.446
+      }
+    },
+    "45d": {
+      "signal_ics": {
+        "ret_20": 0.0027,
+        "ret_60": -0.076,
+        "rel_strength": 0.0026,
+        "accel": -0.0784,
+        "vol_ratio": 0.0498,
+        "above_ma": -0.0411,
+        "volatility": 0.1365,
+        "tech_score": -0.0129
+      },
+      "quintiles": {
+        "Q1": {
+          "mean_return": 10.793,
+          "mean_excess": 6.449,
+          "hit_rate": 0.494,
+          "n": 697
+        },
+        "Q2": {
+          "mean_return": 3.876,
+          "mean_excess": -0.121,
+          "hit_rate": 0.438,
+          "n": 697
+        },
+        "Q3": {
+          "mean_return": 4.601,
+          "mean_excess": 0.403,
+          "hit_rate": 0.407,
+          "n": 697
+        },
+        "Q4": {
+          "mean_return": 5.312,
+          "mean_excess": 1.439,
+          "hit_rate": 0.432,
+          "n": 697
+        },
+        "Q5": {
+          "mean_return": 12.591,
+          "mean_excess": 8.953,
+          "hit_rate": 0.482,
+          "n": 697
+        }
+      },
+      "observations": 3485,
+      "calibrated_weights": {
+        "ret_20": 0.0141,
+        "rel_strength": 0.0136,
+        "vol_ratio": 0.2599,
+        "volatility": 0.7124
+      }
+    },
+    "90d": {
+      "signal_ics": {
+        "ret_20": -0.0328,
+        "ret_60": -0.1173,
+        "rel_strength": -0.0157,
+        "accel": -0.0342,
+        "vol_ratio": 0.0317,
+        "above_ma": -0.0735,
+        "volatility": 0.1212,
+        "tech_score": -0.0396
+      },
+      "quintiles": {
+        "Q1": {
+          "mean_return": 24.554,
+          "mean_excess": 16.692,
+          "hit_rate": 0.528,
+          "n": 697
+        },
+        "Q2": {
+          "mean_return": 9.757,
+          "mean_excess": 3.086,
+          "hit_rate": 0.443,
+          "n": 697
+        },
+        "Q3": {
+          "mean_return": 9.064,
+          "mean_excess": 1.839,
+          "hit_rate": 0.402,
+          "n": 697
+        },
+        "Q4": {
+          "mean_return": 6.729,
+          "mean_excess": 1.203,
+          "hit_rate": 0.448,
+          "n": 697
+        },
+        "Q5": {
+          "mean_return": 15.708,
+          "mean_excess": 9.206,
+          "hit_rate": 0.471,
+          "n": 697
+        }
+      },
+      "observations": 3485,
+      "calibrated_weights": {
+        "vol_ratio": 0.2073,
+        "volatility": 0.7927
+      }
+    }
+  },
+  "synthesis_context": {
+    "20d": {
+      "ic_composite": -0.0015,
+      "top_quintile_mean_excess_pct": 3.836,
+      "top_quintile_hit_rate": 0.481,
+      "bottom_quintile_mean_excess_pct": 1.056,
+      "n_observations": 3485,
+      "signal_ics": {
+        "ret_20": {
+          "ic": -0.0006,
+          "t_stat": -0.0
+        },
+        "ret_60": {
+          "ic": -0.0772,
+          "t_stat": -4.6
+        },
+        "rel_strength": {
+          "ic": 0.0266,
+          "t_stat": 1.6
+        },
+        "accel": {
+          "ic": -0.078,
+          "t_stat": -4.6
+        },
+        "vol_ratio": {
+          "ic": 0.0848,
+          "t_stat": 5.0
+        },
+        "above_ma": {
+          "ic": -0.065,
+          "t_stat": -3.8
+        },
+        "volatility": {
+          "ic": 0.0897,
+          "t_stat": 5.3
+        },
+        "tech_score": {
+          "ic": -0.0015,
+          "t_stat": -0.1
+        }
+      }
+    },
+    "45d": {
+      "ic_composite": -0.0129,
+      "top_quintile_mean_excess_pct": 8.953,
+      "top_quintile_hit_rate": 0.482,
+      "bottom_quintile_mean_excess_pct": 6.449,
+      "n_observations": 3485,
+      "signal_ics": {
+        "ret_20": {
+          "ic": 0.0027,
+          "t_stat": 0.2
+        },
+        "ret_60": {
+          "ic": -0.076,
+          "t_stat": -4.5
+        },
+        "rel_strength": {
+          "ic": 0.0026,
+          "t_stat": 0.2
+        },
+        "accel": {
+          "ic": -0.0784,
+          "t_stat": -4.6
+        },
+        "vol_ratio": {
+          "ic": 0.0498,
+          "t_stat": 2.9
+        },
+        "above_ma": {
+          "ic": -0.0411,
+          "t_stat": -2.4
+        },
+        "volatility": {
+          "ic": 0.1365,
+          "t_stat": 8.1
+        },
+        "tech_score": {
+          "ic": -0.0129,
+          "t_stat": -0.8
+        }
+      }
+    },
+    "90d": {
+      "ic_composite": -0.0396,
+      "top_quintile_mean_excess_pct": 9.206,
+      "top_quintile_hit_rate": 0.471,
+      "bottom_quintile_mean_excess_pct": 16.692,
+      "n_observations": 3485,
+      "signal_ics": {
+        "ret_20": {
+          "ic": -0.0328,
+          "t_stat": -1.9
+        },
+        "ret_60": {
+          "ic": -0.1173,
+          "t_stat": -7.0
+        },
+        "rel_strength": {
+          "ic": -0.0157,
+          "t_stat": -0.9
+        },
+        "accel": {
+          "ic": -0.0342,
+          "t_stat": -2.0
+        },
+        "vol_ratio": {
+          "ic": 0.0317,
+          "t_stat": 1.9
+        },
+        "above_ma": {
+          "ic": -0.0735,
+          "t_stat": -4.4
+        },
+        "volatility": {
+          "ic": 0.1212,
+          "t_stat": 7.2
+        },
+        "tech_score": {
+          "ic": -0.0396,
+          "t_stat": -2.3
+        }
+      }
+    }
+  }
+}

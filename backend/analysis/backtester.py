@@ -363,6 +363,7 @@ async def run_backtest(db: AsyncSession) -> dict[str, Any]:
 
 def _build_synthesis_context(cal: dict[str, Any]) -> dict[str, Any]:
     """Distil calibration into a compact dict for the synthesis LLM prompt."""
+    import math
     ctx: dict[str, Any] = {}
     for horizon_key, hdata in cal.get("horizons", {}).items():
         q = hdata.get("quintiles", {})
@@ -370,13 +371,21 @@ def _build_synthesis_context(cal: dict[str, Any]) -> dict[str, Any]:
             continue
         q1 = q.get("Q5", {})  # Q5 = highest signal rank (we sort ascending, Q5 is top)
         q5 = q.get("Q1", {})  # Q1 = lowest signal rank
-        ic_composite = hdata.get("signal_ics", {}).get("tech_score")
+        n = hdata.get("observations", 0)
+        # Include per-signal ICs with t-stats for LLM context
+        raw_ics = hdata.get("signal_ics", {})
+        sig_ics: dict[str, dict[str, float]] = {}
+        for sig, ic in raw_ics.items():
+            if ic is not None:
+                t = ic * math.sqrt(n) / math.sqrt(1 - ic**2) if n > 1 and abs(ic) < 1 else 0.0
+                sig_ics[sig] = {"ic": round(ic, 4), "t_stat": round(t, 1)}
         ctx[horizon_key] = {
-            "ic_composite": ic_composite,
+            "ic_composite": raw_ics.get("tech_score"),
             "top_quintile_mean_excess_pct": q1.get("mean_excess"),
             "top_quintile_hit_rate": q1.get("hit_rate"),
             "bottom_quintile_mean_excess_pct": q5.get("mean_excess"),
-            "n_observations": hdata.get("observations", 0),
+            "n_observations": n,
+            "signal_ics": sig_ics,
         }
     return ctx
 
@@ -404,24 +413,41 @@ def format_calibration_for_prompt(cal: dict[str, Any] | None) -> str:
         f"### Historical Signal Calibration (backtested {cal.get('symbols_tested', '?')} symbols, "
         f"{cal.get('snapshots', '?')} monthly snapshots)",
     ]
+    # Emit 90d as the primary horizon for upside anchoring
+    primary = ctx.get("90d") or ctx.get("45d") or {}
+    sig_ics = primary.get("signal_ics", {})
+    if sig_ics:
+        # Show top positive and top negative signals
+        sorted_sigs = sorted(sig_ics.items(), key=lambda x: x[1].get("ic", 0), reverse=True)
+        pos = [(s, v) for s, v in sorted_sigs if v.get("ic", 0) > 0]
+        neg = [(s, v) for s, v in sorted_sigs if v.get("ic", 0) < 0]
+        sig_lines = []
+        for sig, v in (pos[:3] + neg[-3:]):
+            ic_val = v.get("ic", 0)
+            t_val = v.get("t_stat", 0)
+            sig_lines.append(f"{sig}(IC={ic_val:+.3f},t={t_val:+.1f})")
+        lines.append(f"Key signals (90d): {', '.join(sig_lines)}")
+
     for horizon_key, hdata in ctx.items():
         ic = hdata.get("ic_composite")
         top_excess = hdata.get("top_quintile_mean_excess_pct")
         hit_rate = hdata.get("top_quintile_hit_rate")
         n = hdata.get("n_observations", 0)
-        if ic is None:
+        if top_excess is None:
             continue
+        ic_str = f"IC={ic:+.3f}, " if ic is not None else ""
         lines.append(
-            f"- {horizon_key}: IC={ic:+.3f}, top-quintile stocks averaged "
+            f"- {horizon_key}: {ic_str}top-quintile stocks averaged "
             f"{top_excess:+.1f}% excess vs SPY (hit rate {hit_rate:.0%}), n={n}"
         )
 
-    if len(lines) == 1:
+    if len(lines) <= 2:
         return ""
 
     lines.append(
-        "Use these empirical ranges — not analyst targets — to anchor upside_pct estimates. "
-        "A top-quintile IC>0.10 signal at 45d typically produces 2–5% excess return; "
-        "do not invent double-digit upsides unless the thesis has strong asymmetric catalysts."
+        "Anchor upside_pct to these empirical ranges. High-volatility stocks with low ret_60 "
+        "have the strongest forward return signal. Stocks already above their MAs or with "
+        "large recent 60d runs historically underperform. Do not invent double-digit upsides "
+        "unless the thesis has strong asymmetric catalysts beyond the signal."
     )
     return "\n".join(lines)
