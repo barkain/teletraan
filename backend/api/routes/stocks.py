@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,6 +67,30 @@ async def get_stock(symbol: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
 
     return stock
+
+
+@router.post("/sync-universe")
+async def sync_universe(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Discover new equity symbols from ETF constituents and import them into the DB.
+
+    Runs the universe builder, extracts all equity tickers from ETF holdings,
+    and upserts any symbols not already tracked. Returns immediately; sync runs
+    in background.
+    """
+    from analysis.agents.universe_builder import sync_universe_to_db
+    from database import async_session_factory
+
+    async def _run() -> None:
+        async with async_session_factory() as session:
+            stats = await sync_universe_to_db(session)
+            import logging
+            logging.getLogger(__name__).info("Universe sync: %s", stats)
+
+    background_tasks.add_task(_run)
+    return {"status": "started", "message": "Universe sync running in background. New symbols will appear in /stocks once complete."}
 
 
 @router.get("/{symbol}/history", response_model=list[PriceHistoryResponse])

@@ -52,132 +52,36 @@ INTERNATIONAL_ADRS: dict[str, list[str]] = {
     ]
 }
 
-# Additional well-known large/mid-caps to pad the universe when ETF
-# holdings fetch returns fewer symbols than expected.
-_SUPPLEMENTAL_SYMBOLS: dict[str, list[str]] = {
-    "Technology": [
-        "INTC", "QCOM", "TXN", "INTU", "NOW", "AMAT", "LRCX", "KLAC",
-        "SNPS", "CDNS", "MRVL", "PANW", "FTNT", "CRWD", "ZS",
-    ],
-    "Financials": [
-        "AXP", "SCHW", "ICE", "CME", "CB", "PGR", "MET", "AIG",
-        "TFC", "USB",
-    ],
-    "Healthcare": [
-        "ISRG", "GILD", "VRTX", "REGN", "ZTS", "SYK", "BDX", "EW",
-        "IDXX", "DXCM",
-    ],
-    "Consumer Discretionary": [
-        "GM", "F", "ABNB", "DASH", "ORLY", "AZO", "ROST", "DHI",
-        "LEN", "POOL",
-    ],
-    "Industrials": [
-        "GD", "NOC", "WM", "RSG", "CTAS", "ITW", "EMR", "FDX",
-        "CSX", "NSC",
-    ],
-    "Energy": [
-        "WMB", "HAL", "BKR", "FANG", "TRGP", "KMI", "OKE", "HES",
-    ],
-    "Communication Services": [
-        "SPOT", "SNAP", "PINS", "ROKU", "ZM", "MTCH", "EA", "TTWO",
-    ],
-    "Consumer Staples": [
-        "STZ", "SYY", "HSY", "K", "GIS", "TSN", "ADM", "BG",
-    ],
-    "Materials": [
-        "CTVA", "VMC", "MLM", "ALB", "CE", "EMN", "IFF", "FMC",
-    ],
-    "Utilities": [
-        "WEC", "ES", "AEE", "CMS", "DTE", "FE", "PPL", "EVRG",
-    ],
-    "Real Estate": [
-        "VICI", "IRM", "SBAC", "EXR", "MAA", "ESS", "UDR", "CPT",
-    ],
-}
-
 # Map ETF ticker -> sector name (reverse of SECTOR_ETFS for convenience)
 _ETF_TO_SECTOR: dict[str, str] = SECTOR_ETFS  # already etf -> sector
 
-# High-conviction innovation universe: companies with strong technology moats,
-# high upside potential, and defensible competitive positions in emerging categories.
-# These are intentionally excluded from ETF-based universe (too small/new) but
-# represent exactly the kind of under-priced technology opportunities worth screening.
-INNOVATION_UNIVERSE: dict[str, list[str]] = {
-    "Quantum Computing": [
-        "RGTI",   # Rigetti Computing — superconducting qubit hardware
-        "QUBT",   # Quantum Computing Inc — cloud-based quantum access
-        "QBTS",   # D-Wave Quantum — quantum annealing, first commercial
-        "ARQQ",   # Arqit Quantum — satellite quantum encryption
-    ],
-    "AI Infrastructure": [
-        "ALAB",   # Astera Labs — PCIe/CXL connectivity for AI data centers
-        "AMBA",   # Ambarella — edge AI vision SoCs (automotive, surveillance)
-        "AEHR",   # Aehr Test Systems — near-monopoly in SiC wafer burn-in
-        "ONTO",   # Onto Innovation — advanced packaging / wafer inspection
-        "ENTG",   # Entegris — specialty materials for semis (ASML-class moat)
-        "KLIC",   # Kulicke & Soffa — advanced wire bonding / flip chip
-        "ACLS",   # Axcelis Technologies — ion implant systems
-        "MPWR",   # Monolithic Power — high-margin analog/power ICs
-        "SMTC",   # Semtech — LoRa IoT, LVDS, high-speed analog
-        "SITM",   # SiTime — precision timing silicon (MEMS)
-        "MTSI",   # MACOM Technology — RF/microwave chips (defense + telecom)
-        "ALGM",   # Allegro MicroSystems — magnetic sensor ICs
-    ],
-    "Silicon Carbide & Power Electronics": [
-        "WOLF",   # Wolfspeed — SiC substrates + power devices (dominant moat)
-        "SWKS",   # Skyworks — RF semiconductors for 5G
-        "MCHP",   # Microchip Technology — embedded control ecosystem
-        "SLAB",   # Silicon Laboratories — IoT chips
-        "CAMT",   # Camtek — advanced semiconductor inspection
-    ],
-    "Optical Networking": [
-        "CIEN",   # Ciena — carrier-grade optical transport (deep moat)
-        "VIAV",   # Viavi Solutions — network test instruments + optical
-    ],
-    "Space Technology": [
-        "ASTS",   # AST SpaceMobile — direct-to-cell LEO constellation
-        "LUNR",   # Intuitive Machines — NASA lunar logistics (CLPS contract)
-        "BKSY",   # BlackSky — SAR+optical satellites + AI analytics
-        "RDW",    # Redwire — space infrastructure / manufacturing
-    ],
-    "Clean Energy & Storage": [
-        "ENPH",   # Enphase Energy — microinverter monopoly + energy management
-        "FLNC",   # Fluence Energy — grid-scale storage software/systems
-        "STEM",   # Stem Inc — AI-driven energy storage dispatch
-        "ARRY",   # Array Technologies — solar tracker leader
-        "PLUG",   # Plug Power — hydrogen fuel cell ecosystem
-        "BLDP",   # Ballard Power — PEM fuel cells for heavy transport
-        "ERII",   # Energy Recovery — pressure exchanger (desalination monopoly)
-        "HASI",   # Hannon Armstrong — sustainable infrastructure investment
-    ],
-    "Cybersecurity Platform": [
-        "S",      # SentinelOne — AI-native XDR/endpoint (hyper-growth)
-        "NET",    # Cloudflare — global edge network / zero-trust platform
-        "DDOG",   # Datadog — observability + security, strong data moat
-        "OKTA",   # Okta — identity management, high switching costs
-        "VRNS",   # Varonis — data security analytics
-        "TENB",   # Tenable — exposure/vulnerability management
-        "QLYS",   # Qualys — cloud security compliance SaaS
-    ],
-    "Genomics & Bio Platform": [
-        "CRSP",   # CRISPR Therapeutics — gene editing platform
-        "BEAM",   # Beam Therapeutics — base editing (more precise than CRISPR)
-        "RXRX",   # Recursion Pharma — AI + biology drug discovery platform
-        "TWST",   # Twist Bioscience — synthetic DNA manufacturing platform
-        "PACB",   # Pacific Biosciences — long-read sequencing
-        "NTLA",   # Intellia Therapeutics — in vivo gene editing
-        "ARWR",   # Arrowhead Pharma — RNAi therapeutics platform
-    ],
-    "High-Moat Platform": [
-        "AXON",   # Axon Enterprise — law enforcement AI ecosystem (Evidence.com)
-        "VEEV",   # Veeva Systems — pharma cloud (extreme switching costs)
-        "GTLB",   # GitLab — DevSecOps platform (open core moat)
-        "CSGP",   # CoStar Group — commercial RE data monopoly
-        "GLBE",   # Global-E Online — cross-border e-commerce infrastructure
-        "MNDY",   # Monday.com — work OS platform (network effects)
-        "HUBS",   # HubSpot — CRM + marketing platform
-        "BILL",   # Bill.com — SMB finance automation (network of suppliers)
-    ],
+
+def _is_equity_symbol(sym: str) -> bool:
+    """Return True only for plain equity tickers (filter out futures, indexes, etc.)."""
+    if not sym or len(sym) > 7:
+        return False
+    # Futures (GC=F), indexes (^VIX), options, etc.
+    if "=" in sym or "^" in sym:
+        return False
+    return True
+
+# Innovation and growth-focused ETFs for dynamic universe discovery.
+# These ETFs collectively hold the innovation/growth stocks we want to track —
+# no hardcoded company names needed. As new companies emerge, they'll naturally
+# appear in these ETFs' holdings.
+INNOVATION_ETFS: dict[str, str] = {  # etf_ticker -> category_name
+    "ARKK": "ARK Innovation",
+    "ARKG": "ARK Genomics",
+    "ARKW": "ARK Web & Next-Gen Internet",
+    "IGV": "Software & Cloud",
+    "WCLD": "Cloud Computing",
+    "CLOU": "Cloud Infrastructure",
+    "CIBR": "Cybersecurity",
+    "BOTZ": "Robotics & AI",
+    "ICLN": "Clean Energy",
+    "XBI": "Biotech",
+    "PSCT": "Small Cap Tech",
+    "FINX": "Fintech",
 }
 
 # ---------------------------------------------------------------------------
@@ -391,15 +295,16 @@ async def _fetch_top_movers() -> dict[str, list[str]]:
 
 
 async def get_screening_universe() -> dict[str, list[str]]:
-    """Return sector/category -> symbols mapping (300-500 symbols, 1h TTL cache).
+    """Return sector/category -> symbols mapping (400-600 symbols, 1h TTL cache).
 
     Combines four symbol sources:
-        1. Dynamic ETF holdings (top 25 per sector ETF)
-        2. Commodity futures (hardcoded)
-        3. International ADRs (hardcoded)
+        1. Dynamic sector ETF holdings (top 40 per ETF)
+        2. Dynamic innovation ETF holdings (top 40 per ETF, discovered organically)
+        3. Commodity futures and international ADRs
         4. Top daily movers (gainers, losers, volume leaders)
 
-    Falls back to FALLBACK_HOLDINGS + static sets if all dynamic fetching fails.
+    No hardcoded company names — all equities are discovered via ETF constituents.
+    Falls back to FALLBACK_HOLDINGS if all dynamic fetching fails.
     """
     # Check cache
     if (
@@ -414,17 +319,17 @@ async def get_screening_universe() -> dict[str, list[str]]:
     universe: dict[str, list[str]] = {}
     dynamic_succeeded = False
 
-    # 1. Fetch ETF holdings in parallel
+    # 1. Fetch sector ETF holdings in parallel (top 40 per ETF)
     try:
         etf_tasks = [
-            _fetch_single_etf_holdings(etf, sector)
+            _fetch_single_etf_holdings(etf, sector, top_n=40)
             for etf, sector in _ETF_TO_SECTOR.items()
         ]
         etf_results = await asyncio.gather(*etf_tasks, return_exceptions=True)
 
         for etf_result in etf_results:
             if isinstance(etf_result, BaseException):
-                logger.warning("ETF holdings task failed: %s", etf_result)
+                logger.warning("Sector ETF task failed: %s", etf_result)
                 continue
             sector_name, symbols = etf_result
             if symbols:
@@ -432,25 +337,40 @@ async def get_screening_universe() -> dict[str, list[str]]:
                 universe[sector_name] = symbols
 
     except Exception as exc:
-        logger.warning("ETF holdings parallel fetch failed entirely: %s", exc)
+        logger.warning("Sector ETF holdings parallel fetch failed: %s", exc)
 
-    # Pad sectors with supplemental symbols if below target
-    for sector_name, supplements in _SUPPLEMENTAL_SYMBOLS.items():
-        existing = set(universe.get(sector_name, []))
-        if len(existing) < 20:
-            # Add supplemental symbols not already present
-            for sym in supplements:
-                if sym not in existing:
-                    universe.setdefault(sector_name, []).append(sym)
-                    existing.add(sym)
+    # 2. Fetch innovation ETF holdings in parallel (these discover growth/innovation
+    #    stocks organically — no hardcoded company names needed)
+    try:
+        innovation_tasks = [
+            _fetch_single_etf_holdings(etf, category, top_n=40)
+            for etf, category in INNOVATION_ETFS.items()
+        ]
+        innovation_results = await asyncio.gather(*innovation_tasks, return_exceptions=True)
 
-    # 2. Add commodity futures
+        for innov_result in innovation_results:
+            if isinstance(innov_result, BaseException):
+                logger.warning("Innovation ETF task failed: %s", innov_result)
+                continue
+            category_name, symbols = innov_result
+            if symbols:
+                dynamic_succeeded = True
+                existing = set(universe.get(category_name, []))
+                for sym in symbols:
+                    if sym not in existing:
+                        universe.setdefault(category_name, []).append(sym)
+                        existing.add(sym)
+
+    except Exception as exc:
+        logger.warning("Innovation ETF holdings parallel fetch failed: %s", exc)
+
+    # 3. Add commodity futures
     universe.update(COMMODITY_SYMBOLS)
 
-    # 3. Add international ADRs
+    # 4. Add international ADRs
     universe.update(INTERNATIONAL_ADRS)
 
-    # 4. Fetch top movers
+    # 5. Fetch top movers
     try:
         movers = await _fetch_top_movers()
         if movers:
@@ -458,14 +378,6 @@ async def get_screening_universe() -> dict[str, list[str]]:
             universe.update(movers)
     except Exception as exc:
         logger.warning("Top movers fetch failed: %s", exc)
-
-    # 5. Add innovation/high-moat universe (quantum, AI infra, space, clean energy, etc.)
-    for category, symbols in INNOVATION_UNIVERSE.items():
-        existing = set(universe.get(category, []))
-        for sym in symbols:
-            if sym not in existing:
-                universe.setdefault(category, []).append(sym)
-                existing.add(sym)
 
     # Fallback: if no dynamic data at all, use FALLBACK_HOLDINGS
     if not dynamic_succeeded:
@@ -524,13 +436,11 @@ def get_all_universe_symbols() -> list[str]:
     # Fallback: static holdings + commodities + ADRs
     logger.debug("get_all_universe_symbols: no cache, using fallback")
     symbols = []
-    for etf, sector in _ETF_TO_SECTOR.items():
+    for etf in list(_ETF_TO_SECTOR.keys()) + list(INNOVATION_ETFS.keys()):
         symbols.extend(FALLBACK_HOLDINGS.get(etf, []))
     for syms in COMMODITY_SYMBOLS.values():
         symbols.extend(syms)
     for syms in INTERNATIONAL_ADRS.values():
-        symbols.extend(syms)
-    for syms in _SUPPLEMENTAL_SYMBOLS.values():
         symbols.extend(syms)
     return list(dict.fromkeys(symbols))
 
@@ -538,3 +448,58 @@ def get_all_universe_symbols() -> list[str]:
 def get_commodity_symbols() -> list[str]:
     """Return commodity futures symbols."""
     return list(COMMODITY_SYMBOLS["Commodities"])
+
+
+async def sync_universe_to_db(db: Any) -> dict[str, int]:
+    """Import newly discovered equity symbols from the screening universe into the DB.
+
+    Fetches ETF constituents, filters to plain equity tickers, and upserts any
+    symbols not already in the stocks table. Returns {"added": N, "skipped": M}.
+    """
+    from models.stock import Stock
+    from sqlalchemy import select as _sa_select
+
+    universe = await get_screening_universe()
+
+    # Build flat symbol → category map, equity symbols only
+    sym_to_category: dict[str, str] = {}
+    for category, symbols in universe.items():
+        for sym in symbols:
+            if _is_equity_symbol(sym) and sym not in sym_to_category:
+                sym_to_category[sym] = category
+
+    if not sym_to_category:
+        return {"added": 0, "skipped": 0}
+
+    # Find which symbols already exist in DB
+    result = await db.execute(_sa_select(Stock.symbol))
+    existing: set[str] = {row[0].upper() for row in result.fetchall()}
+
+    new_syms = [s for s in sym_to_category if s.upper() not in existing]
+    if not new_syms:
+        logger.info("Universe sync: all %d equity symbols already in DB", len(sym_to_category))
+        return {"added": 0, "skipped": len(sym_to_category)}
+
+    logger.info("Universe sync: adding %d new symbols to DB", len(new_syms))
+    added = 0
+    for sym in new_syms:
+        try:
+            db.add(Stock(
+                symbol=sym,
+                name=sym,  # name populated later via ETL or manual update
+                sector=sym_to_category.get(sym),
+                is_active=True,
+            ))
+            added += 1
+        except Exception as exc:
+            logger.debug("Failed to stage %s: %s", sym, exc)
+
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.warning("Universe sync commit failed: %s", exc)
+        return {"added": 0, "skipped": len(sym_to_category)}
+
+    logger.info("Universe sync complete: %d added, %d already existed", added, len(existing))
+    return {"added": added, "skipped": len(sym_to_category) - len(new_syms)}
