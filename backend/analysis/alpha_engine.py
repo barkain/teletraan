@@ -546,14 +546,26 @@ def _score_fundamentals(
     valuation_components: list[float] = []
     if forward_pe is not None:
         pe = float(forward_pe)
-        valuation_components.append(
-            95.0 if pe <= 15 else 85.0 if pe <= 25 else 70.0 if pe <= 35 else 50.0 if pe <= 50 else 25.0
-        )
+        if is_growth_company:
+            # Growth-adjusted: P/E 60 is cheap for a 30%+ grower (PEG ~2)
+            valuation_components.append(
+                95.0 if pe <= 40 else 85.0 if pe <= 70 else 70.0 if pe <= 100 else 50.0 if pe <= 150 else 25.0
+            )
+        else:
+            valuation_components.append(
+                95.0 if pe <= 15 else 85.0 if pe <= 25 else 70.0 if pe <= 35 else 50.0 if pe <= 50 else 25.0
+            )
     if trailing_pe is not None:
         pe = float(trailing_pe)
-        valuation_components.append(
-            90.0 if pe <= 18 else 80.0 if pe <= 30 else 65.0 if pe <= 45 else 45.0 if pe <= 60 else 20.0
-        )
+        if is_growth_company:
+            # Pre-profit or early-profit companies: trailing PE less meaningful, use loosely
+            valuation_components.append(
+                90.0 if pe <= 50 else 75.0 if pe <= 100 else 55.0 if pe <= 200 else 30.0
+            )
+        else:
+            valuation_components.append(
+                90.0 if pe <= 18 else 80.0 if pe <= 30 else 65.0 if pe <= 45 else 45.0 if pe <= 60 else 20.0
+            )
     if peg is not None:
         p = float(peg)
         valuation_components.append(
@@ -561,9 +573,15 @@ def _score_fundamentals(
         )
     if price_to_sales is not None:
         ps = float(price_to_sales)
-        valuation_components.append(
-            90.0 if ps <= 2 else 80.0 if ps <= 4 else 65.0 if ps <= 8 else 45.0 if ps <= 15 else 20.0
-        )
+        if is_growth_company:
+            # High-growth SaaS/tech: P/S 15-20 is normal, penalise only >35
+            valuation_components.append(
+                90.0 if ps <= 8 else 80.0 if ps <= 15 else 65.0 if ps <= 25 else 45.0 if ps <= 40 else 20.0
+            )
+        else:
+            valuation_components.append(
+                90.0 if ps <= 2 else 80.0 if ps <= 4 else 65.0 if ps <= 8 else 45.0 if ps <= 15 else 20.0
+            )
     if not valuation_components:
         valuation_components.append(50.0)
 
