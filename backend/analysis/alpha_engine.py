@@ -692,21 +692,30 @@ def _score_basic_technical(
             elif key_u.startswith("SMA_50") or key_u.startswith("EMA_50"):
                 indicator_bonus += 6.0 if latest >= val else 0.0
 
+    # IC-calibrated weights (Phase 2): volatility IC=+0.111 at 90d; accel IC=−0.127 at 20d;
+    # ret_60 IC=−0.163 at 90d (mean-reversion for overextended names).
+    volatility_signal = _clamp((volatility - 1.0) / 3.5, 0.0, 1.0) * 100.0
+    ret_60_overextension = _clamp((ret_60 - 20.0) / 40.0, 0.0, 1.0) * 10.0
     technical_score = (
-        0.30 * _clamp((ret_20 + 25.0) / 50.0, 0.0, 1.0) * 100.0
-        + 0.25 * _clamp((rel_strength + 35.0) / 70.0, 0.0, 1.0) * 100.0
-        + 0.10 * _clamp((accel + 20.0) / 40.0, 0.0, 1.0) * 100.0
+        0.25 * _clamp((ret_20 + 25.0) / 50.0, 0.0, 1.0) * 100.0
+        + 0.20 * _clamp((rel_strength + 35.0) / 70.0, 0.0, 1.0) * 100.0
+        + 0.15 * volatility_signal
         + 0.10 * _clamp((vol_ratio - 0.5) / 2.5, 0.0, 1.0) * 100.0
-        + 0.10 * _clamp(close_above_20 + close_above_50, 0.0, 2.0) / 2.0 * 100.0
+        + 0.08 * _clamp(close_above_20 + close_above_50, 0.0, 2.0) / 2.0 * 100.0
         + 0.10 * _clamp((sector_strength + 20.0) / 40.0, 0.0, 1.0) * 100.0
+        + 0.07 * _clamp((accel + 20.0) / 40.0, 0.0, 1.0) * 100.0
         + 0.05 * _clamp((rich_signal + 100.0) / 200.0, 0.0, 1.0) * 100.0
         + indicator_bonus
+        - ret_60_overextension
     )
     technical_score = _clamp(technical_score, 0.0, 100.0)
+    # Remove volatility from risk_score: it's the single strongest positive predictor (IC +0.111).
+    # Replace with ret_60 overextension penalty: stocks that already ran >20% in 60d face
+    # mean-reversion risk (IC −0.163 at 90d).
     risk_score = _clamp(
         55.0
         + abs(min(ret_20, 0.0)) * 0.8
-        + volatility * 3.0
+        + max(0.0, ret_60 - 20.0) * 0.4
         - vol_ratio * 5.0
         - close_above_20 * 5.0
         - close_above_50 * 5.0,
@@ -722,6 +731,9 @@ def _score_basic_technical(
         "spy_20d": round(spy_20, 2),
         "rel_strength_20d": round(rel_strength, 2),
         "volume_ratio": round(vol_ratio, 2),
+        "volatility_daily_pct": round(volatility, 3),
+        "volatility_signal": round(volatility_signal, 1),
+        "ret_60_overextension_penalty": round(ret_60_overextension, 1),
         "rich_signal": round(rich_signal, 2),
         "rich_confidence": round(rich_confidence, 2),
         "rating": rating,
