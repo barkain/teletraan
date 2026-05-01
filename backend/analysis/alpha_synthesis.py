@@ -12,7 +12,10 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import update as _sa_update
+
 from llm.client_pool import pool_query_llm
+from models.alpha_engine import CandidateIdea
 from models.deep_insight import DeepInsight, InsightAction, InsightType
 from analysis.outcome_tracker import InsightOutcomeTracker
 
@@ -27,10 +30,25 @@ Rules:
 - Separate market-wide ideas from portfolio-aware suggestions.
 - Keep the output concise, concrete, and tradeable.
 - If evidence is weak, say so plainly.
+- For upside_pct: derive your own estimate from the thesis narrative — do NOT use analyst
+  consensus targets. Reason from the hypothesis: TAM expansion, revenue growth trajectory,
+  margin improvement, moat strengthening, or catalyst crystallisation. Be intellectually
+  honest — if the thesis is weak, say so with a low upside_pct and low confidence.
 
 Return valid JSON with keys:
 - summary: short paragraph
-- candidate_notes: array of {symbol, title, thesis, action, confidence, horizon_days, risk_factors, invalidation_trigger}
+- candidate_notes: array of {
+    symbol,
+    title,
+    thesis,
+    action,
+    confidence,
+    horizon_days,
+    risk_factors,
+    invalidation_trigger,
+    upside_pct: your estimated % upside over the horizon derived from the thesis (float, not analyst targets),
+    upside_rationale: one sentence explaining how you derived the upside estimate
+  }
 - portfolio_notes: array of strings
 - data_gaps: array of strings
 """
@@ -88,13 +106,20 @@ def build_alpha_candidate_context(
 
     lines.append("### Ranked Candidates")
     for candidate in candidates[:10]:
+        # Extract current price from setup_trigger ("Close 123.45")
+        price_str = ""
+        if getattr(candidate, "setup_trigger", "") and str(candidate.setup_trigger).startswith("Close "):
+            price_str = f" | current_price=${candidate.setup_trigger.replace('Close ', '')}"
         lines.append(
             f"- #{candidate.rank} {candidate.symbol} | score {candidate.overall_score:.2f} | "
             f"confidence {candidate.confidence:.2f} | thesis {candidate.thesis_type} | "
-            f"holding={candidate.is_portfolio_holding}"
+            f"holding={candidate.is_portfolio_holding}{price_str}"
         )
-        lines.append(f"  - Bull: {candidate.bull_case}")
-        lines.append(f"  - Bear: {candidate.bear_case}")
+        # Strip analyst target from bull_case so LLM forms its own view
+        bull = str(getattr(candidate, "bull_case", "") or "")
+        bull_clean = bull.split(" Street upside")[0].strip()
+        lines.append(f"  - Scores: {bull_clean}")
+        lines.append(f"  - Risk: {candidate.bear_case}")
         if candidate.portfolio_relevance:
             lines.append(f"  - Portfolio: {candidate.portfolio_relevance}")
         if candidate.key_drivers:
@@ -183,6 +208,25 @@ async def synthesize_alpha_run(
         risk_factors = note.get("risk_factors") or candidate.invalidations
         invalidation = note.get("invalidation_trigger") or candidate.setup_trigger
         horizon_days = int(note.get("horizon_days") or candidate.expected_horizon_days or 45)
+
+        # Write LLM-derived upside back to CandidateIdea (replacing analyst target)
+        upside_pct = note.get("upside_pct")
+        upside_rationale = note.get("upside_rationale", "")
+        if upside_pct is not None and thesis:
+            llm_bull = thesis
+            if upside_rationale:
+                llm_bull += f" | Upside estimate: +{float(upside_pct):.0f}% — {upside_rationale}"
+            try:
+                await db.execute(
+                    _sa_update(CandidateIdea)
+                    .where(
+                        CandidateIdea.analysis_run_id == run.id,
+                        CandidateIdea.symbol == candidate.symbol,
+                    )
+                    .values(bull_case=llm_bull)
+                )
+            except Exception as exc:
+                logger.warning("Failed to update CandidateIdea bull_case for %s: %s", candidate.symbol, exc)
 
         deep_insight = DeepInsight(
             insight_type=InsightType.OPPORTUNITY.value,
