@@ -18,6 +18,7 @@ from llm.client_pool import pool_query_llm
 from models.alpha_engine import CandidateIdea
 from models.deep_insight import DeepInsight, InsightAction, InsightType
 from analysis.outcome_tracker import InsightOutcomeTracker
+from analysis.backtester import load_calibration, format_calibration_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,11 @@ async def synthesize_alpha_run(
         regime=regime,
         market_snapshot=market_snapshot,
     )
+
+    # Append historical calibration context so upside estimates are grounded in data
+    calibration_block = format_calibration_for_prompt(load_calibration())
+    if calibration_block:
+        user_prompt = calibration_block + "\n\n" + user_prompt
 
     llm_response: dict[str, Any] | None = None
     try:
