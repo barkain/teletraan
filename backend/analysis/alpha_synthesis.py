@@ -172,9 +172,23 @@ async def synthesize_alpha_run(
         )
         raw = (result.text or "").strip()
         if raw:
+            # Strip markdown code fences if present
+            extracted = raw
+            if "```" in raw:
+                import re as _re
+                m = _re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+                if m:
+                    extracted = m.group(1).strip()
             try:
-                llm_response = json.loads(raw)
+                llm_response = json.loads(extracted)
+                logger.info(
+                    "Alpha synthesis parsed: %d candidate_notes",
+                    len(llm_response.get("candidate_notes", [])),
+                )
             except Exception:
+                logger.warning(
+                    "Alpha synthesis JSON parse failed; raw[:200]=%r", extracted[:200]
+                )
                 llm_response = {
                     "summary": raw[:1000],
                     "candidate_notes": [],
