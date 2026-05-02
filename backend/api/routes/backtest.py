@@ -12,6 +12,7 @@ from analysis.backtester import (
     load_calibration,
     run_strategy_backtest,
     load_strategy_backtest,
+    get_today_picks,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,3 +95,26 @@ async def get_strategy_results(
             detail="No strategy backtest available. Run POST /backtest/strategy-run first.",
         )
     return result
+
+
+@router.get("/today-picks")
+async def get_today_picks_endpoint(
+    n_picks: int = 5,
+    n_candidates: int = 20,
+    min_market_cap_m: float = 500,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(get_current_user),
+) -> dict:
+    """Score all symbols with the IC-calibrated quant scorer, apply a fundamental
+    quality gate on the top candidates, and return today's top picks.
+
+    Hybrid approach: Scorer B (volatility/bb_width/vol_ratio IC-weights) ranks
+    candidates purely on price signals, then fundamentals from Yahoo Finance
+    filter out micro-caps and revenue-declining names.
+    """
+    return await get_today_picks(
+        db,
+        n_picks=n_picks,
+        n_candidates=n_candidates,
+        min_market_cap=min_market_cap_m * 1_000_000,
+    )

@@ -832,3 +832,137 @@ def load_strategy_backtest() -> dict[str, Any] | None:
             return json.load(f)
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Today's picks — hybrid Scorer B + fundamental quality gate
+# ---------------------------------------------------------------------------
+
+async def get_today_picks(
+    db: AsyncSession,
+    n_candidates: int = 20,
+    n_picks: int = 5,
+    min_market_cap: float = 500_000_000,
+    min_revenue_growth: float = -0.25,
+) -> dict[str, Any]:
+    """Score all symbols with the IC-calibrated scorer, then apply a fundamental
+    quality gate on the top candidates before surfacing the final picks.
+
+    Steps:
+      1. Load all price history from DB, score every symbol with _ic_calibrated_score()
+      2. Take top n_candidates by quant score
+      3. Fetch fundamentals via Yahoo Finance for those candidates
+      4. Filter out: market_cap < min_market_cap OR revenue_growth < min_revenue_growth
+      5. Return top n_picks from the filtered set, with signal detail + regime
+    """
+    from data.adapters.yahoo import get_fundamental_data
+
+    matrix = await _load_price_matrix(db)
+    if "SPY" not in matrix:
+        return {"error": "SPY not in price matrix"}
+
+    spy_data = matrix["SPY"]
+    spy_closes = spy_data["closes"]
+    regime = _compute_regime(spy_closes)
+
+    # Score every symbol on current (full) price history
+    scored: list[tuple[str, float, dict[str, float]]] = []
+    for symbol, data in matrix.items():
+        if symbol == "SPY":
+            continue
+        closes = data["closes"]
+        volumes = data["volumes"]
+        score = _ic_calibrated_score(closes, volumes, spy_closes)
+        if score is None:
+            continue
+        sigs = compute_signals(closes, volumes, spy_closes)
+        if sigs is None:
+            continue
+        scored.append((symbol, score, sigs))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    candidates = scored[:n_candidates]
+    candidate_symbols = [s for s, _, _ in candidates]
+
+    # Fetch fundamentals for candidates only
+    fundamentals = await get_fundamental_data(candidate_symbols)
+
+    # Apply quality gates
+    filtered: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for symbol, score, sigs in candidates:
+        fund = fundamentals.get(symbol) or {}
+        mkt_cap = fund.get("market_cap") or 0
+        rev_growth = fund.get("revenue_growth")  # None = unknown
+        sector = fund.get("sector") or "Unknown"
+        industry = fund.get("industry") or ""
+
+        reject_reason = None
+        if mkt_cap and mkt_cap < min_market_cap:
+            reject_reason = f"market_cap ${mkt_cap/1e6:.0f}M < ${min_market_cap/1e6:.0f}M threshold"
+        elif rev_growth is not None and rev_growth < min_revenue_growth:
+            reject_reason = f"revenue_growth {rev_growth:.0%} < {min_revenue_growth:.0%} threshold"
+
+        entry = {
+            "symbol": symbol,
+            "quant_score": round(score, 4),
+            "signals": {
+                "volatility": round(sigs["volatility"], 3),
+                "bb_width": round(sigs["bb_width"], 3),
+                "vol_ratio": round(sigs["vol_ratio"], 3),
+                "rel_strength": round(sigs["rel_strength"], 2),
+                "ret_20d_pct": round(sigs["ret_20"], 2),
+                "ret_60d_pct": round(sigs["ret_60"], 2),
+                "rsi": round(sigs["rsi"], 1),
+                "bb_pct_b": round(sigs["bb_pct_b"], 3),
+            },
+            "fundamentals": {
+                "market_cap_m": round(mkt_cap / 1e6, 0) if mkt_cap else None,
+                "revenue_growth": round(rev_growth, 3) if rev_growth is not None else None,
+                "sector": sector,
+                "industry": industry,
+                "price_to_sales": fund.get("price_to_sales"),
+                "trailing_pe": fund.get("trailing_pe"),
+                "profit_margins": fund.get("profit_margins"),
+            },
+        }
+        if reject_reason:
+            entry["rejected"] = reject_reason
+            rejected.append(entry)
+        else:
+            filtered.append(entry)
+
+    # Deduplicate share-class twins (same company, different ticker e.g. GOOGL/GOOG)
+    # If two candidates have market caps within 2% of each other and same sector, keep the first (higher score)
+    deduped: list[dict[str, Any]] = []
+    seen_caps: list[float] = []
+    for entry in filtered:
+        cap = entry["fundamentals"].get("market_cap_m") or 0
+        sector = entry["fundamentals"].get("sector") or ""
+        if cap > 0:
+            is_twin = any(
+                abs(cap - c) / max(cap, c) < 0.02 and sector == deduped[i]["fundamentals"].get("sector")
+                for i, c in enumerate(seen_caps)
+                if c > 0
+            )
+            if is_twin:
+                continue
+        deduped.append(entry)
+        seen_caps.append(cap)
+
+    picks = deduped[:n_picks]
+
+    return {
+        "as_of": date.today().isoformat(),
+        "regime": regime,
+        "n_picks": len(picks),
+        "picks": picks,
+        "rejected_candidates": rejected,
+        "total_scored": len(scored),
+        "regime_note": {
+            "risk_on": "Full signal — deploy normally",
+            "caution": "Moderate signal — consider half-size positions",
+            "risk_off": "High-vol regime — strategy excels here but expect larger swings",
+            "unknown": "Insufficient SPY history",
+        }.get(regime, ""),
+    }
