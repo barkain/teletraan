@@ -118,3 +118,65 @@ async def get_today_picks_endpoint(
         n_candidates=n_candidates,
         min_market_cap=min_market_cap_m * 1_000_000,
     )
+
+
+@router.post("/deep-picks")
+async def trigger_deep_picks(
+    background_tasks: BackgroundTasks,
+    n_candidates: int = 15,
+    min_market_cap_m: float = 500,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(get_current_user),
+) -> dict:
+    """Full hybrid pipeline: IC-calibrated quant scorer nominates candidates,
+    DeepAnalysisEngine runs multi-agent analysis on those symbols.
+
+    Step 1 (sync, fast): Scorer B ranks all 200+ symbols → fundamental quality
+    gate → top n_candidates survivors.
+    Step 2 (background): DeepAnalysisEngine runs 5 specialist analysts in
+    parallel on those symbols → synthesises investment theses → stores to DB.
+
+    Poll GET /api/v1/deep-insights for results.
+    """
+    from analysis.deep_engine import get_deep_analysis_engine
+
+    quant_result = await get_today_picks(
+        db,
+        n_picks=n_candidates,
+        n_candidates=n_candidates * 2,
+        min_market_cap=min_market_cap_m * 1_000_000,
+    )
+
+    if "error" in quant_result:
+        raise HTTPException(status_code=500, detail=quant_result["error"])
+
+    candidate_symbols = [p["symbol"] for p in quant_result.get("picks", [])]
+    if not candidate_symbols:
+        raise HTTPException(status_code=404, detail="No candidates passed quality gate")
+
+    engine = get_deep_analysis_engine()
+
+    async def _run_deep() -> None:
+        try:
+            insights = await engine.run_and_store(symbols=candidate_symbols)
+            logger.info(
+                "Deep picks complete: %d insights from candidates %s",
+                len(insights),
+                candidate_symbols,
+            )
+        except Exception:
+            logger.exception("Deep picks analysis failed")
+
+    background_tasks.add_task(_run_deep)
+
+    return {
+        "status": "started",
+        "regime": quant_result.get("regime"),
+        "regime_note": quant_result.get("regime_note"),
+        "candidates": quant_result.get("picks", []),
+        "n_candidates": len(candidate_symbols),
+        "message": (
+            f"Deep analysis running on {candidate_symbols}. "
+            "Poll GET /api/v1/deep-insights for results."
+        ),
+    }
