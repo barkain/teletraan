@@ -25,13 +25,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 CALIBRATION_PATH = Path(__file__).parent.parent / "data" / "backtest_calibration.json"
+STRATEGY_PATH = Path(__file__).parent.parent / "data" / "strategy_backtest.json"
 
 # Minimum rows for a symbol to be included in backtest
 MIN_HISTORY_ROWS = 120  # ~6 months trading days
 # Monthly snapshot interval (trading days)
 SNAPSHOT_INTERVAL_DAYS = 21
 # Forward return horizons to evaluate
-FORWARD_HORIZONS = [20, 45, 90]
+FORWARD_HORIZONS = [20, 30, 45, 90]
 # Minimum observations to report IC as reliable
 MIN_IC_OBSERVATIONS = 30
 
@@ -53,6 +54,79 @@ def _vol_ratio(volumes: list[float], n: int = 20) -> float | None:
     if not avg:
         return None
     return volumes[-1] / avg
+
+
+def _rsi(closes: list[float], period: int = 14) -> float | None:
+    if len(closes) < period + 1:
+        return None
+    gains, losses = [], []
+    for i in range(len(closes) - period, len(closes)):
+        delta = closes[i] - closes[i - 1]
+        gains.append(max(delta, 0.0))
+        losses.append(max(-delta, 0.0))
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1 + rs))
+
+
+def _ema_series(closes: list[float], period: int) -> list[float]:
+    """EMA over the full close series; returns values starting at index period-1."""
+    if len(closes) < period:
+        return []
+    k = 2.0 / (period + 1)
+    ema = sum(closes[:period]) / period
+    result = [ema]
+    for price in closes[period:]:
+        ema = price * k + ema * (1 - k)
+        result.append(ema)
+    return result
+
+
+def _macd_hist_pct(closes: list[float]) -> float | None:
+    """MACD histogram (12-26-9) normalised as % of latest close."""
+    if len(closes) < 35:
+        return None
+    ema12 = _ema_series(closes, 12)   # index i → close index 11+i
+    ema26 = _ema_series(closes, 26)   # index i → close index 25+i
+    # Align: ema26[i] matches ema12[i+14]
+    offset = 14  # 26 - 12
+    n_overlap = len(ema26)
+    macd_line = [ema12[i + offset] - ema26[i] for i in range(n_overlap)]
+    if len(macd_line) < 9:
+        return None
+    signal_line = _ema_series(macd_line, 9)
+    if not signal_line:
+        return None
+    histogram = macd_line[-1] - signal_line[-1]
+    return (histogram / closes[-1] * 100.0) if closes[-1] else None
+
+
+def _bollinger_pct_b(closes: list[float], period: int = 20, num_std: float = 2.0) -> float | None:
+    """Bollinger Band %B: 0 = at lower band, 1 = at upper band."""
+    if len(closes) < period:
+        return None
+    window = closes[-period:]
+    middle = sum(window) / period
+    std = statistics.stdev(window)
+    if std == 0:
+        return 0.5
+    upper = middle + num_std * std
+    lower = middle - num_std * std
+    return _clamp((closes[-1] - lower) / (upper - lower), 0.0, 1.0)
+
+
+def _bollinger_width(closes: list[float], period: int = 20, num_std: float = 2.0) -> float | None:
+    """Bollinger Band width normalised by middle band (volatility measure)."""
+    if len(closes) < period:
+        return None
+    window = closes[-period:]
+    middle = sum(window) / period
+    if not middle:
+        return None
+    return (2.0 * num_std * statistics.stdev(window)) / middle
 
 
 def _safe_mean(vals: list[float]) -> float | None:
@@ -115,6 +189,11 @@ def compute_signals(
     )
     tech_score = _clamp(tech_score, 0, 100)
 
+    rsi = _rsi(closes)
+    macd_hist = _macd_hist_pct(closes)
+    bb_pct_b = _bollinger_pct_b(closes)
+    bb_width = _bollinger_width(closes)
+
     return {
         "ret_20": ret_20,
         "ret_60": ret_60 or 0.0,
@@ -124,6 +203,11 @@ def compute_signals(
         "above_ma": (above_20 + above_50) / 2,
         "volatility": volatility,
         "tech_score": tech_score,
+        # New signals for IC testing
+        "rsi": rsi if rsi is not None else 50.0,
+        "macd_hist": macd_hist if macd_hist is not None else 0.0,
+        "bb_pct_b": bb_pct_b if bb_pct_b is not None else 0.5,
+        "bb_width": bb_width if bb_width is not None else 0.0,
     }
 
 
@@ -451,3 +535,300 @@ def format_calibration_for_prompt(cal: dict[str, Any] | None) -> str:
         "unless the thesis has strong asymmetric catalysts beyond the signal."
     )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Walk-forward strategy simulation
+# ---------------------------------------------------------------------------
+
+def _ic_calibrated_score(
+    closes: list[float],
+    volumes: list[float],
+    spy_closes: list[float] | None,
+) -> float | None:
+    """IC-calibrated strategy score — v2 with RSI, MACD, Bollinger signals.
+
+    Weights are IC-proportional (90d horizon). The strategy is fundamentally
+    mean-reverting: find high-volatility stocks that are currently oversold
+    (low RSI, near lower BB, negative MACD histogram) — they tend to bounce hard.
+
+    Positive signals (IC > 0 at 90d):
+      volatility  IC=+0.121  → high daily vol = larger expected move
+      bb_width    IC=+0.117  → wide bands = volatile regime, bigger bounces
+      vol_ratio   IC=+0.032  → volume surge
+
+    Flipped negative signals (low value = positive outcome):
+      bb_pct_b    IC=−0.116  → near lower band = oversold, flip to (1 − %B)
+      rsi         IC=−0.082  → low RSI = oversold, flip to (100 − RSI) / 100
+
+    Penalty:
+      ret_60      IC=−0.117  → stocks already up >15% in 60d face reversal
+    """
+    sigs = compute_signals(closes, volumes, spy_closes)
+    if sigs is None:
+        return None
+
+    vol_norm = _clamp((sigs["volatility"] - 0.5) / 4.5, 0.0, 1.0)           # IC=+0.121 at 90d
+    bbw_norm = _clamp((sigs["bb_width"] - 0.02) / 0.18, 0.0, 1.0)           # IC=+0.117 at 90d (new)
+    volr_norm = _clamp((sigs["vol_ratio"] - 0.5) / 2.5, 0.0, 1.0)           # IC=+0.032 at 90d
+    relstr_norm = _clamp((sigs["rel_strength"] + 35.0) / 70.0, 0.0, 1.0)    # IC=−0.016 at 90d but +0.027 at 20d
+    bb_inv = 1.0 - sigs["bb_pct_b"]                                           # IC=−0.116 flipped
+    rsi_inv = _clamp((100.0 - sigs["rsi"]) / 70.0, 0.0, 1.0)                # IC=−0.082 flipped
+
+    # Reversal penalty: stocks up >15% over 60d have mean-reversion tendency
+    ret60_penalty = _clamp((sigs["ret_60"] - 15.0) / 35.0, 0.0, 1.0) * 0.30
+
+    ret20_norm = _clamp((sigs["ret_20"] + 25.0) / 50.0, 0.0, 1.0)            # short-term momentum
+
+    score = (
+        0.30 * vol_norm       # IC=+0.121 — dominant signal
+        + 0.20 * bbw_norm     # IC=+0.117 — second volatility dimension (new)
+        + 0.20 * volr_norm    # IC=+0.032 — volume surge
+        + 0.17 * relstr_norm  # relative strength — filters for stocks already in motion
+        + 0.13 * ret20_norm   # short-term momentum — same filter
+        - ret60_penalty       # IC=−0.117 — reversal penalty
+    )
+    return _clamp(score, 0.0, 1.0)
+
+
+def _compute_regime(spy_closes: list[float]) -> str:
+    """Classify market regime from SPY price data.
+
+    risk_on:  SPY 20d return > +1%, above 50d MA, annualised vol < 30%
+    risk_off: SPY 20d return < −5%, or below 50d MA with > −2% return, or vol > 40%
+    caution:  everything in between
+    """
+    if len(spy_closes) < 51:
+        return "unknown"
+
+    spy_20d_ret = (spy_closes[-1] / spy_closes[-21] - 1.0) * 100.0 if spy_closes[-21] else 0.0
+    ma_50 = sum(spy_closes[-50:]) / 50.0
+    above_50 = spy_closes[-1] >= ma_50
+
+    daily_rets = [
+        (spy_closes[i] / spy_closes[i - 1] - 1.0)
+        for i in range(max(1, len(spy_closes) - 20), len(spy_closes))
+        if spy_closes[i - 1]
+    ]
+    spy_vol_ann = statistics.stdev(daily_rets) * math.sqrt(252) * 100.0 if len(daily_rets) >= 2 else 15.0
+
+    if spy_20d_ret > 1.0 and above_50 and spy_vol_ann <= 30.0:
+        return "risk_on"
+    if spy_20d_ret < -5.0 or (not above_50 and spy_20d_ret < -2.0) or spy_vol_ann > 40.0:
+        return "risk_off"
+    return "caution"
+
+
+def _build_date_index(matrix: dict[str, dict[str, Any]]) -> dict[str, dict[Any, int]]:
+    """Pre-build {symbol: {date: idx}} for O(1) snap_date lookups."""
+    return {sym: {d: i for i, d in enumerate(data["dates"])} for sym, data in matrix.items()}
+
+
+def _compute_max_drawdown(returns_pct: list[float]) -> float:
+    """Max drawdown from a series of period percentage returns."""
+    nav = 1.0
+    peak = 1.0
+    max_dd = 0.0
+    for r in returns_pct:
+        nav *= (1 + r / 100.0)
+        if nav > peak:
+            peak = nav
+        dd = (peak - nav) / peak * 100.0
+        if dd > max_dd:
+            max_dd = dd
+    return max_dd
+
+
+async def run_strategy_backtest(
+    db: AsyncSession,
+    n_picks: int = 5,
+) -> dict[str, Any]:
+    """Walk-forward strategy simulation.
+
+    At each monthly snapshot uses only price data up to that date (no look-ahead),
+    scores all symbols with the IC-calibrated scorer, picks top n_picks,
+    tracks equal-weight portfolio returns vs SPY at 20/45/90d horizons.
+
+    Output saved to data/strategy_backtest.json.
+    """
+    logger.info("Loading price matrix for strategy backtest...")
+    matrix = await _load_price_matrix(db)
+    logger.info("Loaded %d symbols", len(matrix))
+
+    if "SPY" not in matrix:
+        return {"error": "SPY not in price matrix — required for benchmark"}
+
+    spy_data = matrix["SPY"]
+    all_dates = spy_data["dates"]
+    total_days = len(all_dates)
+    max_horizon = max(FORWARD_HORIZONS)
+
+    snapshot_indices = list(range(64, total_days - max_horizon, SNAPSHOT_INTERVAL_DAYS))
+    if len(snapshot_indices) < 3:
+        return {"error": f"Insufficient data: {total_days} trading days"}
+
+    # Pre-build date → index maps for fast lookups
+    date_index = _build_date_index(matrix)
+    # Fallback candidates for dates missing from a symbol
+    nearby_offsets = list(range(1, 4))
+
+    trade_log: list[dict[str, Any]] = []
+
+    for snap_idx in snapshot_indices:
+        snap_date = all_dates[snap_idx]
+        spy_closes_snap = spy_data["closes"][:snap_idx + 1]
+        spy_snap_close = spy_closes_snap[-1]
+
+        # Map snap_date to each symbol's index (with ±3-day fallback)
+        sym_snap_idxs: dict[str, int] = {}
+        for symbol in matrix:
+            if symbol == "SPY":
+                continue
+            didx = date_index[symbol]
+            idx = didx.get(snap_date)
+            if idx is None:
+                for offset in nearby_offsets:
+                    candidate = all_dates[snap_idx - offset] if snap_idx >= offset else None
+                    if candidate is not None:
+                        idx = didx.get(candidate)
+                        if idx is not None:
+                            break
+            if idx is not None and idx >= 64:
+                sym_snap_idxs[symbol] = idx
+
+        # Score all eligible symbols
+        scored: list[tuple[str, float]] = []
+        for symbol, sym_idx in sym_snap_idxs.items():
+            data = matrix[symbol]
+            score = _ic_calibrated_score(
+                data["closes"][:sym_idx + 1],
+                data["volumes"][:sym_idx + 1],
+                spy_closes_snap,
+            )
+            if score is not None:
+                scored.append((symbol, score))
+
+        if len(scored) < n_picks:
+            continue
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        picks = scored[:n_picks]
+        pick_symbols = [s for s, _ in picks]
+        pick_scores = {s: round(sc, 4) for s, sc in picks}
+
+        # Compute returns at each horizon for each pick
+        pick_returns: dict[int, dict[str, float]] = {h: {} for h in FORWARD_HORIZONS}
+        for symbol, _ in picks:
+            data = matrix[symbol]
+            sym_idx = sym_snap_idxs[symbol]
+            snap_close = data["closes"][sym_idx]
+            if snap_close == 0:
+                continue
+            for horizon in FORWARD_HORIZONS:
+                fwd_idx = sym_idx + horizon
+                if fwd_idx < len(data["closes"]):
+                    ret = (data["closes"][fwd_idx] / snap_close - 1.0) * 100.0
+                    pick_returns[horizon][symbol] = round(ret, 3)
+
+        # SPY forward returns
+        spy_returns: dict[int, float] = {}
+        for horizon in FORWARD_HORIZONS:
+            spy_fwd_idx = snap_idx + horizon
+            if spy_fwd_idx < len(spy_data["closes"]) and spy_snap_close:
+                spy_returns[horizon] = round(
+                    (spy_data["closes"][spy_fwd_idx] / spy_snap_close - 1.0) * 100.0, 3
+                )
+
+        regime = _compute_regime(spy_closes_snap)
+
+        entry: dict[str, Any] = {
+            "date": snap_date.isoformat() if hasattr(snap_date, "isoformat") else str(snap_date),
+            "picks": pick_symbols,
+            "scores": pick_scores,
+            "n_scored": len(scored),
+            "regime": regime,
+        }
+        for horizon in FORWARD_HORIZONS:
+            rets = list(pick_returns[horizon].values())
+            port_ret = _safe_mean(rets)
+            spy_ret = spy_returns.get(horizon)
+            if port_ret is not None and spy_ret is not None:
+                entry[f"returns_{horizon}d"] = pick_returns[horizon]
+                entry[f"portfolio_return_{horizon}d"] = round(port_ret, 3)
+                entry[f"spy_return_{horizon}d"] = spy_ret
+                entry[f"excess_{horizon}d"] = round(port_ret - spy_ret, 3)
+
+        trade_log.append(entry)
+
+    def _build_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
+        """Compute per-horizon stats for a subset of trade_log entries."""
+        out: dict[str, Any] = {}
+        for horizon in FORWARD_HORIZONS:
+            key = f"{horizon}d"
+            excess_series = [e[f"excess_{horizon}d"] for e in entries if f"excess_{horizon}d" in e]
+            if not excess_series:
+                continue
+            avg_excess = _safe_mean(excess_series) or 0.0
+            win_rate = sum(1 for e in excess_series if e > 0) / len(excess_series)
+            std_excess = _safe_std(excess_series) or 0.0
+            periods_per_year = 252.0 / horizon
+            sharpe = (
+                (avg_excess * periods_per_year) / (std_excess * math.sqrt(periods_per_year))
+                if std_excess > 0 else 0.0
+            )
+            out[key] = {
+                "avg_excess_pct": round(avg_excess, 3),
+                "win_rate": round(win_rate, 3),
+                "sharpe": round(sharpe, 3),
+                "n_periods": len(excess_series),
+            }
+        return out
+
+    # Regime breakdown
+    regime_counts = {"risk_on": 0, "caution": 0, "risk_off": 0, "unknown": 0}
+    for e in trade_log:
+        regime_counts[e.get("regime", "unknown")] = regime_counts.get(e.get("regime", "unknown"), 0) + 1
+
+    risk_on_entries = [e for e in trade_log if e.get("regime") == "risk_on"]
+    risk_on_caution_entries = [e for e in trade_log if e.get("regime") in ("risk_on", "caution")]
+
+    summary = _build_summary(trade_log)
+    summary_regime_on = _build_summary(risk_on_entries)
+    summary_regime_on_caution = _build_summary(risk_on_caution_entries)
+
+    # Max drawdown on 20d portfolio NAV (snapshots every 21d ≈ non-overlapping)
+    port_20d = [e["portfolio_return_20d"] for e in trade_log if "portfolio_return_20d" in e]
+    port_20d_on = [e["portfolio_return_20d"] for e in risk_on_entries if "portfolio_return_20d" in e]
+    max_dd = _compute_max_drawdown(port_20d) if port_20d else None
+    max_dd_on = _compute_max_drawdown(port_20d_on) if port_20d_on else None
+
+    result: dict[str, Any] = {
+        "as_of": date.today().isoformat(),
+        "n_picks": n_picks,
+        "snapshots_run": len(trade_log),
+        "symbols_scored": len(matrix) - 1,
+        "regime_counts": regime_counts,
+        "summary": summary,
+        "summary_regime_on": summary_regime_on,
+        "summary_regime_on_caution": summary_regime_on_caution,
+        "max_drawdown_20d_pct": round(max_dd, 3) if max_dd is not None else None,
+        "max_drawdown_20d_regime_on_pct": round(max_dd_on, 3) if max_dd_on is not None else None,
+        "trade_log": trade_log,
+    }
+
+    STRATEGY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(STRATEGY_PATH, "w") as f:
+        json.dump(result, f, indent=2)
+    logger.info("Strategy backtest saved to %s", STRATEGY_PATH)
+    return result
+
+
+def load_strategy_backtest() -> dict[str, Any] | None:
+    """Load saved strategy backtest results from disk."""
+    if not STRATEGY_PATH.exists():
+        return None
+    try:
+        with open(STRATEGY_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return None

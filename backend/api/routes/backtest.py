@@ -7,7 +7,12 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_db, get_current_user
-from analysis.backtester import run_backtest, load_calibration
+from analysis.backtester import (
+    run_backtest,
+    load_calibration,
+    run_strategy_backtest,
+    load_strategy_backtest,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/backtest", tags=["backtest"])
@@ -44,3 +49,48 @@ async def get_backtest_results(
     if cal is None:
         raise HTTPException(status_code=404, detail="No backtest calibration available. Run POST /backtest/run first.")
     return cal
+
+
+@router.post("/strategy-run")
+async def trigger_strategy_backtest(
+    background_tasks: BackgroundTasks,
+    n_picks: int = 5,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(get_current_user),
+) -> dict:
+    """Trigger walk-forward strategy simulation in the background.
+
+    Scores all symbols monthly using IC-calibrated signals (volatility dominant),
+    picks top n_picks, tracks equal-weight portfolio vs SPY at 20/45/90d horizons.
+    Results saved to data/strategy_backtest.json.
+    """
+    async def _run() -> None:
+        try:
+            result = await run_strategy_backtest(db, n_picks=n_picks)
+            logger.info(
+                "Strategy backtest complete: %d snapshots, summary=%s",
+                result.get("snapshots_run", 0),
+                result.get("summary", {}),
+            )
+        except Exception:
+            logger.exception("Strategy backtest failed")
+
+    background_tasks.add_task(_run)
+    return {
+        "status": "started",
+        "message": f"Strategy backtest running (n_picks={n_picks}). Poll GET /backtest/strategy-results for output.",
+    }
+
+
+@router.get("/strategy-results")
+async def get_strategy_results(
+    _: str = Depends(get_current_user),
+) -> dict:
+    """Return the most recent walk-forward strategy backtest results."""
+    result = load_strategy_backtest()
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No strategy backtest available. Run POST /backtest/strategy-run first.",
+        )
+    return result
