@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     #   5. (none of the above)        - Claude Code subscription (dev only)
     LLM_PROVIDER: str = "auto"  # auto | anthropic_api | bedrock | vertex | azure | proxy | subscription
     ANTHROPIC_API_KEY: Optional[str] = None
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
 
     # Amazon Bedrock settings
     CLAUDE_CODE_USE_BEDROCK: bool = False

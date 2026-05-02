@@ -190,7 +190,7 @@ async def test_llm_connection(
             body.base_url = db_values["ANTHROPIC_BASE_URL"]
 
     provider = body.provider
-    model = body.model or "claude-sonnet-4-20250514"
+    model = body.model or "claude-sonnet-4-6"
 
     result = await _test_llm_connection_http(provider, model, body)
     return LLMTestResult(**result)
