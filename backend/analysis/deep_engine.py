@@ -468,8 +468,25 @@ class DeepAnalysisEngine:
         """
         synthesis_start = datetime.utcnow()
 
-        # Format analyst reports for synthesis
-        synthesis_context = format_synthesis_context(analyst_reports)
+        # Format analyst reports for synthesis — cap per-analyst to keep total under ~10K chars
+        _MAX_ANALYST_CHARS = 2000
+        truncated_reports: dict[str, Any] = {}
+        for analyst, report in analyst_reports.items():
+            if isinstance(report, dict) and report.get("_full_response"):
+                r = dict(report)
+                if len(r["_full_response"]) > _MAX_ANALYST_CHARS:
+                    r["_full_response"] = r["_full_response"][:_MAX_ANALYST_CHARS] + "\n[truncated]"
+                truncated_reports[analyst] = r
+            else:
+                truncated_reports[analyst] = report
+
+        synthesis_context = format_synthesis_context(truncated_reports)
+
+        # Hard cap: synthesis context must stay manageable even on large symbol sets
+        _MAX_CONTEXT_CHARS = 12000
+        if len(synthesis_context) > _MAX_CONTEXT_CHARS:
+            synthesis_context = synthesis_context[:_MAX_CONTEXT_CHARS] + "\n[...context truncated for length]"
+
         if portfolio_context:
             synthesis_context = f"{synthesis_context}\n\n{portfolio_context}"
         logger.info(f"[DEEP] Synthesis context length: {len(synthesis_context)} chars")
@@ -493,6 +510,17 @@ class DeepAnalysisEngine:
         except Exception as e:
             logger.warning(f"[DEEP] Failed to build enhanced synthesis prompt: {e}")
             enhanced_prompt = format_synthesis_prompt_with_context()
+
+        # Force inline JSON output — the SDK runs Claude Code which has file tools;
+        # without this instruction the model tends to write large responses to files,
+        # making the text response unparseable.
+        enhanced_prompt += (
+            "\n\n## CRITICAL OUTPUT REQUIREMENT\n"
+            "You MUST output your response as a single JSON object directly in your message text. "
+            "Do NOT use file tools. Do NOT write to any files. "
+            "Your ENTIRE response must start with { and end with }. "
+            "No prose before or after the JSON. No markdown code fences."
+        )
 
         response_text = await self._query_llm(enhanced_prompt, synthesis_context, "synthesis")
         logger.info(f"[DEEP] Synthesis response length: {len(response_text)} chars")
