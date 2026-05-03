@@ -315,15 +315,19 @@ For each insight with `related_symbols`, you MUST also provide a `secondary_play
 - Keep it concise: one sentence per related symbol, separated by semicolons.
 
 ## Action Levels
-- **STRONG_BUY**: High conviction, multiple confirming signals, favorable risk/reward
-- **BUY**: Positive setup with moderate confidence
-- **HOLD**: Maintain position, no clear action signal
+- **STRONG_BUY**: High conviction new position, multiple confirming signals, favorable risk/reward
+- **BUY**: Open a new position with moderate confidence
+- **BUY_MORE**: Add to an existing portfolio position — **ONLY for stocks listed in Portfolio Holdings** where thesis remains bullish
+- **HOLD**: Maintain current position, no clear add or exit signal — **ONLY for stocks listed in Portfolio Holdings**
 - **SELL**: Exit or reduce position — **ONLY for stocks listed in Portfolio Holdings**
-- **STRONG_SELL**: High conviction bearish, urgent action recommended — **ONLY for stocks listed in Portfolio Holdings**
-- **WATCH**: Interesting setup but needs confirmation
+- **STRONG_SELL**: High conviction bearish, urgent exit recommended — **ONLY for stocks listed in Portfolio Holdings**
+- **WATCH**: Interesting setup but needs confirmation (non-held stocks)
 - **AVOID**: Bearish view on a stock NOT in the portfolio — use instead of SELL/STRONG_SELL for non-held stocks
 
-**CRITICAL RULE**: SELL and STRONG_SELL actions are EXCLUSIVELY for stocks the user currently owns (listed in Portfolio Holdings). If you have a bearish thesis on a stock NOT in the portfolio, use AVOID instead. BUY, STRONG_BUY, HOLD, and WATCH can be used for any stock.
+**CRITICAL RULES**:
+1. For stocks in Portfolio Holdings: use BUY_MORE (add), HOLD (keep), SELL (reduce/exit), or STRONG_SELL (urgent exit). Do NOT use BUY for a stock you already own — use BUY_MORE.
+2. SELL, STRONG_SELL, BUY_MORE, and HOLD are EXCLUSIVELY for stocks listed in Portfolio Holdings.
+3. For non-held bearish stocks: use AVOID, never SELL.
 
 ## Confidence Scoring
 - 0.8-1.0: Multiple analysts agree with high individual confidence
@@ -1756,7 +1760,7 @@ def _normalize_action(action: str) -> str:
         Normalized action string.
     """
     action = action.upper().strip()
-    valid_actions = {"STRONG_BUY", "BUY", "HOLD", "SELL", "STRONG_SELL", "WATCH", "AVOID"}
+    valid_actions = {"STRONG_BUY", "BUY", "BUY_MORE", "HOLD", "SELL", "STRONG_SELL", "WATCH", "AVOID"}
 
     if action in valid_actions:
         return action
@@ -1764,6 +1768,8 @@ def _normalize_action(action: str) -> str:
     # Map common variations
     if action in {"LONG", "BULLISH"}:
         return "BUY"
+    elif action in {"ADD_TO_POSITION", "ADD_TO", "ADD", "ACCUMULATE", "INCREASE_POSITION"}:
+        return "BUY_MORE"
     elif action in {"SHORT", "BEARISH"}:
         return "SELL"
     elif action in {"MONITOR", "WATCHING"}:

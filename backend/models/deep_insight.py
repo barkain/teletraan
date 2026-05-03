@@ -22,6 +22,7 @@ class InsightAction(str, enum.Enum):
 
     STRONG_BUY = "STRONG_BUY"
     BUY = "BUY"
+    BUY_MORE = "BUY_MORE"  # Add to an existing portfolio position
     HOLD = "HOLD"
     SELL = "SELL"
     STRONG_SELL = "STRONG_SELL"

@@ -52,11 +52,14 @@ async def _load_portfolio_context() -> tuple[dict[str, dict], str]:
     lines = [
         "",
         "## Current Portfolio Holdings",
-        "The user holds the following positions. Assess how each pick interacts "
-        "with existing holdings: flag concentration risk, sector overlap, correlation "
-        "with held names, and whether adding the pick diversifies or doubles down. "
-        "For agent-discovered picks not in the quant list, note whether they complement "
-        "or conflict with current allocations.",
+        "The user holds the following positions. For EACH held symbol that appears "
+        "in the analysis, you MUST produce an insight with one of three actions:",
+        "  - **BUY_MORE**: thesis is bullish, add to the position",
+        "  - **HOLD**: thesis is neutral, keep current size",
+        "  - **SELL**: thesis is bearish, reduce or exit",
+        "",
+        "Also assess how new picks interact with the portfolio: flag sector "
+        "concentration risk, correlation with held names, and diversification impact.",
         "",
     ]
     for symbol, info in sorted(holdings.items(), key=lambda x: x[1]["total_cost"], reverse=True):
@@ -66,8 +69,7 @@ async def _load_portfolio_context() -> tuple[dict[str, dict], str]:
             f"cost basis ({alloc:.1f}% of portfolio)"
         )
     lines.append(
-        "\nFor any pick that duplicates a held position, flag as ADD_TO_POSITION. "
-        "For bearish findings on held stocks, flag as PORTFOLIO_RISK."
+        "\nDo NOT use BUY for a stock already in the portfolio — use BUY_MORE instead."
     )
     return holdings, "\n".join(lines)
 
