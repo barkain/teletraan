@@ -146,6 +146,7 @@ class DeepAnalysisEngine:
         self,
         symbols: list[str] | None = None,
         include_synthesis: bool = True,
+        quant_context: str | None = None,
     ) -> dict[str, Any]:
         """Run full multi-agent analysis.
 
@@ -184,6 +185,10 @@ class DeepAnalysisEngine:
         # Merge enhanced context into market context for analysts
         if enhanced_context:
             market_context["_enhanced_context"] = enhanced_context
+
+        # Inject quant nomination context so agents know why each symbol was selected
+        if quant_context:
+            market_context["_quant_context"] = quant_context
 
         # Step 1.5: Compute correlation matrix for the Correlation Detective
         correlation_prompt = CORRELATION_DETECTIVE_PROMPT
@@ -318,6 +323,7 @@ class DeepAnalysisEngine:
     async def run_and_store(
         self,
         symbols: list[str] | None = None,
+        quant_context: str | None = None,
     ) -> list[DeepInsight]:
         """Run analysis and store insights in database.
 
@@ -332,7 +338,7 @@ class DeepAnalysisEngine:
             List of created DeepInsight database objects with research_context attached.
         """
         # Run the analysis
-        result = await self.run_analysis(symbols=symbols, include_synthesis=True)
+        result = await self.run_analysis(symbols=symbols, include_synthesis=True, quant_context=quant_context)
         insights_data = result.get("insights", [])
 
         if not insights_data:
@@ -401,6 +407,11 @@ class DeepAnalysisEngine:
 
         # Format context for the analyst
         formatted_context = format_func(agent_context)
+
+        # Append quant nomination context if present
+        quant_ctx = market_context.get("_quant_context")
+        if quant_ctx:
+            formatted_context = f"{formatted_context}\n\n{quant_ctx}"
 
         # Run with retries
         last_error: Exception | None = None

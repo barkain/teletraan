@@ -155,10 +155,14 @@ async def trigger_deep_picks(
         raise HTTPException(status_code=404, detail="No candidates passed quality gate")
 
     engine = get_deep_analysis_engine()
+    quant_context = quant_result.get("quant_context")
 
     async def _run_deep() -> None:
         try:
-            insights = await engine.run_and_store(symbols=candidate_symbols)
+            insights = await engine.run_and_store(
+                symbols=candidate_symbols,
+                quant_context=quant_context,
+            )
             logger.info(
                 "Deep picks complete: %d insights from candidates %s",
                 len(insights),

@@ -838,6 +838,48 @@ def load_strategy_backtest() -> dict[str, Any] | None:
 # Today's picks — hybrid Scorer B + fundamental quality gate
 # ---------------------------------------------------------------------------
 
+def format_quant_context(picks: list[dict[str, Any]], regime: str) -> str:
+    """Format quant scorer results as a context block for agent prompts.
+
+    Tells agents WHY each symbol was nominated: the IC-validated signals that
+    drove its score, so they can focus their analysis on whether the signal
+    thesis holds up under fundamental and macro scrutiny.
+    """
+    lines = [
+        "## Quant Nomination Context (IC-Calibrated Scorer)",
+        f"Regime: {regime}",
+        "These symbols were nominated by an IC-calibrated quant scorer backtested across",
+        "206 symbols × 17 monthly snapshots (walk-forward, no look-ahead). Strategy",
+        "performance: 3.17× vs SPY 1.50×, 71% win rate at 90d, Sharpe 0.98.",
+        "",
+        "Dominant signals (90d IC): volatility IC=+0.121, bb_width IC=+0.117,",
+        "vol_ratio IC=+0.032. Stocks scoring high tend to be volatile, with expanding",
+        "Bollinger Bands and recent volume surges — candidates for large directional moves.",
+        "",
+        "| Symbol | Score | Volatility | BB Width | Vol Ratio | Rel Str | 20d Ret | RSI |",
+        "|--------|-------|-----------|---------|-----------|---------|---------|-----|",
+    ]
+    for p in picks:
+        s = p["signals"]
+        lines.append(
+            f"| {p['symbol']:<6} | {p['quant_score']:.3f} "
+            f"| {s['volatility']:.2f} "
+            f"| {s['bb_width']:.3f} "
+            f"| {s['vol_ratio']:.2f} "
+            f"| {s['rel_strength']:+.1f} "
+            f"| {s['ret_20d_pct']:+.1f}% "
+            f"| {s['rsi']:.0f} |"
+        )
+    lines += [
+        "",
+        "High bb_width = expanding Bollinger Bands (volatility regime). High vol_ratio =",
+        "recent volume surge vs 20d avg. Rel Str = 20d return minus SPY (× 2) + 5d excess.",
+        "Your job: assess whether each candidate has a credible thesis beyond the price signal.",
+        "Flag any names where the quant signal is misleading (e.g. vol from bad news, RSI",
+        "overbought, sector headwinds) and surface those risks clearly in your analysis.",
+    ]
+    return "\n".join(lines)
+
 async def get_today_picks(
     db: AsyncSession,
     n_candidates: int = 20,
@@ -952,6 +994,8 @@ async def get_today_picks(
 
     picks = deduped[:n_picks]
 
+    quant_ctx = format_quant_context(picks, regime)
+
     return {
         "as_of": date.today().isoformat(),
         "regime": regime,
@@ -965,4 +1009,5 @@ async def get_today_picks(
             "risk_off": "High-vol regime — strategy excels here but expect larger swings",
             "unknown": "Insufficient SPY history",
         }.get(regime, ""),
+        "quant_context": quant_ctx,
     }
