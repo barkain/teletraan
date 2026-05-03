@@ -6,11 +6,12 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import update as sql_update
+from sqlalchemy import update as sql_update, select
 
 from api.deps import get_db, get_current_user
 from database import async_session_factory
 from models.deep_insight import DeepInsight
+from models.portfolio import Portfolio
 from analysis.backtester import (
     run_backtest,
     load_calibration,
@@ -21,6 +22,54 @@ from analysis.backtester import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/backtest", tags=["backtest"])
+
+
+async def _load_portfolio_context() -> tuple[dict[str, dict], str]:
+    """Return (holdings_dict, formatted_markdown) for the synthesis prompt.
+
+    holdings_dict maps symbol → {shares, cost_basis, total_cost}.
+    Returns ({}, "") if no portfolio exists or on any error.
+    """
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(select(Portfolio).limit(1))
+            portfolio = result.scalar_one_or_none()
+            if not portfolio or not portfolio.holdings:
+                return {}, ""
+            holdings: dict[str, dict] = {
+                h.symbol.upper(): {
+                    "shares": h.shares,
+                    "cost_basis": h.cost_basis,
+                    "total_cost": h.shares * h.cost_basis,
+                }
+                for h in portfolio.holdings
+            }
+    except Exception as e:
+        logger.warning("Failed to load portfolio (non-fatal): %s", e)
+        return {}, ""
+
+    total_cost = sum(h["total_cost"] for h in holdings.values())
+    lines = [
+        "",
+        "## Current Portfolio Holdings",
+        "The user holds the following positions. Assess how each pick interacts "
+        "with existing holdings: flag concentration risk, sector overlap, correlation "
+        "with held names, and whether adding the pick diversifies or doubles down. "
+        "For agent-discovered picks not in the quant list, note whether they complement "
+        "or conflict with current allocations.",
+        "",
+    ]
+    for symbol, info in sorted(holdings.items(), key=lambda x: x[1]["total_cost"], reverse=True):
+        alloc = (info["total_cost"] / total_cost * 100) if total_cost > 0 else 0
+        lines.append(
+            f"- {symbol}: {info['shares']:.1f} shares @ ${info['cost_basis']:.2f} "
+            f"cost basis ({alloc:.1f}% of portfolio)"
+        )
+    lines.append(
+        "\nFor any pick that duplicates a held position, flag as ADD_TO_POSITION. "
+        "For bearish findings on held stocks, flag as PORTFOLIO_RISK."
+    )
+    return holdings, "\n".join(lines)
 
 
 @router.post("/run")
@@ -166,11 +215,17 @@ async def trigger_deep_picks(
         for rank, p in enumerate(quant_result.get("picks", []))
     }
 
+    portfolio_holdings, portfolio_ctx_str = await _load_portfolio_context()
+    held_candidates = [s for s in candidate_symbols if s in portfolio_holdings]
+    if held_candidates:
+        logger.info("Portfolio overlap with candidates: %s", held_candidates)
+
     async def _run_deep() -> None:
         try:
             insights = await engine.run_and_store(
                 symbols=candidate_symbols,
                 quant_context=quant_context,
+                portfolio_context=portfolio_ctx_str or None,
             )
             logger.info(
                 "Deep picks complete: %d insights from candidates %s",
@@ -192,6 +247,7 @@ async def trigger_deep_picks(
                         })
                     else:
                         ctx["discovery_source"] = "agent_discovered"
+                    ctx["in_portfolio"] = sym in portfolio_holdings
                     await session.execute(
                         sql_update(DeepInsight)
                         .where(DeepInsight.id == insight.id)
@@ -209,6 +265,7 @@ async def trigger_deep_picks(
         "regime_note": quant_result.get("regime_note"),
         "candidates": quant_result.get("picks", []),
         "n_candidates": len(candidate_symbols),
+        "portfolio_overlap": held_candidates,
         "message": (
             f"Deep analysis running on {candidate_symbols}. "
             "Poll GET /api/v1/deep-insights for results."

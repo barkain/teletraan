@@ -147,6 +147,7 @@ class DeepAnalysisEngine:
         symbols: list[str] | None = None,
         include_synthesis: bool = True,
         quant_context: str | None = None,
+        portfolio_context: str | None = None,
     ) -> dict[str, Any]:
         """Run full multi-agent analysis.
 
@@ -273,7 +274,7 @@ class DeepAnalysisEngine:
             logger.info("Running Synthesis Lead...")
             synthesis_start = datetime.utcnow()
             try:
-                synthesis_result, insights = await self._run_synthesis(analyst_reports)
+                synthesis_result, insights = await self._run_synthesis(analyst_reports, portfolio_context=portfolio_context)
                 synthesis_elapsed = (datetime.utcnow() - synthesis_start).total_seconds()
                 logger.info(f"Synthesis complete in {synthesis_elapsed:.1f}s, storing {len(insights)} insights...")
             except Exception as e:
@@ -324,6 +325,7 @@ class DeepAnalysisEngine:
         self,
         symbols: list[str] | None = None,
         quant_context: str | None = None,
+        portfolio_context: str | None = None,
     ) -> list[DeepInsight]:
         """Run analysis and store insights in database.
 
@@ -338,7 +340,7 @@ class DeepAnalysisEngine:
             List of created DeepInsight database objects with research_context attached.
         """
         # Run the analysis
-        result = await self.run_analysis(symbols=symbols, include_synthesis=True, quant_context=quant_context)
+        result = await self.run_analysis(symbols=symbols, include_synthesis=True, quant_context=quant_context, portfolio_context=portfolio_context)
         insights_data = result.get("insights", [])
 
         if not insights_data:
@@ -453,6 +455,7 @@ class DeepAnalysisEngine:
     async def _run_synthesis(
         self,
         analyst_reports: dict[str, Any],
+        portfolio_context: str | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Run the synthesis lead agent.
 
@@ -467,6 +470,8 @@ class DeepAnalysisEngine:
 
         # Format analyst reports for synthesis
         synthesis_context = format_synthesis_context(analyst_reports)
+        if portfolio_context:
+            synthesis_context = f"{synthesis_context}\n\n{portfolio_context}"
         logger.info(f"[DEEP] Synthesis context length: {len(synthesis_context)} chars")
 
         # Build enhanced synthesis prompt with institutional memory
