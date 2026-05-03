@@ -6,7 +6,11 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import update as sql_update
+
 from api.deps import get_db, get_current_user
+from database import async_session_factory
+from models.deep_insight import DeepInsight
 from analysis.backtester import (
     run_backtest,
     load_calibration,
@@ -99,8 +103,8 @@ async def get_strategy_results(
 
 @router.get("/today-picks")
 async def get_today_picks_endpoint(
-    n_picks: int = 5,
-    n_candidates: int = 20,
+    n_picks: int = 15,
+    n_candidates: int = 30,
     min_market_cap_m: float = 500,
     db: AsyncSession = Depends(get_db),
     _: str = Depends(get_current_user),
@@ -156,6 +160,11 @@ async def trigger_deep_picks(
 
     engine = get_deep_analysis_engine()
     quant_context = quant_result.get("quant_context")
+    # Build lookup: symbol → (score, rank) for reconciliation tagging
+    quant_scores: dict[str, tuple[float, int]] = {
+        p["symbol"]: (p.get("quant_score", 0.0), rank + 1)
+        for rank, p in enumerate(quant_result.get("picks", []))
+    }
 
     async def _run_deep() -> None:
         try:
@@ -168,6 +177,27 @@ async def trigger_deep_picks(
                 len(insights),
                 candidate_symbols,
             )
+            # Tag each insight with discovery source so quant-nominated and
+            # agent-discovered picks are distinguishable downstream.
+            async with async_session_factory() as session:
+                for insight in insights:
+                    sym = insight.primary_symbol
+                    ctx = dict(insight.discovery_context or {})
+                    if sym in quant_scores:
+                        score, rank = quant_scores[sym]
+                        ctx.update({
+                            "discovery_source": "quant_nominated",
+                            "quant_score": score,
+                            "quant_rank": rank,
+                        })
+                    else:
+                        ctx["discovery_source"] = "agent_discovered"
+                    await session.execute(
+                        sql_update(DeepInsight)
+                        .where(DeepInsight.id == insight.id)
+                        .values(discovery_context=ctx)
+                    )
+                await session.commit()
         except Exception:
             logger.exception("Deep picks analysis failed")
 
