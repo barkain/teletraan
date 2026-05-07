@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import yfinance as yf
 
-from api.deps import get_db
+from api.deps import CurrentUser, get_db
 from config import get_settings
 from models.portfolio import Portfolio, PortfolioHolding
 from models.deep_insight import DeepInsight
@@ -559,8 +559,12 @@ class IBKRAccountResponse(BaseModel):
     display_name: str
 
 
+class IBKRSyncRequest(BaseModel):
+    account_id: str
+
+
 @router.get("/ibkr/status", response_model=IBKRStatusResponse)
-async def get_ibkr_status():
+async def get_ibkr_status(_: CurrentUser):
     """Check whether the IBKR Client Portal Gateway is reachable and authenticated."""
     from data.adapters.ibkr import IBKRAdapter
     settings = get_settings()
@@ -575,7 +579,7 @@ async def get_ibkr_status():
 
 
 @router.get("/ibkr/accounts", response_model=list[IBKRAccountResponse])
-async def list_ibkr_accounts():
+async def list_ibkr_accounts(_: CurrentUser):
     """List IBKR accounts accessible via the gateway session."""
     from data.adapters.ibkr import IBKRAdapter
     settings = get_settings()
@@ -600,7 +604,8 @@ async def list_ibkr_accounts():
 @router.post("/{portfolio_id}/sync-ibkr", response_model=IBKRSyncResult)
 async def sync_portfolio_from_ibkr(
     portfolio_id: int,
-    account_id: str,
+    body: IBKRSyncRequest,
+    _: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     """Pull positions from IBKR and sync them into a Teletraan portfolio.
@@ -615,6 +620,8 @@ async def sync_portfolio_from_ibkr(
     """
     from data.adapters.ibkr import IBKRAdapter
     settings = get_settings()
+
+    account_id = body.account_id
 
     # Verify portfolio exists
     result = await db.execute(select(Portfolio).where(Portfolio.id == portfolio_id))

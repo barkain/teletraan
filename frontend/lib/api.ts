@@ -445,7 +445,7 @@ export const api = {
     ibkrAccounts: () =>
       fetchApi<IBKRAccount[]>('/api/v1/portfolio/ibkr/accounts'),
     ibkrSync: (portfolioId: number, accountId: string) =>
-      postApi<IBKRSyncResult>(`/api/v1/portfolio/${portfolioId}/sync-ibkr?account_id=${encodeURIComponent(accountId)}`, {}),
+      postApi<IBKRSyncResult>(`/api/v1/portfolio/${portfolioId}/sync-ibkr`, { account_id: accountId }),
   },
 
   // Research
