@@ -440,6 +440,12 @@ export const api = {
       deleteApi<{ deleted_count: number }>('/api/v1/portfolio/holdings'),
     impact: () =>
       fetchApi<PortfolioImpact>('/api/v1/portfolio/impact'),
+    ibkrStatus: () =>
+      fetchApi<IBKRStatus>('/api/v1/portfolio/ibkr/status'),
+    ibkrAccounts: () =>
+      fetchApi<IBKRAccount[]>('/api/v1/portfolio/ibkr/accounts'),
+    ibkrSync: (portfolioId: number, accountId: string) =>
+      postApi<IBKRSyncResult>(`/api/v1/portfolio/${portfolioId}/sync-ibkr?account_id=${encodeURIComponent(accountId)}`, {}),
   },
 
   // Research
@@ -630,7 +636,7 @@ export interface AlphaRunDetail {
 }
 
 // Import types
-import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, ImportResult, LLMProviderStatus, LLMProviderConfig, LLMTestRequest, LLMTestResult, RunListResponse, RunsAggregateStats, RunSummary } from '@/types';
+import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, ImportResult, LLMProviderStatus, LLMProviderConfig, LLMTestRequest, LLMTestResult, RunListResponse, RunsAggregateStats, RunSummary, IBKRStatus, IBKRAccount, IBKRSyncResult } from '@/types';
 import type { KnowledgePattern, KnowledgePatternsResponse, KnowledgePatternsParams, PatternsSummary, MatchingPatternsParams, ConversationTheme, ConversationThemesResponse, ConversationThemesParams } from '@/lib/types/knowledge';
 import type { FollowUpResearch, ResearchListResponse, ResearchListParams, ResearchCreateRequest } from '@/lib/types/research';
 import type { ReportListResponse, ReportDetail, PublishResponse } from '@/lib/types/report';

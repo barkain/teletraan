@@ -3,6 +3,8 @@
 import { useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   AlertDialog,
@@ -15,6 +17,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { HoldingsTable } from '@/components/portfolio/holdings-table';
 import { HoldingDialog } from '@/components/portfolio/holding-dialog';
 import { PortfolioSummary } from '@/components/portfolio/portfolio-summary';
@@ -32,7 +42,7 @@ import {
 import { api } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import type { PortfolioHolding, HoldingCreate, HoldingUpdate } from '@/types';
-import { Briefcase, Download, Loader2, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Briefcase, Download, Loader2, Plus, RefreshCw, Trash2, Upload, Wifi, WifiOff } from 'lucide-react';
 import { ConnectionError } from '@/components/ui/empty-state';
 import { toast } from 'sonner';
 
@@ -67,7 +77,7 @@ function PortfolioSkeleton() {
   );
 }
 
-function EmptyState({ onAdd, onImport, isImporting }: { onAdd: () => void; onImport: () => void; isImporting: boolean }) {
+function EmptyState({ onAdd, onImport, onIbkr, isImporting }: { onAdd: () => void; onImport: () => void; onIbkr: () => void; isImporting: boolean }) {
   return (
     <Card className="py-12">
       <CardContent className="flex flex-col items-center justify-center text-center">
@@ -98,6 +108,10 @@ function EmptyState({ onAdd, onImport, isImporting }: { onAdd: () => void; onImp
                 <Upload className="h-4 w-4" />
                 Import CSV
               </Button>
+              <Button variant="outline" onClick={onIbkr} className="gap-2">
+                <Wifi className="h-4 w-4" />
+                Sync from IBKR
+              </Button>
             </div>
           </>
         )}
@@ -110,6 +124,9 @@ export default function PortfolioPage() {
   const [holdingDialogOpen, setHoldingDialogOpen] = useState(false);
   const [editingHolding, setEditingHolding] = useState<PortfolioHolding | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [ibkrDialogOpen, setIbkrDialogOpen] = useState(false);
+  const [ibkrAccountId, setIbkrAccountId] = useState('');
+  const [ibkrSyncing, setIbkrSyncing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const queryClient = useQueryClient();
@@ -183,6 +200,22 @@ export default function PortfolioPage() {
         toast.error(`Delete failed: ${err.message}`);
       },
     });
+  };
+
+  const handleIbkrSync = async () => {
+    if (!portfolio || !ibkrAccountId.trim()) return;
+    setIbkrSyncing(true);
+    try {
+      const result = await api.portfolio.ibkrSync(portfolio.id, ibkrAccountId.trim());
+      await queryClient.invalidateQueries({ queryKey: portfolioKeys.all });
+      setIbkrDialogOpen(false);
+      toast.success(`IBKR sync complete: ${result.added} added, ${result.updated} updated`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Sync failed';
+      toast.error(`IBKR sync failed: ${msg}`);
+    } finally {
+      setIbkrSyncing(false);
+    }
   };
 
   const handleDialogSubmit = (data: HoldingCreate | HoldingUpdate) => {
@@ -261,6 +294,14 @@ export default function PortfolioPage() {
               <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
               Update Prices
             </Button>
+            <Button variant="outline" size="sm" onClick={() => { setIbkrAccountId(portfolio?.ibkr_account_id ?? ''); setIbkrDialogOpen(true); }} title="Sync from Interactive Brokers">
+              {portfolio?.ibkr_last_synced_at ? (
+                <Wifi className="h-4 w-4 mr-2 text-green-500" />
+              ) : (
+                <WifiOff className="h-4 w-4 mr-2 text-muted-foreground" />
+              )}
+              IBKR Sync
+            </Button>
             <Button onClick={handleOpenAddDialog} className="gap-2">
               <Plus className="h-4 w-4" />
               Add Holding
@@ -269,13 +310,52 @@ export default function PortfolioPage() {
         )}
       </div>
 
+      {/* IBKR Sync Dialog */}
+      <Dialog open={ibkrDialogOpen} onOpenChange={setIbkrDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Sync from Interactive Brokers</DialogTitle>
+            <DialogDescription>
+              Enter your IBKR account ID to pull live positions into this portfolio.
+              The IBKR Client Portal Gateway must be running and authenticated at{' '}
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">localhost:5000</code>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="ibkr-account">Account ID</Label>
+              <Input
+                id="ibkr-account"
+                placeholder="e.g. DU1234567"
+                value={ibkrAccountId}
+                onChange={(e) => setIbkrAccountId(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleIbkrSync()}
+              />
+            </div>
+            {portfolio?.ibkr_last_synced_at && (
+              <p className="text-xs text-muted-foreground">
+                Last synced: {new Date(portfolio.ibkr_last_synced_at).toLocaleString()}
+                {portfolio.ibkr_account_id && ` (${portfolio.ibkr_account_id})`}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIbkrDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleIbkrSync} disabled={ibkrSyncing || !ibkrAccountId.trim()}>
+              {ibkrSyncing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+              {ibkrSyncing ? 'Syncing...' : 'Sync Now'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Content */}
       {isLoading ? (
         <PortfolioSkeleton />
       ) : error ? (
         <ConnectionError error={error} />
       ) : !portfolio || !hasHoldings ? (
-        <EmptyState onAdd={handleOpenAddDialog} onImport={handleImportClick} isImporting={importHoldings.isPending} />
+        <EmptyState onAdd={handleOpenAddDialog} onImport={handleImportClick} onIbkr={() => { setIbkrAccountId(portfolio?.ibkr_account_id ?? ''); setIbkrDialogOpen(true); }} isImporting={importHoldings.isPending} />
       ) : (
         <>
           {/* Portfolio Summary */}

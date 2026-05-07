@@ -1,8 +1,9 @@
 """Portfolio models for tracking investment holdings."""
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -21,6 +22,10 @@ class Portfolio(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), default="My Portfolio")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Interactive Brokers integration
+    ibkr_account_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    ibkr_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     holdings: Mapped[list["PortfolioHolding"]] = relationship(

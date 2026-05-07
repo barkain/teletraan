@@ -4,15 +4,18 @@ import asyncio
 import csv
 import io
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import yfinance as yf
 
 from api.deps import get_db
+from config import get_settings
 from models.portfolio import Portfolio, PortfolioHolding
 from models.deep_insight import DeepInsight
 from schemas.portfolio import (
@@ -528,4 +531,155 @@ async def get_portfolio_impact(db: AsyncSession = Depends(get_db)):
         overall_bullish_exposure=overall_bullish,
         overall_bearish_exposure=overall_bearish,
         insight_count=len(insights),
+    )
+
+
+# ===== INTERACTIVE BROKERS INTEGRATION =====
+
+
+class IBKRSyncResult(BaseModel):
+    added: int
+    updated: int
+    unchanged: int
+    skipped: int
+    account_id: str
+    synced_at: str
+
+
+class IBKRStatusResponse(BaseModel):
+    connected: bool
+    authenticated: bool
+    gateway_url: str
+    message: str | None = None
+
+
+class IBKRAccountResponse(BaseModel):
+    account_id: str
+    account_type: str
+    display_name: str
+
+
+@router.get("/ibkr/status", response_model=IBKRStatusResponse)
+async def get_ibkr_status():
+    """Check whether the IBKR Client Portal Gateway is reachable and authenticated."""
+    from data.adapters.ibkr import IBKRAdapter
+    settings = get_settings()
+    async with IBKRAdapter(gateway_url=settings.IBKR_GATEWAY_URL) as ibkr:
+        status = await ibkr.check_auth()
+    return IBKRStatusResponse(
+        connected=status["connected"],
+        authenticated=status["authenticated"],
+        gateway_url=settings.IBKR_GATEWAY_URL,
+        message=status.get("message"),
+    )
+
+
+@router.get("/ibkr/accounts", response_model=list[IBKRAccountResponse])
+async def list_ibkr_accounts():
+    """List IBKR accounts accessible via the gateway session."""
+    from data.adapters.ibkr import IBKRAdapter
+    settings = get_settings()
+    async with IBKRAdapter(gateway_url=settings.IBKR_GATEWAY_URL) as ibkr:
+        status = await ibkr.check_auth()
+        if not status["authenticated"]:
+            raise HTTPException(
+                status_code=503,
+                detail="IBKR gateway not authenticated. Log in at the gateway URL first.",
+            )
+        accounts = await ibkr.get_accounts()
+    return [
+        IBKRAccountResponse(
+            account_id=a.account_id,
+            account_type=a.account_type,
+            display_name=a.display_name,
+        )
+        for a in accounts
+    ]
+
+
+@router.post("/{portfolio_id}/sync-ibkr", response_model=IBKRSyncResult)
+async def sync_portfolio_from_ibkr(
+    portfolio_id: int,
+    account_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Pull positions from IBKR and sync them into a Teletraan portfolio.
+
+    - Positions that don't exist yet are added.
+    - Existing holdings have their shares and cost_basis updated if changed.
+    - Holdings no longer present in IBKR are left in place (manual removal only).
+
+    Args:
+        portfolio_id: Teletraan portfolio to sync into.
+        account_id: IBKR account ID to pull from (e.g. "DU1234567").
+    """
+    from data.adapters.ibkr import IBKRAdapter
+    settings = get_settings()
+
+    # Verify portfolio exists
+    result = await db.execute(select(Portfolio).where(Portfolio.id == portfolio_id))
+    portfolio = result.scalar_one_or_none()
+    if not portfolio:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+
+    async with IBKRAdapter(gateway_url=settings.IBKR_GATEWAY_URL) as ibkr:
+        status = await ibkr.check_auth()
+        if not status["authenticated"]:
+            raise HTTPException(
+                status_code=503,
+                detail="IBKR gateway not authenticated. Log in at the gateway URL first.",
+            )
+        positions = await ibkr.get_positions(account_id)
+
+    if not positions:
+        raise HTTPException(status_code=404, detail=f"No equity positions found for account {account_id}")
+
+    added = updated = unchanged = skipped = 0
+
+    for pos in positions:
+        if pos.position == 0:
+            skipped += 1
+            continue
+
+        result = await db.execute(
+            select(PortfolioHolding).where(
+                PortfolioHolding.portfolio_id == portfolio_id,
+                PortfolioHolding.symbol == pos.symbol,
+            )
+        )
+        holding = result.scalar_one_or_none()
+
+        if holding is None:
+            db.add(PortfolioHolding(
+                portfolio_id=portfolio_id,
+                symbol=pos.symbol,
+                shares=pos.position,
+                cost_basis=pos.avg_cost,
+                notes=f"Synced from IBKR {account_id}",
+            ))
+            added += 1
+        elif holding.shares != pos.position or holding.cost_basis != pos.avg_cost:
+            holding.shares = pos.position
+            holding.cost_basis = pos.avg_cost
+            updated += 1
+        else:
+            unchanged += 1
+
+    # Persist sync metadata on the portfolio
+    portfolio.ibkr_account_id = account_id
+    portfolio.ibkr_last_synced_at = datetime.utcnow()
+    await db.commit()
+
+    logger.info(
+        "IBKR sync complete for portfolio %d: +%d updated=%d unchanged=%d skipped=%d",
+        portfolio_id, added, updated, unchanged, skipped,
+    )
+
+    return IBKRSyncResult(
+        added=added,
+        updated=updated,
+        unchanged=unchanged,
+        skipped=skipped,
+        account_id=account_id,
+        synced_at=portfolio.ibkr_last_synced_at.isoformat(),
     )

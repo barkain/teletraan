@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     # Example: CORS_ORIGINS=https://myapp.fly.dev,https://myapp.vercel.app
     CORS_ORIGINS: str = ""
 
+    # --- Interactive Brokers (Client Portal Web API) ---
+    # Run the IBKR Client Portal Gateway locally and authenticate via the
+    # browser at https://localhost:5000 before using these endpoints.
+    IBKR_GATEWAY_URL: str = "https://localhost:5000"
+
     # Data Source Integrations
     PREDICTION_MARKETS_ENABLED: bool = True
     REDDIT_SENTIMENT_ENABLED: bool = True

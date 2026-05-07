@@ -49,6 +49,8 @@ class PortfolioResponse(PortfolioBase):
     total_cost: float | None = None
     total_gain_loss: float | None = None
     total_gain_loss_pct: float | None = None
+    ibkr_account_id: str | None = None
+    ibkr_last_synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime | None = None
 

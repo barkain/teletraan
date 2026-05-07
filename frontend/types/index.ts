@@ -374,8 +374,32 @@ export interface Portfolio {
   total_cost?: number;
   total_gain_loss?: number;
   total_gain_loss_pct?: number;
+  ibkr_account_id?: string;
+  ibkr_last_synced_at?: string;
   created_at: string;
   updated_at?: string;
+}
+
+export interface IBKRStatus {
+  connected: boolean;
+  authenticated: boolean;
+  gateway_url: string;
+  message?: string;
+}
+
+export interface IBKRAccount {
+  account_id: string;
+  account_type: string;
+  display_name: string;
+}
+
+export interface IBKRSyncResult {
+  added: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  account_id: string;
+  synced_at: string;
 }
 
 export interface HoldingCreate {
