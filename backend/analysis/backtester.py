@@ -591,6 +591,69 @@ def _ic_calibrated_score(
     return _clamp(score, 0.0, 1.0)
 
 
+def _quality_growth_score(
+    closes: list[float],
+    volumes: list[float],
+    spy_closes: list[float] | None,
+) -> float | None:
+    """Quality/growth compounder scorer — structural complement to Scorer B.
+
+    Rewards low volatility, healthy uptrend (RSI 45-70, price above both MAs),
+    sustained positive momentum vs SPY. Finds secular compounders (data-center
+    enablers, industrial growth stories) that Scorer B's mean-reversion lens misses.
+
+    Works best in risk_on regimes; combine with _ic_calibrated_score() for
+    regime-aware dual-track candidate generation.
+
+    Signals (all price-based, no extra data fetch):
+      above_ma    → price above 20d and 50d MA (confirmed uptrend)
+      rsi         → healthy range 45–70 (not oversold, not overbought)
+      momentum    → ret_60 positive but not extended
+      low_vol     → low daily std-dev (smooth, quality trajectory)
+      rel_str     → outperforming SPY over 20d
+      ret_20      → recent confirmation
+    """
+    sigs = compute_signals(closes, volumes, spy_closes)
+    if sigs is None:
+        return None
+
+    # 1. Trend quality: above both MAs (already 0=below both, 0.5=one, 1.0=both)
+    ma_n = sigs["above_ma"]
+
+    # 2. RSI in healthy trend zone 45-70; penalise overbought >72
+    rsi = sigs["rsi"]
+    rsi_n = _clamp((rsi - 35.0) / 30.0, 0.0, 1.0)              # 35→65 = 0→1
+    overbought_pen = _clamp((rsi - 72.0) / 18.0, 0.0, 1.0) * 0.25
+
+    # 3. Sustained 60d momentum; penalise extension >25%
+    ret60 = sigs["ret_60"]
+    momentum_n = _clamp(ret60 / 30.0, 0.0, 1.0)                 # 0→30% = 0→1
+    extension_pen = _clamp((ret60 - 25.0) / 25.0, 0.0, 1.0) * 0.20
+
+    # 4. Low daily volatility (quality = smooth trajectory)
+    # volatility is daily std-dev in %; 0.5%/day (best) → 3.5%/day (noisy)
+    vol = sigs["volatility"]
+    low_vol_n = 1.0 - _clamp((vol - 0.5) / 3.0, 0.0, 1.0)
+
+    # 5. Outperforming SPY
+    relstr_n = _clamp((sigs["rel_strength"] + 5.0) / 25.0, 0.0, 1.0)
+
+    # 6. Recent 20d confirmation
+    ret20_n = _clamp((sigs["ret_20"] + 5.0) / 20.0, 0.0, 1.0)   # -5→15% = 0→1
+
+    score = (
+        0.25 * rsi_n          # healthy trend zone
+        + 0.20 * ma_n         # above both MAs
+        + 0.20 * momentum_n   # sustained 60d momentum
+        + 0.15 * low_vol_n    # quality = low vol
+        + 0.10 * relstr_n     # beating SPY
+        + 0.10 * ret20_n      # recent confirmation
+        - overbought_pen
+        - extension_pen
+    )
+    return _clamp(score, 0.0, 1.0)
+
+
 def _compute_regime(spy_closes: list[float]) -> str:
     """Classify market regime from SPY price data.
 
@@ -838,7 +901,7 @@ def load_strategy_backtest() -> dict[str, Any] | None:
 # Today's picks — hybrid Scorer B + fundamental quality gate
 # ---------------------------------------------------------------------------
 
-def format_quant_context(picks: list[dict[str, Any]], regime: str) -> str:
+def format_quant_context(picks: list[dict[str, Any]], regime: str, quality_picks: list[dict[str, Any]] | None = None) -> str:
     """Format quant scorer results as a context block for agent prompts.
 
     Tells agents WHY each symbol was nominated: the IC-validated signals that
@@ -878,7 +941,30 @@ def format_quant_context(picks: list[dict[str, Any]], regime: str) -> str:
         "Flag any names where the quant signal is misleading (e.g. vol from bad news, RSI",
         "overbought, sector headwinds) and surface those risks clearly in your analysis.",
     ]
+    if quality_picks:
+        lines += [
+            "",
+            "## Quality/Growth Compounder Nominations",
+            "These symbols were nominated by the Quality/Growth scorer: rewards low volatility,",
+            "price above both MAs, RSI in healthy uptrend range (45-70), sustained momentum.",
+            "These are secular compounder candidates — industrials, infrastructure, quality growth.",
+            "",
+            "| Symbol | Q-Score | RSI | Above MAs | Vol | Rel Str | 60d Ret |",
+            "|--------|---------|-----|-----------|-----|---------|---------|",
+        ]
+        for p in quality_picks:
+            s = p["signals"]
+            lines.append(
+                f"| {p['symbol']:<6} | {p.get('quality_score', 0):.3f} "
+                f"| {s['rsi']:.0f} "
+                f"| {s.get('above_ma', 0):.1f} "
+                f"| {s['volatility']:.2f} "
+                f"| {s['rel_strength']:+.1f} "
+                f"| {s['ret_60d_pct']:+.1f}% |"
+            )
+        lines.append("")
     return "\n".join(lines)
+
 
 async def get_today_picks(
     db: AsyncSession,
@@ -887,15 +973,18 @@ async def get_today_picks(
     min_market_cap: float = 500_000_000,
     min_revenue_growth: float = -0.25,
 ) -> dict[str, Any]:
-    """Score all symbols with the IC-calibrated scorer, then apply a fundamental
-    quality gate on the top candidates before surfacing the final picks.
+    """Dual-track scorer: Scorer B (mean-reversion) + Quality/Growth compounder scorer.
 
-    Steps:
-      1. Load all price history from DB, score every symbol with _ic_calibrated_score()
-      2. Take top n_candidates by quant score
-      3. Fetch fundamentals via Yahoo Finance for those candidates
-      4. Filter out: market_cap < min_market_cap OR revenue_growth < min_revenue_growth
-      5. Return top n_picks from the filtered set, with signal detail + regime
+    Scorer B track:
+      1. Score all symbols with _ic_calibrated_score() (high-vol, oversold picks)
+      2. Top n_candidates → fundamental gate → top n_picks
+
+    Quality/Growth track:
+      1. Score all symbols with _quality_growth_score() (low-vol, uptrend compounders)
+      2. Top n_candidates quality candidates → fundamental gate → top n_picks
+      3. Deduped against Scorer B picks (no overlap in final output)
+
+    Returns both pick lists plus a unified quant_context for downstream agents.
     """
     from data.adapters.yahoo import get_fundamental_data
 
@@ -907,102 +996,128 @@ async def get_today_picks(
     spy_closes = spy_data["closes"]
     regime = _compute_regime(spy_closes)
 
-    # Score every symbol on current (full) price history
-    scored: list[tuple[str, float, dict[str, float]]] = []
+    # Score every symbol with BOTH scorers in a single pass
+    all_scored: list[tuple[str, float, float, dict[str, float]]] = []
     for symbol, data in matrix.items():
         if symbol == "SPY":
             continue
         closes = data["closes"]
         volumes = data["volumes"]
-        score = _ic_calibrated_score(closes, volumes, spy_closes)
-        if score is None:
-            continue
         sigs = compute_signals(closes, volumes, spy_closes)
         if sigs is None:
             continue
-        scored.append((symbol, score, sigs))
+        b_score = _ic_calibrated_score(closes, volumes, spy_closes)
+        q_score = _quality_growth_score(closes, volumes, spy_closes)
+        if b_score is None or q_score is None:
+            continue
+        all_scored.append((symbol, b_score, q_score, sigs))
 
-    scored.sort(key=lambda x: x[1], reverse=True)
-    candidates = scored[:n_candidates]
-    candidate_symbols = [s for s, _, _ in candidates]
+    # --- Scorer B candidates ---
+    b_sorted = sorted(all_scored, key=lambda x: x[1], reverse=True)
+    b_candidates = b_sorted[:n_candidates]
+    b_symbols = [s for s, _, _, _ in b_candidates]
 
-    # Fetch fundamentals for candidates only
-    fundamentals = await get_fundamental_data(candidate_symbols)
+    # --- Quality/Growth candidates (exclude ETFs by checking symbol not in known ETF prefixes) ---
+    q_sorted = sorted(all_scored, key=lambda x: x[2], reverse=True)
+    q_candidates = q_sorted[:n_candidates]
+    q_symbols = [s for s, _, _, _ in q_candidates]
 
-    # Apply quality gates
-    filtered: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
-    for symbol, score, sigs in candidates:
-        fund = fundamentals.get(symbol) or {}
-        mkt_cap = fund.get("market_cap") or 0
-        rev_growth = fund.get("revenue_growth")  # None = unknown
-        sector = fund.get("sector") or "Unknown"
-        industry = fund.get("industry") or ""
+    # Fetch fundamentals for the union of both candidate sets
+    all_candidate_symbols = list(dict.fromkeys(b_symbols + q_symbols))
+    fundamentals = await get_fundamental_data(all_candidate_symbols)
 
-        reject_reason = None
-        if mkt_cap and mkt_cap < min_market_cap:
-            reject_reason = f"market_cap ${mkt_cap/1e6:.0f}M < ${min_market_cap/1e6:.0f}M threshold"
-        elif rev_growth is not None and rev_growth < min_revenue_growth:
-            reject_reason = f"revenue_growth {rev_growth:.0%} < {min_revenue_growth:.0%} threshold"
+    def _build_picks(
+        candidates: list[tuple[str, float, float, dict[str, float]]],
+        score_field: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Gate candidates and return (filtered, rejected) pick lists."""
+        filtered: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
+        for symbol, b_s, q_s, sigs in candidates:
+            fund = fundamentals.get(symbol) or {}
+            mkt_cap = fund.get("market_cap") or 0
+            rev_growth = fund.get("revenue_growth")
+            sector = fund.get("sector") or "Unknown"
+            industry = fund.get("industry") or ""
 
-        entry = {
-            "symbol": symbol,
-            "quant_score": round(score, 4),
-            "signals": {
-                "volatility": round(sigs["volatility"], 3),
-                "bb_width": round(sigs["bb_width"], 3),
-                "vol_ratio": round(sigs["vol_ratio"], 3),
-                "rel_strength": round(sigs["rel_strength"], 2),
-                "ret_20d_pct": round(sigs["ret_20"], 2),
-                "ret_60d_pct": round(sigs["ret_60"], 2),
-                "rsi": round(sigs["rsi"], 1),
-                "bb_pct_b": round(sigs["bb_pct_b"], 3),
-            },
-            "fundamentals": {
-                "market_cap_m": round(mkt_cap / 1e6, 0) if mkt_cap else None,
-                "revenue_growth": round(rev_growth, 3) if rev_growth is not None else None,
-                "sector": sector,
-                "industry": industry,
-                "price_to_sales": fund.get("price_to_sales"),
-                "trailing_pe": fund.get("trailing_pe"),
-                "profit_margins": fund.get("profit_margins"),
-            },
-        }
-        if reject_reason:
-            entry["rejected"] = reject_reason
-            rejected.append(entry)
-        else:
-            filtered.append(entry)
+            reject_reason = None
+            if mkt_cap and mkt_cap < min_market_cap:
+                reject_reason = f"market_cap ${mkt_cap/1e6:.0f}M < ${min_market_cap/1e6:.0f}M threshold"
+            elif rev_growth is not None and rev_growth < min_revenue_growth:
+                reject_reason = f"revenue_growth {rev_growth:.0%} < {min_revenue_growth:.0%} threshold"
 
-    # Deduplicate share-class twins (same company, different ticker e.g. GOOGL/GOOG)
-    # If two candidates have market caps within 2% of each other and same sector, keep the first (higher score)
-    deduped: list[dict[str, Any]] = []
-    seen_caps: list[float] = []
-    for entry in filtered:
-        cap = entry["fundamentals"].get("market_cap_m") or 0
-        sector = entry["fundamentals"].get("sector") or ""
-        if cap > 0:
-            is_twin = any(
-                abs(cap - c) / max(cap, c) < 0.02 and sector == deduped[i]["fundamentals"].get("sector")
-                for i, c in enumerate(seen_caps)
-                if c > 0
-            )
-            if is_twin:
-                continue
-        deduped.append(entry)
-        seen_caps.append(cap)
+            score_val = b_s if score_field == "quant_score" else q_s
+            entry: dict[str, Any] = {
+                "symbol": symbol,
+                score_field: round(score_val, 4),
+                "signals": {
+                    "volatility": round(sigs["volatility"], 3),
+                    "bb_width": round(sigs["bb_width"], 3),
+                    "vol_ratio": round(sigs["vol_ratio"], 3),
+                    "rel_strength": round(sigs["rel_strength"], 2),
+                    "ret_20d_pct": round(sigs["ret_20"], 2),
+                    "ret_60d_pct": round(sigs["ret_60"], 2),
+                    "rsi": round(sigs["rsi"], 1),
+                    "bb_pct_b": round(sigs["bb_pct_b"], 3),
+                    "above_ma": round(sigs["above_ma"], 2),
+                },
+                "fundamentals": {
+                    "market_cap_m": round(mkt_cap / 1e6, 0) if mkt_cap else None,
+                    "revenue_growth": round(rev_growth, 3) if rev_growth is not None else None,
+                    "sector": sector,
+                    "industry": industry,
+                    "price_to_sales": fund.get("price_to_sales"),
+                    "trailing_pe": fund.get("trailing_pe"),
+                    "profit_margins": fund.get("profit_margins"),
+                },
+            }
+            if reject_reason:
+                entry["rejected"] = reject_reason
+                rejected.append(entry)
+            else:
+                filtered.append(entry)
+        return filtered, rejected
 
-    picks = deduped[:n_picks]
+    def _dedup(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Remove share-class twins (same sector, caps within 2%)."""
+        deduped: list[dict[str, Any]] = []
+        seen_caps: list[float] = []
+        for entry in entries:
+            cap = entry["fundamentals"].get("market_cap_m") or 0
+            sec = entry["fundamentals"].get("sector") or ""
+            if cap > 0:
+                is_twin = any(
+                    abs(cap - c) / max(cap, c) < 0.02 and sec == deduped[i]["fundamentals"].get("sector")
+                    for i, c in enumerate(seen_caps)
+                    if c > 0
+                )
+                if is_twin:
+                    continue
+            deduped.append(entry)
+            seen_caps.append(cap)
+        return deduped
 
-    quant_ctx = format_quant_context(picks, regime)
+    b_filtered, b_rejected = _build_picks(b_candidates, "quant_score")
+    q_filtered, q_rejected = _build_picks(q_candidates, "quality_score")
+
+    picks = _dedup(b_filtered)[:n_picks]
+    pick_symbols = {p["symbol"] for p in picks}
+
+    # Quality picks: dedup within themselves, then exclude any already in Scorer B picks
+    q_deduped = _dedup(q_filtered)
+    quality_picks = [p for p in q_deduped if p["symbol"] not in pick_symbols][:n_picks]
+
+    quant_ctx = format_quant_context(picks, regime, quality_picks)
 
     return {
         "as_of": date.today().isoformat(),
         "regime": regime,
         "n_picks": len(picks),
         "picks": picks,
-        "rejected_candidates": rejected,
-        "total_scored": len(scored),
+        "quality_picks": quality_picks,
+        "n_quality_picks": len(quality_picks),
+        "rejected_candidates": b_rejected + q_rejected,
+        "total_scored": len(all_scored),
         "regime_note": {
             "risk_on": "Full signal — deploy normally",
             "caution": "Moderate signal — consider half-size positions",
