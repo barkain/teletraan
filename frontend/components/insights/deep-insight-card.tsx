@@ -86,6 +86,14 @@ const analystColors: Record<string, {
     progress: 'bg-violet-500',
     icon: Zap,
   },
+  portfolio: {
+    border: 'border-l-teal-500',
+    bg: 'bg-teal-500/10',
+    text: 'text-teal-500 dark:text-teal-400',
+    badge: 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border-teal-500/30',
+    progress: 'bg-teal-500',
+    icon: DollarSign,
+  },
 };
 
 /** Fallback for unknown analyst types */
@@ -108,6 +116,7 @@ function getAnalystType(analyst: string): string {
   if (lower.includes('correlation') || lower.includes('cross') || lower.includes('intermarket')) return 'correlation';
   if (lower.includes('sentiment') || lower.includes('social') || lower.includes('crowd')) return 'sentiment';
   if (lower.includes('prediction') || lower.includes('forecast') || lower.includes('probability')) return 'prediction';
+  if (lower.includes('portfolio') || lower.includes('holdings') || lower.includes('position')) return 'portfolio';
   return 'technical'; // default fallback
 }
 
@@ -125,6 +134,7 @@ const actionConfig: Record<InsightAction, {
 }> = {
   STRONG_BUY: { color: 'bg-green-600 text-white', borderColor: 'border-l-green-600', icon: TrendingUp, label: 'Strong Buy' },
   BUY: { color: 'bg-green-500 text-white', borderColor: 'border-l-green-500', icon: TrendingUp, label: 'Buy' },
+  BUY_MORE: { color: 'bg-emerald-600 text-white', borderColor: 'border-l-emerald-600', icon: TrendingUp, label: 'Add to Position' },
   HOLD: { color: 'bg-yellow-500 text-white', borderColor: 'border-l-yellow-500', icon: Minus, label: 'Hold' },
   SELL: { color: 'bg-red-500 text-white', borderColor: 'border-l-red-500', icon: TrendingDown, label: 'Sell' },
   STRONG_SELL: { color: 'bg-red-600 text-white', borderColor: 'border-l-red-600', icon: TrendingDown, label: 'Strong Sell' },

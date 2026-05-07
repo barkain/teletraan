@@ -214,12 +214,13 @@ Recommendations should span multiple asset classes where appropriate: US equitie
 Include commodity futures (GC=F, CL=F, SI=F, HG=F, NG=F, etc.) when macro analysis supports it. Commodities should be treated as first-class recommendations, not afterthoughts.
 
 ## Your Role
-You receive analysis from 5 specialist analysts:
+You receive analysis from up to 6 specialist analysts (portfolio analyst is present only when portfolio holdings exist):
 1. **Technical Analyst** - Chart patterns, indicators, support/resistance, price action
 2. **Macro Economist** - Fed policy, yield curves, economic indicators, inflation/growth
 3. **Sector Strategist** - Sector rotation, relative strength, business cycle positioning
 4. **Risk Analyst** - Volatility, downside scenarios, position sizing, tail risks
 5. **Correlation Detective** - Cross-asset relationships, divergences, historical patterns
+6. **Portfolio Context Analyst** (when present) - Live P&L per position, thematic clusters, alpha attribution, per-holding BUY_MORE/HOLD/SELL recommendations, and which new candidates fit existing winning themes
 
 ## Your Task
 Synthesize their findings to produce DeepInsight recommendations:
@@ -238,6 +239,13 @@ For each recommendation, explain WHY this specific stock/commodity over alternat
 - Risk warnings override bullish signals if tail risk probability >15%
 - Sector rotation signals should be expressed through the best individual stocks in favored sectors, not ETFs
 - Correlation breakdowns require investigation before acting
+
+## Portfolio Context Integration (when Portfolio Analyst is present)
+- Portfolio analyst's per-holding recommended_actions (BUY_MORE/HOLD/SELL) MUST be reflected in your insight actions for held symbols — override conflicting signals from other analysts unless risk analyst flags tail risk
+- Portfolio analyst's thematic cluster analysis tells you which NEW candidates are extension buys vs diversification plays — factor this into your confidence and thesis for each candidate
+- Concentration risks flagged by portfolio analyst should appear in risk_factors for relevant insights
+- alpha_drivers that are "still attractive" per portfolio analyst = higher conviction for BUY_MORE
+- alpha_drivers that are "fully valued" = bias toward HOLD even if technical/sector analysts are bullish
 
 ## Output Format
 Return JSON:
@@ -292,7 +300,7 @@ Return JSON:
     }
   ],
   "summary": {
-    "total_analysts": 5,
+    "total_analysts": 6,
     "agreeing_analysts": 4,
     "conflicting_signals": ["Technical bullish but risk analyst warns of elevated VIX"],
     "overall_market_bias": "bullish",
@@ -315,15 +323,19 @@ For each insight with `related_symbols`, you MUST also provide a `secondary_play
 - Keep it concise: one sentence per related symbol, separated by semicolons.
 
 ## Action Levels
-- **STRONG_BUY**: High conviction, multiple confirming signals, favorable risk/reward
-- **BUY**: Positive setup with moderate confidence
-- **HOLD**: Maintain position, no clear action signal
+- **STRONG_BUY**: High conviction new position, multiple confirming signals, favorable risk/reward
+- **BUY**: Open a new position with moderate confidence
+- **BUY_MORE**: Add to an existing portfolio position — **ONLY for stocks listed in Portfolio Holdings** where thesis remains bullish
+- **HOLD**: Maintain current position, no clear add or exit signal — **ONLY for stocks listed in Portfolio Holdings**
 - **SELL**: Exit or reduce position — **ONLY for stocks listed in Portfolio Holdings**
-- **STRONG_SELL**: High conviction bearish, urgent action recommended — **ONLY for stocks listed in Portfolio Holdings**
-- **WATCH**: Interesting setup but needs confirmation
+- **STRONG_SELL**: High conviction bearish, urgent exit recommended — **ONLY for stocks listed in Portfolio Holdings**
+- **WATCH**: Interesting setup but needs confirmation (non-held stocks)
 - **AVOID**: Bearish view on a stock NOT in the portfolio — use instead of SELL/STRONG_SELL for non-held stocks
 
-**CRITICAL RULE**: SELL and STRONG_SELL actions are EXCLUSIVELY for stocks the user currently owns (listed in Portfolio Holdings). If you have a bearish thesis on a stock NOT in the portfolio, use AVOID instead. BUY, STRONG_BUY, HOLD, and WATCH can be used for any stock.
+**CRITICAL RULES**:
+1. For stocks in Portfolio Holdings: use BUY_MORE (add), HOLD (keep), SELL (reduce/exit), or STRONG_SELL (urgent exit). Do NOT use BUY for a stock you already own — use BUY_MORE.
+2. SELL, STRONG_SELL, BUY_MORE, and HOLD are EXCLUSIVELY for stocks listed in Portfolio Holdings.
+3. For non-held bearish stocks: use AVOID, never SELL.
 
 ## Confidence Scoring
 - 0.8-1.0: Multiple analysts agree with high individual confidence
@@ -931,6 +943,9 @@ def parse_synthesis_response_full(response: str) -> SynthesisParseResult:
             "historical_precedent": insight.get("historical_precedent"),
             "analysts_involved": insight.get("analysts_involved", []),
             "data_sources": _extract_data_sources(insight),
+            "entry_zone": insight.get("entry_zone") or insight.get("entry"),
+            "target_price": insight.get("target_price") or insight.get("target"),
+            "stop_loss": insight.get("stop_loss") or insight.get("stop"),
         }
 
         # Validate required fields
@@ -1756,7 +1771,7 @@ def _normalize_action(action: str) -> str:
         Normalized action string.
     """
     action = action.upper().strip()
-    valid_actions = {"STRONG_BUY", "BUY", "HOLD", "SELL", "STRONG_SELL", "WATCH", "AVOID"}
+    valid_actions = {"STRONG_BUY", "BUY", "BUY_MORE", "HOLD", "SELL", "STRONG_SELL", "WATCH", "AVOID"}
 
     if action in valid_actions:
         return action
@@ -1764,6 +1779,8 @@ def _normalize_action(action: str) -> str:
     # Map common variations
     if action in {"LONG", "BULLISH"}:
         return "BUY"
+    elif action in {"ADD_TO_POSITION", "ADD_TO", "ADD", "ACCUMULATE", "INCREASE_POSITION"}:
+        return "BUY_MORE"
     elif action in {"SHORT", "BEARISH"}:
         return "SELL"
     elif action in {"MONITOR", "WATCHING"}:

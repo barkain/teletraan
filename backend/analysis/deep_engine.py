@@ -54,6 +54,11 @@ from analysis.agents.synthesis_lead import (
     build_pattern_context,
     build_track_record_context,
 )
+from analysis.agents.portfolio_analyst import (
+    PORTFOLIO_ANALYST_PROMPT,
+    format_portfolio_context,
+    parse_portfolio_response,
+)
 from analysis.context_builder import market_context_builder
 from analysis.statistical_calculator import StatisticalFeatureCalculator
 from analysis.memory_service import InstitutionalMemoryService
@@ -125,6 +130,13 @@ class DeepAnalysisEngine:
             "parse_response": parse_risk_response,
             "context_type": "risk",
         },
+        # Portfolio analyst is added dynamically in run_analysis() only when holdings exist
+        "portfolio": {
+            "prompt": PORTFOLIO_ANALYST_PROMPT,
+            "format_context": format_portfolio_context,
+            "parse_response": parse_portfolio_response,
+            "context_type": "portfolio",
+        },
     }
 
     def __init__(self, max_retries: int = 2, timeout_seconds: int = 120) -> None:
@@ -146,6 +158,9 @@ class DeepAnalysisEngine:
         self,
         symbols: list[str] | None = None,
         include_synthesis: bool = True,
+        quant_context: str | None = None,
+        portfolio_context: str | None = None,
+        portfolio_holdings: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Run full multi-agent analysis.
 
@@ -185,6 +200,15 @@ class DeepAnalysisEngine:
         if enhanced_context:
             market_context["_enhanced_context"] = enhanced_context
 
+        # Inject quant nomination context so agents know why each symbol was selected
+        if quant_context:
+            market_context["_quant_context"] = quant_context
+
+        # Inject portfolio holdings for the Portfolio Context Analyst
+        if portfolio_holdings:
+            market_context["_portfolio_holdings"] = portfolio_holdings
+            market_context["_analyzed_symbols"] = symbols or []
+
         # Step 1.5: Compute correlation matrix for the Correlation Detective
         correlation_prompt = CORRELATION_DETECTIVE_PROMPT
         try:
@@ -221,12 +245,18 @@ class DeepAnalysisEngine:
             )
 
         # Build analyst configs with potentially updated correlation prompt
-        analyst_configs = dict(self.ANALYSTS)
+        # Exclude portfolio from the default set — it's added conditionally below
+        analyst_configs = {k: v for k, v in self.ANALYSTS.items() if k != "portfolio"}
         if correlation_prompt != CORRELATION_DETECTIVE_PROMPT:
             analyst_configs["correlation"] = {
                 **analyst_configs["correlation"],
                 "prompt": correlation_prompt,
             }
+
+        # Add Portfolio Context Analyst only when holdings data is present
+        if market_context.get("_portfolio_holdings"):
+            analyst_configs["portfolio"] = self.ANALYSTS["portfolio"]
+            logger.info("Running Portfolio Context Analyst...")
 
         # Step 2: Run all analysts in parallel
         logger.info("Running Technical Analyst...")
@@ -258,7 +288,8 @@ class DeepAnalysisEngine:
                 analyst_reports[analyst_name] = result
                 successful_count += 1
 
-        logger.info(f"All analysts completed in {analysts_elapsed:.1f}s ({successful_count}/5 successful)")
+        total_analysts = len(analyst_configs)
+        logger.info(f"All analysts completed in {analysts_elapsed:.1f}s ({successful_count}/{total_analysts} successful)")
 
         # Step 3: Run synthesis lead (if enabled)
         synthesis_result: dict[str, Any] = {}
@@ -268,7 +299,7 @@ class DeepAnalysisEngine:
             logger.info("Running Synthesis Lead...")
             synthesis_start = datetime.utcnow()
             try:
-                synthesis_result, insights = await self._run_synthesis(analyst_reports)
+                synthesis_result, insights = await self._run_synthesis(analyst_reports, portfolio_context=portfolio_context)
                 synthesis_elapsed = (datetime.utcnow() - synthesis_start).total_seconds()
                 logger.info(f"Synthesis complete in {synthesis_elapsed:.1f}s, storing {len(insights)} insights...")
             except Exception as e:
@@ -296,7 +327,7 @@ class DeepAnalysisEngine:
                 "timestamp": start_time.isoformat(),
                 "elapsed_seconds": round(elapsed, 2),
                 "symbols": symbols,
-                "analysts_run": list(self.ANALYSTS.keys()),
+                "analysts_run": list(analyst_configs.keys()),
                 "successful_analysts": successful_analysts,
             },
             # Research context data for storage
@@ -318,6 +349,10 @@ class DeepAnalysisEngine:
     async def run_and_store(
         self,
         symbols: list[str] | None = None,
+        quant_context: str | None = None,
+        portfolio_context: str | None = None,
+        portfolio_holdings: dict[str, dict[str, Any]] | None = None,
+        fundamentals_map: dict[str, dict[str, Any]] | None = None,
     ) -> list[DeepInsight]:
         """Run analysis and store insights in database.
 
@@ -332,7 +367,13 @@ class DeepAnalysisEngine:
             List of created DeepInsight database objects with research_context attached.
         """
         # Run the analysis
-        result = await self.run_analysis(symbols=symbols, include_synthesis=True)
+        result = await self.run_analysis(
+            symbols=symbols,
+            include_synthesis=True,
+            quant_context=quant_context,
+            portfolio_context=portfolio_context,
+            portfolio_holdings=portfolio_holdings,
+        )
         insights_data = result.get("insights", [])
 
         if not insights_data:
@@ -351,7 +392,7 @@ class DeepAnalysisEngine:
             research_context_data["enhanced_context"] = result["_enhanced_context"]
 
         # Store in database with research context
-        stored_insights = await self._store_insights(insights_data, research_context_data)
+        stored_insights = await self._store_insights(insights_data, research_context_data, fundamentals_map=fundamentals_map)
 
         logger.info(f"Stored {len(stored_insights)} DeepInsight records with research context")
 
@@ -393,14 +434,22 @@ class DeepAnalysisEngine:
         parse_func = config["parse_response"]
         context_type = config["context_type"]
 
-        # Get agent-specific context
-        agent_context = await market_context_builder.build_agent_context(
-            agent_type=context_type,
-            symbols=symbols,
-        )
+        # Portfolio analyst uses full market_context directly (needs holdings + price_history)
+        if context_type == "portfolio":
+            formatted_context = format_func(market_context)
+        else:
+            # Get agent-specific context
+            agent_context = await market_context_builder.build_agent_context(
+                agent_type=context_type,
+                symbols=symbols,
+            )
+            # Format context for the analyst
+            formatted_context = format_func(agent_context)
 
-        # Format context for the analyst
-        formatted_context = format_func(agent_context)
+        # Append quant nomination context if present (portfolio analyst already includes it)
+        quant_ctx = market_context.get("_quant_context")
+        if quant_ctx and context_type != "portfolio":
+            formatted_context = f"{formatted_context}\n\n{quant_ctx}"
 
         # Run with retries
         last_error: Exception | None = None
@@ -442,6 +491,7 @@ class DeepAnalysisEngine:
     async def _run_synthesis(
         self,
         analyst_reports: dict[str, Any],
+        portfolio_context: str | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         """Run the synthesis lead agent.
 
@@ -454,8 +504,27 @@ class DeepAnalysisEngine:
         """
         synthesis_start = datetime.utcnow()
 
-        # Format analyst reports for synthesis
-        synthesis_context = format_synthesis_context(analyst_reports)
+        # Format analyst reports for synthesis — cap per-analyst to keep total under ~10K chars
+        _MAX_ANALYST_CHARS = 2000
+        truncated_reports: dict[str, Any] = {}
+        for analyst, report in analyst_reports.items():
+            if isinstance(report, dict) and report.get("_full_response"):
+                r = dict(report)
+                if len(r["_full_response"]) > _MAX_ANALYST_CHARS:
+                    r["_full_response"] = r["_full_response"][:_MAX_ANALYST_CHARS] + "\n[truncated]"
+                truncated_reports[analyst] = r
+            else:
+                truncated_reports[analyst] = report
+
+        synthesis_context = format_synthesis_context(truncated_reports)
+
+        # Hard cap: synthesis context must stay manageable even on large symbol sets
+        _MAX_CONTEXT_CHARS = 12000
+        if len(synthesis_context) > _MAX_CONTEXT_CHARS:
+            synthesis_context = synthesis_context[:_MAX_CONTEXT_CHARS] + "\n[...context truncated for length]"
+
+        if portfolio_context:
+            synthesis_context = f"{synthesis_context}\n\n{portfolio_context}"
         logger.info(f"[DEEP] Synthesis context length: {len(synthesis_context)} chars")
 
         # Build enhanced synthesis prompt with institutional memory
@@ -477,6 +546,17 @@ class DeepAnalysisEngine:
         except Exception as e:
             logger.warning(f"[DEEP] Failed to build enhanced synthesis prompt: {e}")
             enhanced_prompt = format_synthesis_prompt_with_context()
+
+        # Force inline JSON output — the SDK runs Claude Code which has file tools;
+        # without this instruction the model tends to write large responses to files,
+        # making the text response unparseable.
+        enhanced_prompt += (
+            "\n\n## CRITICAL OUTPUT REQUIREMENT\n"
+            "You MUST output your response as a single JSON object directly in your message text. "
+            "Do NOT use file tools. Do NOT write to any files. "
+            "Your ENTIRE response must start with { and end with }. "
+            "No prose before or after the JSON. No markdown code fences."
+        )
 
         response_text = await self._query_llm(enhanced_prompt, synthesis_context, "synthesis")
         logger.info(f"[DEEP] Synthesis response length: {len(response_text)} chars")
@@ -522,6 +602,7 @@ class DeepAnalysisEngine:
         self,
         insights_data: list[dict[str, Any]],
         research_context_data: dict[str, Any] | None = None,
+        fundamentals_map: dict[str, dict[str, Any]] | None = None,
     ) -> list[DeepInsight]:
         """Store insights in the database with their research contexts.
 
@@ -539,7 +620,9 @@ class DeepAnalysisEngine:
         async with async_session_factory() as session:
             for data in insights_data:
                 try:
-                    insight = self._create_deep_insight(data)
+                    sym = data.get("primary_symbol")
+                    fund = (fundamentals_map or {}).get(sym) if sym else None
+                    insight = self._create_deep_insight(data, fundamentals=fund)
                     session.add(insight)
 
                     # Create and attach research context if data provided
@@ -608,7 +691,7 @@ class DeepAnalysisEngine:
 
         return stored
 
-    def _create_deep_insight(self, data: dict[str, Any]) -> DeepInsight:
+    def _create_deep_insight(self, data: dict[str, Any], fundamentals: dict[str, Any] | None = None) -> DeepInsight:
         """Create a DeepInsight model from parsed data.
 
         Args:
@@ -637,6 +720,16 @@ class DeepAnalysisEngine:
                     "confidence": e.get("confidence", 0.5),
                 })
 
+        # Build structured valuation snapshot from fundamentals (if provided)
+        valuation_data: dict[str, Any] | None = None
+        if fundamentals:
+            valuation_data = {
+                k: fundamentals[k]
+                for k in ("market_cap_m", "trailing_pe", "price_to_sales",
+                          "revenue_growth", "profit_margins", "sector", "industry")
+                if k in fundamentals and fundamentals[k] is not None
+            } or None
+
         return DeepInsight(
             insight_type=insight_type,
             action=action,
@@ -653,6 +746,10 @@ class DeepAnalysisEngine:
             historical_precedent=data.get("historical_precedent"),
             analysts_involved=data.get("analysts_involved", []),
             data_sources=data.get("data_sources", []),
+            entry_zone=data.get("entry_zone"),
+            target_price=data.get("target_price"),
+            stop_loss=data.get("stop_loss"),
+            valuation_data=valuation_data,
         )
 
     def _create_research_context(

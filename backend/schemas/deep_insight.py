@@ -6,6 +6,7 @@ from enum import Enum
 class InsightAction(str, Enum):
     STRONG_BUY = "STRONG_BUY"
     BUY = "BUY"
+    BUY_MORE = "BUY_MORE"
     HOLD = "HOLD"
     SELL = "SELL"
     STRONG_SELL = "STRONG_SELL"
@@ -63,6 +64,7 @@ class DeepInsightResponse(DeepInsightBase):
     technical_analysis_data: dict[str, Any] | None = None
     prediction_market_data: dict[str, Any] | None = None
     sentiment_data: dict[str, Any] | None = None
+    valuation_data: dict[str, Any] | None = None
 
     class Config:
         from_attributes = True

@@ -468,6 +468,22 @@ export const api = {
     publish: (id: string) =>
       postApi<PublishResponse>(`/api/v1/reports/${id}/publish`),
   },
+
+  // Alpha Engine
+  alphaEngine: {
+    start: () =>
+      postApi<AlphaStartResponse>('/api/v1/alpha-engine/start'),
+    status: (taskId: string) =>
+      fetchApi<AlphaTaskStatus>(`/api/v1/alpha-engine/status/${taskId}`),
+    active: () =>
+      fetchApi<AlphaTaskStatus | null>('/api/v1/alpha-engine/active'),
+    runs: (params?: { limit?: number; offset?: number }) =>
+      fetchApi<AlphaRunListResponse>('/api/v1/alpha-engine/runs', {
+        params: params as Record<string, string | number | boolean | undefined>,
+      }),
+    run: (runId: string) =>
+      fetchApi<AlphaRunDetail>(`/api/v1/alpha-engine/runs/${runId}`),
+  },
 };
 
 // ============================================
@@ -522,6 +538,96 @@ export const chatApi = {
   send: (message: string, context?: { symbol?: string }) =>
     postApi<{ response: string }>('/api/v1/chat', { message, ...context }),
 };
+
+// Alpha Engine types
+export interface AlphaStartResponse {
+  task_id: string;
+  status: string;
+  message: string;
+}
+
+export interface AlphaTaskStatus {
+  task_id: string;
+  analysis_run_id: string | null;
+  status: string;
+  progress: number;
+  phase_details: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  elapsed_seconds: number | null;
+  market_regime: string | null;
+  universe_size: number | null;
+  ideas_persisted: number | null;
+}
+
+export interface AlphaRun {
+  id: string;
+  run_type: string;
+  status: string;
+  market_date: string;
+  market_regime: string | null;
+  market_confidence: number | null;
+  universe_size: number;
+  symbols_scanned: number;
+  ideas_persisted: number;
+  portfolio_symbols: string[] | null;
+  analysis_metadata: Record<string, unknown> | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface AlphaCandidate {
+  id: number;
+  analysis_run_id: string;
+  symbol: string;
+  rank: number;
+  thesis_type: string;
+  overall_score: number;
+  confidence: number;
+  expected_horizon_days: number | null;
+  bull_case: string | null;
+  bear_case: string | null;
+  key_drivers: string[] | null;
+  setup_trigger: string | null;
+  invalidations: string[] | null;
+  portfolio_relevance: string | null;
+  is_portfolio_holding: boolean;
+  target_price: number | null;
+  stop_price: number | null;
+  evidence: Record<string, unknown> | null;
+}
+
+export interface AlphaSignal {
+  id: number;
+  analysis_run_id: string;
+  symbol: string;
+  sector: string | null;
+  signal_version: string;
+  overall_score: number;
+  technical_score: number;
+  fundamental_score: number;
+  valuation_score: number;
+  flow_score: number;
+  sentiment_score: number;
+  macro_score: number;
+  catalyst_score: number;
+  liquidity_score: number;
+  risk_score: number;
+  data_completeness: number;
+}
+
+export interface AlphaRunListResponse {
+  items: AlphaRun[];
+  total: number;
+}
+
+export interface AlphaRunDetail {
+  run: AlphaRun;
+  candidates: AlphaCandidate[];
+  top_signals: AlphaSignal[];
+}
 
 // Import types
 import type { Stock, PriceHistory, Insight, InsightAnnotation, InsightFilters, AnalysisResult, PaginatedResponse, RefreshDataResponse, WatchlistSettings, DeepInsight, DeepInsightListResponse, DeepInsightType, InsightAction, AutonomousAnalysisResponse, Portfolio, PortfolioHolding, HoldingCreate, HoldingUpdate, PortfolioImpact, ImportResult, LLMProviderStatus, LLMProviderConfig, LLMTestRequest, LLMTestResult, RunListResponse, RunsAggregateStats, RunSummary } from '@/types';

@@ -23,6 +23,7 @@ from models.price import PriceHistory  # type: ignore[import-not-found]
 from models.economic import EconomicIndicator  # type: ignore[import-not-found]
 from models.analysis_task import AnalysisTask, AnalysisTaskStatus  # type: ignore[import-not-found]
 from analysis.engine import AnalysisEngine  # type: ignore[import-not-found]
+from analysis.alpha_engine import create_daily_alpha_run  # type: ignore[import-not-found]
 from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
 from analysis.thematic_outcome_tracker import ThematicOutcomeTracker  # type: ignore[import-not-found]
 from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
@@ -523,25 +524,35 @@ class ETLOrchestrator:
         """
         try:
             from data.adapters.investor_feeds import get_investor_feed_adapter  # type: ignore[import-not-found]
+            from data.adapters.sec_filings import get_sec_filings_adapter  # type: ignore[import-not-found]
 
             adapter = get_investor_feed_adapter()
+            sec_adapter = get_sec_filings_adapter()
             data = await adapter.get_all_intelligence()
             positions = len(data.get("positions", []))
             commentary = len(data.get("commentary", []))
+            sec_signals = await sec_adapter.get_symbol_signals(self.DEFAULT_SYMBOLS)
+            sec_filings = sum(
+                int(payload.get("recent_filing_count", 0))
+                for payload in sec_signals.values()
+            )
             logger.info(
-                "Investor feeds refreshed: %d positions, %d commentary items",
+                "Investor feeds refreshed: %d positions, %d commentary items, %d SEC filings",
                 positions,
                 commentary,
+                sec_filings,
             )
             return {
                 "positions": positions,
                 "commentary": commentary,
+                "sec_filings": sec_filings,
             }
         except Exception as e:
             logger.warning("Investor feed refresh failed: %s", e)
             return {
                 "positions": 0,
                 "commentary": 0,
+                "sec_filings": 0,
             }
 
     async def refresh_earnings_calendar(self) -> dict[str, Any]:
@@ -760,6 +771,31 @@ class ETLOrchestrator:
         )
         logger.info("Scheduled autonomous analysis finished (task_id=%s)", task_id)
 
+    async def run_daily_alpha_engine(self) -> dict[str, Any]:
+        """Scheduled job: persist the daily v2 alpha preflight snapshot.
+
+        This is the Phase 1 wiring for the daily market-wide alpha engine.
+        It creates an AnalysisRun, stores a MarketSnapshot, and captures the
+        market universe plus regime label for downstream ranking phases.
+        """
+        logger.info("Starting daily alpha engine preflight")
+
+        try:
+            async with async_session_factory() as session:
+                result = await create_daily_alpha_run(session)
+                await session.commit()
+        except Exception as exc:
+            logger.exception("Daily alpha engine preflight failed: %s", exc)
+            raise
+
+        logger.info(
+            "Daily alpha engine preflight complete: run_id=%s universe=%d regime=%s",
+            result["analysis_run_id"],
+            result["universe_size"],
+            result["regime"]["name"],
+        )
+        return result
+
     def start(self) -> None:
         """Start the scheduler with configured jobs."""
         if self._is_running:
@@ -787,6 +823,15 @@ class ETLOrchestrator:
             self.run_analysis,
             CronTrigger(hour=19, minute=0, timezone="America/New_York"),
             id="daily_analysis",
+            replace_existing=True,
+        )
+
+        # Daily v2 alpha preflight after market close + price refresh (6:45 PM ET)
+        self.scheduler.add_job(
+            self.run_daily_alpha_engine,
+            CronTrigger(day_of_week="mon-fri", hour=18, minute=45, timezone="America/New_York"),
+            id="daily_alpha_engine_preflight",
+            name="Daily alpha engine preflight",
             replace_existing=True,
         )
 
@@ -936,6 +981,7 @@ class ETLOrchestrator:
             "daily_price_refresh",
             "weekly_economic_refresh",
             "daily_analysis",
+            "daily_alpha_engine_preflight",
             "weekly_stock_info_refresh",
             "intraday_outcome_check",
             "daily_outcome_check",

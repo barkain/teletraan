@@ -23,6 +23,8 @@ from api.routes.search import router as search_router
 from api.routes.settings import router as settings_router
 from api.routes.statistical_features import router as statistical_features_router
 from api.routes.stocks import router as stocks_router
+from api.routes.alpha_engine import router as alpha_engine_router
+from api.routes.backtest import router as backtest_router
 from api.routes.thematic_insights import router as thematic_insights_router
 
 # Combined router for all routes
@@ -53,6 +55,8 @@ router.include_router(reports_router, prefix="/reports", tags=["reports"], depen
 router.include_router(research_router, tags=["research"], dependencies=_auth)
 router.include_router(runs_router, prefix="/runs", tags=["runs"], dependencies=_auth)
 router.include_router(export_router, dependencies=_auth)
+router.include_router(alpha_engine_router, prefix="/alpha-engine", tags=["alpha-engine"], dependencies=_auth)
+router.include_router(backtest_router, dependencies=_auth)
 router.include_router(thematic_insights_router, prefix="/thematic-insights", tags=["thematic-insights"], dependencies=_auth)
 
 __all__ = ["router"]

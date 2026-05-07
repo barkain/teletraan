@@ -52,51 +52,51 @@ INTERNATIONAL_ADRS: dict[str, list[str]] = {
     ]
 }
 
-# Additional well-known large/mid-caps to pad the universe when ETF
-# holdings fetch returns fewer symbols than expected.
-_SUPPLEMENTAL_SYMBOLS: dict[str, list[str]] = {
-    "Technology": [
-        "INTC", "QCOM", "TXN", "INTU", "NOW", "AMAT", "LRCX", "KLAC",
-        "SNPS", "CDNS", "MRVL", "PANW", "FTNT", "CRWD", "ZS",
-    ],
-    "Financials": [
-        "AXP", "SCHW", "ICE", "CME", "CB", "PGR", "MET", "AIG",
-        "TFC", "USB",
-    ],
-    "Healthcare": [
-        "ISRG", "GILD", "VRTX", "REGN", "ZTS", "SYK", "BDX", "EW",
-        "IDXX", "DXCM",
-    ],
-    "Consumer Discretionary": [
-        "GM", "F", "ABNB", "DASH", "ORLY", "AZO", "ROST", "DHI",
-        "LEN", "POOL",
-    ],
-    "Industrials": [
-        "GD", "NOC", "WM", "RSG", "CTAS", "ITW", "EMR", "FDX",
-        "CSX", "NSC",
-    ],
-    "Energy": [
-        "WMB", "HAL", "BKR", "FANG", "TRGP", "KMI", "OKE", "HES",
-    ],
-    "Communication Services": [
-        "SPOT", "SNAP", "PINS", "ROKU", "ZM", "MTCH", "EA", "TTWO",
-    ],
-    "Consumer Staples": [
-        "STZ", "SYY", "HSY", "K", "GIS", "TSN", "ADM", "BG",
-    ],
-    "Materials": [
-        "CTVA", "VMC", "MLM", "ALB", "CE", "EMN", "IFF", "FMC",
-    ],
-    "Utilities": [
-        "WEC", "ES", "AEE", "CMS", "DTE", "FE", "PPL", "EVRG",
-    ],
-    "Real Estate": [
-        "VICI", "IRM", "SBAC", "EXR", "MAA", "ESS", "UDR", "CPT",
-    ],
-}
-
 # Map ETF ticker -> sector name (reverse of SECTOR_ETFS for convenience)
 _ETF_TO_SECTOR: dict[str, str] = SECTOR_ETFS  # already etf -> sector
+
+
+def _is_equity_symbol(sym: str) -> bool:
+    """Return True only for plain equity tickers (filter out futures, indexes, etc.)."""
+    if not sym or len(sym) > 7:
+        return False
+    # Futures (GC=F), indexes (^VIX), options, etc.
+    if "=" in sym or "^" in sym:
+        return False
+    return True
+
+# Innovation and growth-focused ETFs for dynamic universe discovery.
+# These ETFs collectively hold the innovation/growth stocks we want to track —
+# no hardcoded company names needed. As new companies emerge, they'll naturally
+# appear in these ETFs' holdings.
+INNOVATION_ETFS: dict[str, str] = {  # etf_ticker -> category_name
+    "ARKK": "ARK Innovation",
+    "ARKG": "ARK Genomics",
+    "ARKW": "ARK Web & Next-Gen Internet",
+    "IGV": "Software & Cloud",
+    "WCLD": "Cloud Computing",
+    "CLOU": "Cloud Infrastructure",
+    "CIBR": "Cybersecurity",
+    "HACK": "Cybersecurity Extended",
+    "BOTZ": "Robotics & AI",
+    "ROBO": "Robotics & Automation",
+    "ICLN": "Clean Energy",
+    "QCLN": "Clean Energy Extended",
+    "XBI": "Biotech",
+    "IBB": "Biotech Large Cap",
+    "IHI": "Medical Devices",
+    "PSCT": "Small Cap Tech",
+    "FINX": "Fintech",
+    "SOXX": "Semiconductors",
+    "SMH": "Semiconductors Extended",
+    "ITA": "Aerospace & Defense",
+    "XAR": "Aerospace & Defense Extended",
+    "SKYY": "Cloud Extended",
+    "IAI": "Investment Banking",
+    "KIE": "Insurance",
+    "PAVE": "Infrastructure",
+    "GRID": "Smart Grid & Infrastructure",
+}
 
 # ---------------------------------------------------------------------------
 # Module-level cache (1-hour TTL)
@@ -309,15 +309,16 @@ async def _fetch_top_movers() -> dict[str, list[str]]:
 
 
 async def get_screening_universe() -> dict[str, list[str]]:
-    """Return sector/category -> symbols mapping (300-500 symbols, 1h TTL cache).
+    """Return sector/category -> symbols mapping (400-600 symbols, 1h TTL cache).
 
     Combines four symbol sources:
-        1. Dynamic ETF holdings (top 25 per sector ETF)
-        2. Commodity futures (hardcoded)
-        3. International ADRs (hardcoded)
+        1. Dynamic sector ETF holdings (top 40 per ETF)
+        2. Dynamic innovation ETF holdings (top 40 per ETF, discovered organically)
+        3. Commodity futures and international ADRs
         4. Top daily movers (gainers, losers, volume leaders)
 
-    Falls back to FALLBACK_HOLDINGS + static sets if all dynamic fetching fails.
+    No hardcoded company names — all equities are discovered via ETF constituents.
+    Falls back to FALLBACK_HOLDINGS if all dynamic fetching fails.
     """
     # Check cache
     if (
@@ -332,17 +333,17 @@ async def get_screening_universe() -> dict[str, list[str]]:
     universe: dict[str, list[str]] = {}
     dynamic_succeeded = False
 
-    # 1. Fetch ETF holdings in parallel
+    # 1. Fetch sector ETF holdings in parallel (top 40 per ETF)
     try:
         etf_tasks = [
-            _fetch_single_etf_holdings(etf, sector)
+            _fetch_single_etf_holdings(etf, sector, top_n=40)
             for etf, sector in _ETF_TO_SECTOR.items()
         ]
         etf_results = await asyncio.gather(*etf_tasks, return_exceptions=True)
 
         for etf_result in etf_results:
             if isinstance(etf_result, BaseException):
-                logger.warning("ETF holdings task failed: %s", etf_result)
+                logger.warning("Sector ETF task failed: %s", etf_result)
                 continue
             sector_name, symbols = etf_result
             if symbols:
@@ -350,25 +351,40 @@ async def get_screening_universe() -> dict[str, list[str]]:
                 universe[sector_name] = symbols
 
     except Exception as exc:
-        logger.warning("ETF holdings parallel fetch failed entirely: %s", exc)
+        logger.warning("Sector ETF holdings parallel fetch failed: %s", exc)
 
-    # Pad sectors with supplemental symbols if below target
-    for sector_name, supplements in _SUPPLEMENTAL_SYMBOLS.items():
-        existing = set(universe.get(sector_name, []))
-        if len(existing) < 20:
-            # Add supplemental symbols not already present
-            for sym in supplements:
-                if sym not in existing:
-                    universe.setdefault(sector_name, []).append(sym)
-                    existing.add(sym)
+    # 2. Fetch innovation ETF holdings in parallel (these discover growth/innovation
+    #    stocks organically — no hardcoded company names needed)
+    try:
+        innovation_tasks = [
+            _fetch_single_etf_holdings(etf, category, top_n=40)
+            for etf, category in INNOVATION_ETFS.items()
+        ]
+        innovation_results = await asyncio.gather(*innovation_tasks, return_exceptions=True)
 
-    # 2. Add commodity futures
+        for innov_result in innovation_results:
+            if isinstance(innov_result, BaseException):
+                logger.warning("Innovation ETF task failed: %s", innov_result)
+                continue
+            category_name, symbols = innov_result
+            if symbols:
+                dynamic_succeeded = True
+                existing = set(universe.get(category_name, []))
+                for sym in symbols:
+                    if sym not in existing:
+                        universe.setdefault(category_name, []).append(sym)
+                        existing.add(sym)
+
+    except Exception as exc:
+        logger.warning("Innovation ETF holdings parallel fetch failed: %s", exc)
+
+    # 3. Add commodity futures
     universe.update(COMMODITY_SYMBOLS)
 
-    # 3. Add international ADRs
+    # 4. Add international ADRs
     universe.update(INTERNATIONAL_ADRS)
 
-    # 4. Fetch top movers
+    # 5. Fetch top movers
     try:
         movers = await _fetch_top_movers()
         if movers:
@@ -434,13 +450,11 @@ def get_all_universe_symbols() -> list[str]:
     # Fallback: static holdings + commodities + ADRs
     logger.debug("get_all_universe_symbols: no cache, using fallback")
     symbols = []
-    for etf, sector in _ETF_TO_SECTOR.items():
+    for etf in list(_ETF_TO_SECTOR.keys()) + list(INNOVATION_ETFS.keys()):
         symbols.extend(FALLBACK_HOLDINGS.get(etf, []))
     for syms in COMMODITY_SYMBOLS.values():
         symbols.extend(syms)
     for syms in INTERNATIONAL_ADRS.values():
-        symbols.extend(syms)
-    for syms in _SUPPLEMENTAL_SYMBOLS.values():
         symbols.extend(syms)
     return list(dict.fromkeys(symbols))
 
@@ -448,3 +462,58 @@ def get_all_universe_symbols() -> list[str]:
 def get_commodity_symbols() -> list[str]:
     """Return commodity futures symbols."""
     return list(COMMODITY_SYMBOLS["Commodities"])
+
+
+async def sync_universe_to_db(db: Any) -> dict[str, int]:
+    """Import newly discovered equity symbols from the screening universe into the DB.
+
+    Fetches ETF constituents, filters to plain equity tickers, and upserts any
+    symbols not already in the stocks table. Returns {"added": N, "skipped": M}.
+    """
+    from models.stock import Stock
+    from sqlalchemy import select as _sa_select
+
+    universe = await get_screening_universe()
+
+    # Build flat symbol → category map, equity symbols only
+    sym_to_category: dict[str, str] = {}
+    for category, symbols in universe.items():
+        for sym in symbols:
+            if _is_equity_symbol(sym) and sym not in sym_to_category:
+                sym_to_category[sym] = category
+
+    if not sym_to_category:
+        return {"added": 0, "skipped": 0}
+
+    # Find which symbols already exist in DB
+    result = await db.execute(_sa_select(Stock.symbol))
+    existing: set[str] = {row[0].upper() for row in result.fetchall()}
+
+    new_syms = [s for s in sym_to_category if s.upper() not in existing]
+    if not new_syms:
+        logger.info("Universe sync: all %d equity symbols already in DB", len(sym_to_category))
+        return {"added": 0, "skipped": len(sym_to_category)}
+
+    logger.info("Universe sync: adding %d new symbols to DB", len(new_syms))
+    added = 0
+    for sym in new_syms:
+        try:
+            db.add(Stock(
+                symbol=sym,
+                name=sym,  # name populated later via ETL or manual update
+                sector=sym_to_category.get(sym),
+                is_active=True,
+            ))
+            added += 1
+        except Exception as exc:
+            logger.debug("Failed to stage %s: %s", sym, exc)
+
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.warning("Universe sync commit failed: %s", exc)
+        return {"added": 0, "skipped": len(sym_to_category)}
+
+    logger.info("Universe sync complete: %d added, %d already existed", added, len(existing))
+    return {"added": added, "skipped": len(sym_to_category) - len(new_syms)}

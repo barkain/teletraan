@@ -53,6 +53,7 @@ const primaryNav: SidebarItem[] = [
 const secondaryNav: SidebarItem[] = [
   { name: 'Market Data', href: '/stocks', icon: <BarChart3 className="h-4 w-4" /> },
   { name: 'Signals', href: '/signals', icon: <Zap className="h-4 w-4" /> },
+  { name: 'Alpha Engine', href: '/alpha-engine', icon: <Zap className="h-4 w-4" /> },
   { name: 'Past Runs', href: '/runs', icon: <Activity className="h-4 w-4" /> },
 ];
 

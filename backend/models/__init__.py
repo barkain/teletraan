@@ -26,6 +26,7 @@ from .portfolio import Portfolio, PortfolioHolding
 from .price import PriceHistory
 from .settings import UserSettings
 from .analysis_task import AnalysisTask, AnalysisTaskStatus, PHASE_PROGRESS, PHASE_NAMES
+from .alpha_engine import AnalysisRun, AnalysisRunStatus, CandidateIdea, MarketSnapshot, SecuritySignal
 from .statistical_feature import StatisticalFeature, StatisticalFeatureType
 from .stock import Stock
 from .thematic_insight import LifecycleState, ThematicInsight
@@ -74,6 +75,12 @@ __all__ = [
     "AnalysisTaskStatus",
     "PHASE_PROGRESS",
     "PHASE_NAMES",
+    # Alpha engine models
+    "AnalysisRun",
+    "AnalysisRunStatus",
+    "MarketSnapshot",
+    "SecuritySignal",
+    "CandidateIdea",
     # Portfolio models
     "Portfolio",
     "PortfolioHolding",

@@ -155,6 +155,7 @@ const DIMENSION_CONFIG: Record<AnalysisDimensionType, DimensionConfig> = {
 const actionConfig: Record<InsightAction, { color: string; icon: typeof TrendingUp; label: string; bgColor: string }> = {
   STRONG_BUY: { color: 'bg-green-600', icon: TrendingUp, label: 'Strong Buy', bgColor: 'bg-green-600/10' },
   BUY: { color: 'bg-green-500', icon: TrendingUp, label: 'Buy', bgColor: 'bg-green-500/10' },
+  BUY_MORE: { color: 'bg-emerald-600', icon: TrendingUp, label: 'Add to Position', bgColor: 'bg-emerald-600/10' },
   HOLD: { color: 'bg-yellow-500', icon: Minus, label: 'Hold', bgColor: 'bg-yellow-500/10' },
   SELL: { color: 'bg-red-500', icon: TrendingDown, label: 'Sell', bgColor: 'bg-red-500/10' },
   STRONG_SELL: { color: 'bg-red-600', icon: TrendingDown, label: 'Strong Sell', bgColor: 'bg-red-600/10' },

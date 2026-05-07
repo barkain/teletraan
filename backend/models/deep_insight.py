@@ -22,6 +22,7 @@ class InsightAction(str, enum.Enum):
 
     STRONG_BUY = "STRONG_BUY"
     BUY = "BUY"
+    BUY_MORE = "BUY_MORE"  # Add to an existing portfolio position
     HOLD = "HOLD"
     SELL = "SELL"
     STRONG_SELL = "STRONG_SELL"
@@ -146,6 +147,7 @@ class DeepInsight(TimestampMixin, Base):
     technical_analysis_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     prediction_market_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     sentiment_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    valuation_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     # Lifecycle management
     lifecycle_state: Mapped[str | None] = mapped_column(
