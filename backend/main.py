@@ -169,7 +169,10 @@ async def _cleanup_stale_analysis_tasks() -> None:
         AnalysisTaskStatus.MACRO_SCAN.value,
         AnalysisTaskStatus.SECTOR_ROTATION.value,
         AnalysisTaskStatus.OPPORTUNITY_HUNT.value,
+        AnalysisTaskStatus.HEATMAP_FETCH.value,
+        AnalysisTaskStatus.HEATMAP_ANALYSIS.value,
         AnalysisTaskStatus.DEEP_DIVE.value,
+        AnalysisTaskStatus.COVERAGE_EVALUATION.value,
         AnalysisTaskStatus.SYNTHESIS.value,
     ]
 

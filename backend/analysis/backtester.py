@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import statistics
 from collections import defaultdict
 from datetime import date, timedelta
@@ -1041,7 +1042,11 @@ async def get_today_picks(
             industry = fund.get("industry") or ""
 
             reject_reason = None
-            if mkt_cap and mkt_cap < min_market_cap:
+            fundamentals_missing = mkt_cap is None or mkt_cap == 0
+            if fundamentals_missing and min_market_cap > 0:
+                # Cannot verify market cap meets threshold — reject conservatively
+                reject_reason = "market_cap unavailable (cannot verify size threshold)"
+            elif not fundamentals_missing and mkt_cap < min_market_cap:
                 reject_reason = f"market_cap ${mkt_cap/1e6:.0f}M < ${min_market_cap/1e6:.0f}M threshold"
             elif rev_growth is not None and rev_growth < min_revenue_growth:
                 reject_reason = f"revenue_growth {rev_growth:.0%} < {min_revenue_growth:.0%} threshold"
@@ -1078,11 +1083,19 @@ async def get_today_picks(
                 filtered.append(entry)
         return filtered, rejected
 
+    def _ticker_root(sym: str) -> str:
+        """Normalize ticker to root class: BRK.A → BRK, GOOGL → GOOGL."""
+        return re.sub(r'[.\-][A-C]$', '', sym.upper())
+
     def _dedup(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Remove share-class twins (same sector, caps within 2%)."""
+        """Remove share-class twins by root ticker or same-sector cap proximity."""
         deduped: list[dict[str, Any]] = []
         seen_caps: list[float] = []
+        seen_roots: set[str] = set()
         for entry in entries:
+            root = _ticker_root(entry["symbol"])
+            if root in seen_roots:
+                continue
             cap = entry["fundamentals"].get("market_cap_m") or 0
             sec = entry["fundamentals"].get("sector") or ""
             if cap > 0:
@@ -1095,6 +1108,7 @@ async def get_today_picks(
                     continue
             deduped.append(entry)
             seen_caps.append(cap)
+            seen_roots.add(root)
         return deduped
 
     b_filtered, b_rejected = _build_picks(b_candidates, "quant_score")
