@@ -122,7 +122,7 @@ async def _enrich_holdings(
 
 
 @router.get("", response_model=PortfolioResponse)
-async def get_portfolio(db: AsyncSession = Depends(get_db)):
+async def get_portfolio(_: CurrentUser, db: AsyncSession = Depends(get_db)):
     """Get the portfolio with enriched holdings.
 
     If no portfolio exists, auto-creates one named 'My Portfolio'.
@@ -153,6 +153,7 @@ async def get_portfolio(db: AsyncSession = Depends(get_db)):
 
 @router.post("", response_model=PortfolioResponse)
 async def create_portfolio(
+    _: CurrentUser,
     request: PortfolioCreate | None = None,
     db: AsyncSession = Depends(get_db),
 ):
@@ -185,6 +186,7 @@ async def create_portfolio(
 
 @router.post("/holdings/import", response_model=ImportResult)
 async def import_holdings(
+    _: CurrentUser,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -275,7 +277,7 @@ async def import_holdings(
 
 
 @router.get("/holdings/export")
-async def export_holdings(db: AsyncSession = Depends(get_db)):
+async def export_holdings(_: CurrentUser, db: AsyncSession = Depends(get_db)):
     """Export holdings as CSV with enriched live price data."""
     portfolio = await _get_or_create_portfolio(db)
     enriched, _ = await _enrich_holdings(portfolio.holdings)
@@ -308,7 +310,7 @@ async def export_holdings(db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/holdings")
-async def delete_all_holdings(db: AsyncSession = Depends(get_db)):
+async def delete_all_holdings(_: CurrentUser, db: AsyncSession = Depends(get_db)):
     """Delete all holdings from the portfolio."""
     portfolio = await _get_or_create_portfolio(db)
     result = await db.execute(
@@ -322,6 +324,7 @@ async def delete_all_holdings(db: AsyncSession = Depends(get_db)):
 
 @router.post("/holdings", response_model=HoldingResponse)
 async def add_holding(
+    _: CurrentUser,
     request: HoldingCreate,
     db: AsyncSession = Depends(get_db),
 ):
@@ -368,6 +371,7 @@ async def add_holding(
 @router.put("/holdings/{holding_id}", response_model=HoldingResponse)
 async def update_holding(
     holding_id: int,
+    _: CurrentUser,
     request: HoldingUpdate,
     db: AsyncSession = Depends(get_db),
 ):
@@ -405,6 +409,7 @@ async def update_holding(
 @router.delete("/holdings/{holding_id}")
 async def delete_holding(
     holding_id: int,
+    _: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a holding from the portfolio.
@@ -431,7 +436,7 @@ async def delete_holding(
 
 
 @router.get("/impact", response_model=PortfolioImpactResponse)
-async def get_portfolio_impact(db: AsyncSession = Depends(get_db)):
+async def get_portfolio_impact(_: CurrentUser, db: AsyncSession = Depends(get_db)):
     """Analyze how active deep insights affect portfolio holdings.
 
     For each active insight, checks if primary_symbol or related_symbols
