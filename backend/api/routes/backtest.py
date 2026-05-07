@@ -52,11 +52,14 @@ async def _load_portfolio_context() -> tuple[dict[str, dict], str]:
     lines = [
         "",
         "## Current Portfolio Holdings",
-        "The user holds the following positions. For EACH held symbol that appears "
-        "in the analysis, you MUST produce an insight with one of three actions:",
+        "The user holds the following positions. You MUST produce an insight for "
+        "EVERY held symbol below — no exceptions. Use exactly one of:",
         "  - **BUY_MORE**: thesis is bullish, add to the position",
         "  - **HOLD**: thesis is neutral, keep current size",
         "  - **SELL**: thesis is bearish, reduce or exit",
+        "",
+        "If a held symbol has limited data in the analyst reports, default to HOLD "
+        "and note the data gap. Do NOT skip any holding.",
         "",
         "Also assess how new picks interact with the portfolio: flag sector "
         "concentration risk, correlation with held names, and diversification impact.",
@@ -205,22 +208,54 @@ async def trigger_deep_picks(
     if "error" in quant_result:
         raise HTTPException(status_code=500, detail=quant_result["error"])
 
-    candidate_symbols = [p["symbol"] for p in quant_result.get("picks", [])]
+    b_picks = quant_result.get("picks", [])
+    q_picks = quant_result.get("quality_picks", [])
+
+    # Interleave Scorer B and Quality/Growth picks so both tracks are represented
+    # in the deep analysis even when n_candidates is small.
+    seen: set[str] = set()
+    interleaved: list[dict] = []
+    for i in range(max(len(b_picks), len(q_picks))):
+        if i < len(b_picks) and b_picks[i]["symbol"] not in seen:
+            interleaved.append(b_picks[i])
+            seen.add(b_picks[i]["symbol"])
+        if i < len(q_picks) and q_picks[i]["symbol"] not in seen:
+            interleaved.append(q_picks[i])
+            seen.add(q_picks[i]["symbol"])
+    candidate_symbols = [p["symbol"] for p in interleaved][:n_candidates]
     if not candidate_symbols:
         raise HTTPException(status_code=404, detail="No candidates passed quality gate")
 
     engine = get_deep_analysis_engine()
     quant_context = quant_result.get("quant_context")
     # Build lookup: symbol → (score, rank) for reconciliation tagging
-    quant_scores: dict[str, tuple[float, int]] = {
-        p["symbol"]: (p.get("quant_score", 0.0), rank + 1)
-        for rank, p in enumerate(quant_result.get("picks", []))
-    }
+    # Scorer B picks get quant_score; quality picks get quality_score (stored under quant_score key)
+    quant_scores: dict[str, tuple[float, int]] = {}
+    for rank, p in enumerate(b_picks):
+        quant_scores[p["symbol"]] = (p.get("quant_score", 0.0), rank + 1)
+    for rank, p in enumerate(q_picks):
+        if p["symbol"] not in quant_scores:
+            quant_scores[p["symbol"]] = (p.get("quality_score", 0.0), rank + 1)
+
+    # Build fundamentals map: symbol → fundamentals dict (for valuation_data on insights)
+    fundamentals_map: dict[str, dict] = {}
+    for p in b_picks + q_picks:
+        sym = p["symbol"]
+        if sym not in fundamentals_map and p.get("fundamentals"):
+            fundamentals_map[sym] = p["fundamentals"]
 
     portfolio_holdings, portfolio_ctx_str = await _load_portfolio_context()
+
+    # Add top 5 holdings by total cost so major positions get full analyst coverage
+    # without blowing up symbol count (30+ symbols causes server OOM on 5 parallel analysts).
+    top_holdings = sorted(portfolio_holdings.items(), key=lambda x: x[1]["total_cost"], reverse=True)[:5]
+    for sym, _ in top_holdings:
+        if sym not in seen:
+            candidate_symbols.append(sym)
+            seen.add(sym)
     held_candidates = [s for s in candidate_symbols if s in portfolio_holdings]
     if held_candidates:
-        logger.info("Portfolio overlap with candidates: %s", held_candidates)
+        logger.info("Portfolio holdings added to candidates: %s", held_candidates)
 
     async def _run_deep() -> None:
         try:
@@ -228,6 +263,8 @@ async def trigger_deep_picks(
                 symbols=candidate_symbols,
                 quant_context=quant_context,
                 portfolio_context=portfolio_ctx_str or None,
+                portfolio_holdings=portfolio_holdings or None,
+                fundamentals_map=fundamentals_map or None,
             )
             logger.info(
                 "Deep picks complete: %d insights from candidates %s",
@@ -265,11 +302,14 @@ async def trigger_deep_picks(
         "status": "started",
         "regime": quant_result.get("regime"),
         "regime_note": quant_result.get("regime_note"),
-        "candidates": quant_result.get("picks", []),
+        "scorer_b_picks": b_picks,
+        "quality_picks": q_picks,
+        "candidates": interleaved[:n_candidates],
         "n_candidates": len(candidate_symbols),
         "portfolio_overlap": held_candidates,
         "message": (
-            f"Deep analysis running on {candidate_symbols}. "
+            f"Deep analysis running on {candidate_symbols} "
+            f"({len(b_picks)} Scorer-B + {len(q_picks)} Quality). "
             "Poll GET /api/v1/deep-insights for results."
         ),
     }
