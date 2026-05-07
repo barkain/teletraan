@@ -200,7 +200,7 @@ export interface LLMTestResult {
 // Deep Insights Types
 // ============================================
 
-export type InsightAction = 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL' | 'WATCH';
+export type InsightAction = 'STRONG_BUY' | 'BUY' | 'BUY_MORE' | 'HOLD' | 'SELL' | 'STRONG_SELL' | 'WATCH';
 
 export type DeepInsightType = 'opportunity' | 'risk' | 'rotation' | 'macro' | 'divergence' | 'correlation';
 

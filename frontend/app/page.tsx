@@ -81,6 +81,7 @@ interface ConfidenceBucket {
 
 const ACTION_COLORS: Record<string, string> = {
   BUY: '#22c55e',
+  BUY_MORE: '#059669',
   STRONG_BUY: '#16a34a',
   SELL: '#ef4444',
   STRONG_SELL: '#dc2626',
@@ -175,7 +176,7 @@ function formatElapsedTime(seconds: number): string {
 }
 
 function computeStats(insights: { action: InsightAction }[]): AnalysisStats {
-  const buyActions: InsightAction[] = ['STRONG_BUY', 'BUY'];
+  const buyActions: InsightAction[] = ['STRONG_BUY', 'BUY', 'BUY_MORE'];
   const sellActions: InsightAction[] = ['STRONG_SELL', 'SELL'];
   const holdActions: InsightAction[] = ['HOLD'];
   const watchActions: InsightAction[] = ['WATCH'];

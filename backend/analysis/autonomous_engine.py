@@ -740,9 +740,10 @@ class AutonomousDeepEngine:
 
     async def run_autonomous_analysis(
         self,
-        max_insights: int = 5,
-        deep_dive_count: int = 5,
+        max_insights: int = 10,
+        deep_dive_count: int = 12,
         task_id: str | None = None,
+        quant_context: str | None = None,
     ) -> AutonomousAnalysisResult:
         """Run complete autonomous analysis pipeline.
 
@@ -768,6 +769,9 @@ class AutonomousDeepEngine:
         analysis_id = str(uuid4())
         start_time = datetime.utcnow()
         result = AutonomousAnalysisResult(analysis_id=analysis_id)
+
+        # Store quant context for injection into analyst and synthesis contexts
+        self._quant_context = quant_context
 
         # Clear activity log for new run, scoped to this task_id
         self.clear_activity_log(task_id=task_id)
@@ -1147,6 +1151,15 @@ class AutonomousDeepEngine:
             thematic_result=getattr(self, '_thematic_result', None),
             stock_descriptions=self._stock_descriptions or None,
         )
+
+        # Append IC-calibrated quant signals so analysts know which names the
+        # quant model flagged and why — convergence with heatmap/thematic = higher conviction
+        if getattr(self, '_quant_context', None):
+            discovery_context = (
+                f"{discovery_context}\n\n"
+                f"## IC-Calibrated Quant Signals (Bottom-Up Screen)\n"
+                f"{self._quant_context}"
+            )
 
         # Run all symbols concurrently (semaphore gates actual LLM calls)
         analyst_reports: dict[str, dict[str, Any]] = {}
@@ -2191,7 +2204,16 @@ class AutonomousDeepEngine:
             self._flatten_analyst_reports(analyst_reports)
         )
 
-        full_context = f"{autonomous_context}{portfolio_context}{thematic_context}{investor_context}\n\n{synthesis_context}"
+        quant_context_block = ""
+        if getattr(self, '_quant_context', None):
+            quant_context_block = (
+                f"\n\n## IC-Calibrated Quant Signals\n"
+                f"Stocks flagged by bottom-up quant scorer (IC-calibrated, 400-symbol universe). "
+                f"Convergence between quant signals and thematic/heatmap discovery = highest conviction.\n"
+                f"{self._quant_context}"
+            )
+
+        full_context = f"{autonomous_context}{portfolio_context}{thematic_context}{investor_context}{quant_context_block}\n\n{synthesis_context}"
 
         # Query LLM
         response = await self._query_llm(enhanced_prompt, full_context, "synthesis", "synthesis")

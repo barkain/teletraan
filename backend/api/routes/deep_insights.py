@@ -16,6 +16,7 @@ from models.analysis_task import AnalysisTask, AnalysisTaskStatus, PHASE_NAMES
 from schemas.deep_insight import DeepInsightResponse, DeepInsightListResponse
 from analysis.deep_engine import deep_analysis_engine
 from analysis.autonomous_engine import get_autonomous_engine
+from analysis.backtester import get_today_picks
 from api.routes.reports import (
     _build_report_html,
     publish_report_async,
@@ -33,8 +34,9 @@ class GenerateRequest(BaseModel):
 
 class AutonomousAnalysisRequest(BaseModel):
     """Request for autonomous analysis - no symbols required!"""
-    max_insights: int = Field(default=5, ge=1, le=20, description="Number of final insights to produce")
-    deep_dive_count: int = Field(default=7, ge=1, le=20, description="Number of opportunities to analyze in detail")
+    max_insights: int = Field(default=10, ge=1, le=20, description="Number of final insights to produce")
+    deep_dive_count: int = Field(default=12, ge=1, le=30, description="Number of opportunities to analyze in detail")
+    include_quant_signals: bool = Field(default=True, description="Run IC-calibrated quant scorer and inject scores as additional context")
 
 
 class AutonomousAnalysisResponse(BaseModel):
@@ -212,33 +214,50 @@ async def generate_deep_insights(
 @router.post("/autonomous", response_model=AutonomousAnalysisResponse)
 async def run_autonomous_analysis(
     request: AutonomousAnalysisRequest | None = None,
+    db: AsyncSession = Depends(get_db),
 ):
-    """Run autonomous market analysis.
+    """Run autonomous market analysis with optional IC-calibrated quant signals.
 
-    The system will:
-    1. Scan macro environment (identify market regime and themes)
-    2. Analyze sector rotation (find sector momentum signals)
-    3. Discover opportunities (screen for specific stocks)
-    4. Deep dive into top candidates (detailed multi-analyst analysis)
-    5. Synthesize final insights (rank and produce actionable insights)
+    Pipeline:
+    1. (Optional) IC-calibrated quant scorer ranks 400-symbol universe → injects scores as context
+    2. Macro scan — market regime + top themes
+    3. Thematic analysis — 3-5 structural investment themes with supply chain reasoning
+    4. Heatmap analysis — sector pattern detection, stock selection
+    5. Deep dive — multi-analyst analysis on top candidates
+    6. Synthesis — thematic + quant convergence informs conviction tiers
 
-    No symbols required - the system finds opportunities autonomously.
-
-    Args:
-        request: Optional parameters for max_insights and deep_dive_count.
-
-    Returns:
-        AutonomousAnalysisResponse with analysis metadata and summary.
+    Convergence between quant signals and heatmap/thematic discovery = highest-conviction insights.
     """
     engine = get_autonomous_engine()
 
-    max_insights = request.max_insights if request else 5
-    deep_dive_count = request.deep_dive_count if request else 7
+    max_insights = request.max_insights if request else 10
+    deep_dive_count = request.deep_dive_count if request else 12
+    include_quant = request.include_quant_signals if request else True
+
+    # Run IC-calibrated quant scorer to get bottom-up signals for the full universe
+    quant_context: str | None = None
+    if include_quant:
+        try:
+            quant_result = await get_today_picks(
+                db,
+                n_picks=deep_dive_count,
+                n_candidates=deep_dive_count * 2,
+                min_market_cap=500_000_000,
+            )
+            quant_context = quant_result.get("quant_context")
+            logger.info(
+                "Quant pre-screen complete: %d Scorer-B picks, %d quality picks",
+                len(quant_result.get("picks", [])),
+                len(quant_result.get("quality_picks", [])),
+            )
+        except Exception as quant_err:
+            logger.warning("Quant pre-screen failed (non-fatal): %s", quant_err)
 
     try:
         result = await engine.run_autonomous_analysis(
             max_insights=max_insights,
             deep_dive_count=deep_dive_count,
+            quant_context=quant_context,
         )
 
         # Extract top sectors from result

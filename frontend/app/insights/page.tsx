@@ -23,6 +23,7 @@ const actionOptions: { value: InsightAction | 'all'; label: string }[] = [
   { value: 'all', label: 'All Actions' },
   { value: 'STRONG_BUY', label: 'Strong Buy' },
   { value: 'BUY', label: 'Buy' },
+  { value: 'BUY_MORE', label: 'Add to Position' },
   { value: 'HOLD', label: 'Hold' },
   { value: 'SELL', label: 'Sell' },
   { value: 'STRONG_SELL', label: 'Strong Sell' },
@@ -137,6 +138,7 @@ const listActionConfig: Record<InsightAction, {
 }> = {
   STRONG_BUY: { color: 'bg-green-600 text-white', icon: TrendingUp, label: 'Strong Buy' },
   BUY: { color: 'bg-green-500 text-white', icon: TrendingUp, label: 'Buy' },
+  BUY_MORE: { color: 'bg-emerald-600 text-white', icon: TrendingUp, label: 'Add to Position' },
   HOLD: { color: 'bg-yellow-500 text-white', icon: Minus, label: 'Hold' },
   SELL: { color: 'bg-red-500 text-white', icon: TrendingDown, label: 'Sell' },
   STRONG_SELL: { color: 'bg-red-600 text-white', icon: TrendingDown, label: 'Strong Sell' },
