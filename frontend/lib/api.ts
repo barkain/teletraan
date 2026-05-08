@@ -423,10 +423,13 @@ export const api = {
     deleteHolding: (holdingId: number) =>
       deleteApi<void>(`/api/v1/portfolio/holdings/${holdingId}`),
     importCsv: async (file: File) => {
+      const token = getAccessToken();
+      const authHeader: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
       const formData = new FormData();
       formData.append('file', file);
       const res = await fetch(`${API_URL}/api/v1/portfolio/holdings/import`, {
         method: 'POST',
+        headers: { ...authHeader },
         body: formData,
       });
       if (!res.ok) {

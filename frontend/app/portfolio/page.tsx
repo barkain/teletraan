@@ -29,6 +29,7 @@ import { HoldingsTable } from '@/components/portfolio/holdings-table';
 import { HoldingDialog } from '@/components/portfolio/holding-dialog';
 import { PortfolioSummary } from '@/components/portfolio/portfolio-summary';
 import { PortfolioImpact } from '@/components/portfolio/portfolio-impact';
+import { YahooImportDialog } from '@/components/portfolio/yahoo-import-dialog';
 import {
   usePortfolio,
   usePortfolioImpact,
@@ -77,7 +78,7 @@ function PortfolioSkeleton() {
   );
 }
 
-function EmptyState({ onAdd, onImport, onIbkr, isImporting }: { onAdd: () => void; onImport: () => void; onIbkr: () => void; isImporting: boolean }) {
+function EmptyState({ onAdd, onImport, onYahoo, onIbkr, isImporting }: { onAdd: () => void; onImport: () => void; onYahoo: () => void; onIbkr: () => void; isImporting: boolean }) {
   return (
     <Card className="py-12">
       <CardContent className="flex flex-col items-center justify-center text-center">
@@ -108,6 +109,10 @@ function EmptyState({ onAdd, onImport, onIbkr, isImporting }: { onAdd: () => voi
                 <Upload className="h-4 w-4" />
                 Import CSV
               </Button>
+              <Button variant="outline" onClick={onYahoo} className="gap-2">
+                <Upload className="h-4 w-4" />
+                Yahoo Import
+              </Button>
               <Button variant="outline" onClick={onIbkr} className="gap-2">
                 <Wifi className="h-4 w-4" />
                 Sync from IBKR
@@ -127,6 +132,7 @@ export default function PortfolioPage() {
   const [ibkrDialogOpen, setIbkrDialogOpen] = useState(false);
   const [ibkrAccountId, setIbkrAccountId] = useState('');
   const [ibkrSyncing, setIbkrSyncing] = useState(false);
+  const [yahooDialogOpen, setYahooDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const queryClient = useQueryClient();
@@ -294,6 +300,10 @@ export default function PortfolioPage() {
               <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
               Update Prices
             </Button>
+            <Button variant="outline" size="sm" onClick={() => setYahooDialogOpen(true)}>
+              <Upload className="h-4 w-4 mr-2" />
+              Yahoo Import
+            </Button>
             <Button variant="outline" size="sm" onClick={() => { setIbkrAccountId(portfolio?.ibkr_account_id ?? ''); setIbkrDialogOpen(true); }} title="Sync from Interactive Brokers">
               {portfolio?.ibkr_last_synced_at ? (
                 <Wifi className="h-4 w-4 mr-2 text-green-500" />
@@ -355,7 +365,7 @@ export default function PortfolioPage() {
       ) : error ? (
         <ConnectionError error={error} />
       ) : !portfolio || !hasHoldings ? (
-        <EmptyState onAdd={handleOpenAddDialog} onImport={handleImportClick} onIbkr={() => { setIbkrAccountId(portfolio?.ibkr_account_id ?? ''); setIbkrDialogOpen(true); }} isImporting={importHoldings.isPending} />
+        <EmptyState onAdd={handleOpenAddDialog} onImport={handleImportClick} onYahoo={() => setYahooDialogOpen(true)} onIbkr={() => { setIbkrAccountId(portfolio?.ibkr_account_id ?? ''); setIbkrDialogOpen(true); }} isImporting={importHoldings.isPending} />
       ) : (
         <>
           {/* Portfolio Summary */}
@@ -385,6 +395,9 @@ export default function PortfolioPage() {
         className="hidden"
         onChange={handleFileChange}
       />
+
+      {/* Yahoo Import Dialog */}
+      <YahooImportDialog open={yahooDialogOpen} onOpenChange={setYahooDialogOpen} />
 
       {/* Holding Dialog */}
       <HoldingDialog
