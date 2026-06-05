@@ -8,6 +8,7 @@ import {
   Building2
 } from 'lucide-react';
 import type { AutonomousAnalysisResponse } from '@/types';
+import { Markdown } from '@/components/markdown';
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)}s`;
@@ -66,8 +67,8 @@ export function AnalysisSummaryBanner({ result }: AnalysisSummaryBannerProps) {
           <summary className="text-sm text-muted-foreground cursor-pointer hover:text-foreground">
             How were these opportunities found?
           </summary>
-          <div className="mt-2 p-3 bg-background/50 rounded-lg text-sm whitespace-pre-line">
-            {result.discovery_summary}
+          <div className="mt-2 p-3 bg-background/50 rounded-lg">
+            <Markdown>{result.discovery_summary}</Markdown>
           </div>
         </details>
       )}
