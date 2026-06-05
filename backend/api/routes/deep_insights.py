@@ -156,9 +156,27 @@ async def list_deep_insights(
     result = await db.execute(query)
     insights = result.scalars().all()
 
+    # Validate each row independently so a single malformed legacy row
+    # (e.g. alpha-engine evidence missing analyst/finding) cannot 500 the
+    # entire list. Rows that still fail validation are logged and skipped.
+    items: list[DeepInsightResponse] = []
+    skipped = 0
+    for i in insights:
+        try:
+            items.append(DeepInsightResponse.model_validate(i))
+        except Exception as exc:
+            skipped += 1
+            logger.warning(
+                "Skipping deep insight id=%s in list response; failed validation: %s",
+                getattr(i, "id", "?"),
+                exc,
+            )
+
+    # Keep the reported total consistent with what the client can actually
+    # page through when rows were skipped.
     return DeepInsightListResponse(
-        items=[DeepInsightResponse.model_validate(i) for i in insights],
-        total=total or 0,
+        items=items,
+        total=max((total or 0) - skipped, 0),
     )
 
 
@@ -174,7 +192,15 @@ async def get_deep_insight(
     insight = result.scalar_one_or_none()
     if not insight:
         raise HTTPException(status_code=404, detail="Deep insight not found")
-    return DeepInsightResponse.model_validate(insight)
+    try:
+        return DeepInsightResponse.model_validate(insight)
+    except Exception as exc:
+        logger.warning(
+            "Deep insight id=%s failed response validation: %s", insight_id, exc
+        )
+        raise HTTPException(
+            status_code=500, detail="Deep insight failed to serialize"
+        )
 
 
 @router.post("/generate")

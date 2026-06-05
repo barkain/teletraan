@@ -258,6 +258,13 @@ async def synthesize_alpha_run(
             secondary_plays=candidate.portfolio_relevance or None,
             supporting_evidence=[
                 {
+                    "analyst": "alpha_engine",
+                    "finding": (
+                        f"Alpha engine ranked {candidate.symbol} with overall score "
+                        f"{float(candidate.overall_score):.1f} at confidence "
+                        f"{float(candidate.confidence):.2f}"
+                        + (" (portfolio holding)" if candidate.is_portfolio_holding else "")
+                    ),
                     "source": "alpha_engine",
                     "overall_score": candidate.overall_score,
                     "confidence": candidate.confidence,
