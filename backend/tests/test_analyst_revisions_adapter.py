@@ -7,7 +7,7 @@ import pytest
 async def test_analyst_revisions_adapter_scores_improving_trends(monkeypatch: pytest.MonkeyPatch):
     from data.adapters import analyst_revisions as ar
 
-    monkeypatch.setattr(ar.finnhub_adapter, "is_configured", True)
+    monkeypatch.setattr(ar.finnhub_adapter, "api_key", "test-key")
 
     async def fake_trends(symbol: str):
         return [

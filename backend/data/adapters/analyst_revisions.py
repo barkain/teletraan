@@ -92,9 +92,9 @@ class AnalystRevisionAdapter:
     def _set_cached(self, key: str, data: Any) -> None:
         self._cache[key] = _CacheEntry(data, _CACHE_TTL)
 
-    async def _run_blocking(self, func: Any) -> Any:
+    async def _run_blocking(self, func: Any, *args: Any) -> Any:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor, func)
+        return await loop.run_in_executor(self._executor, func, *args)
 
     @staticmethod
     def _score_recommendation_mean(rec_mean: float | None) -> float:
