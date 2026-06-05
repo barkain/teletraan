@@ -5,6 +5,7 @@ scheduler can execute the full autonomous pipeline (run + persist +
 auto-publish) without duplicating logic.
 """
 
+import asyncio
 import logging
 from datetime import datetime
 
@@ -173,24 +174,42 @@ async def run_autonomous_analysis_pipeline(
                         pub_err,
                     )
 
+    except asyncio.CancelledError:
+        # Cancellation must still mark the task as failed — otherwise the
+        # record stays "active" forever and the UI polls a phantom run.
+        # Shield the DB update so a second cancel cannot abort it.
+        logger.warning("Background analysis %s was cancelled", task_id)
+        try:
+            await asyncio.shield(
+                _mark_task_failed(task_id, "Analysis was cancelled")
+            )
+        except Exception as update_error:
+            logger.error(
+                "Failed to mark cancelled task %s: %s", task_id, update_error
+            )
+        raise
     except Exception as e:
         logger.error("Background analysis %s failed: %s", task_id, e)
-        # Mark task as failed
         try:
-            async with async_session_factory() as session:
-                result = await session.execute(
-                    select(AnalysisTask).where(AnalysisTask.id == task_id)
-                )
-                task = result.scalar_one_or_none()
-                if task:
-                    task.status = AnalysisTaskStatus.FAILED.value
-                    task.progress = -1
-                    task.error_message = str(e)
-                    task.completed_at = datetime.utcnow()
-                    await session.commit()
+            await _mark_task_failed(task_id, str(e))
         except Exception as update_error:
             logger.error(
                 "Failed to update task %s with error: %s",
                 task_id,
                 update_error,
             )
+
+
+async def _mark_task_failed(task_id: str, message: str) -> None:
+    """Mark an analysis task as failed with the given error message."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(AnalysisTask).where(AnalysisTask.id == task_id)
+        )
+        task = result.scalar_one_or_none()
+        if task:
+            task.status = AnalysisTaskStatus.FAILED.value
+            task.progress = -1
+            task.error_message = message
+            task.completed_at = datetime.utcnow()
+            await session.commit()

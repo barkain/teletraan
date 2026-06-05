@@ -1,10 +1,11 @@
 """Deep Insights API routes."""
 
+import asyncio
 import logging
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,6 +102,9 @@ class StartAnalysisResponse(BaseModel):
 
 
 router = APIRouter()
+
+# Strong references to detached analysis tasks so they are not GC'd mid-run.
+_detached_analysis_tasks: set[asyncio.Task] = set()
 
 
 @router.get("", response_model=DeepInsightListResponse)
@@ -205,7 +209,6 @@ async def get_deep_insight(
 
 @router.post("/generate")
 async def generate_deep_insights(
-    background_tasks: BackgroundTasks,
     request: GenerateRequest | None = None,
 ):
     """Trigger deep analysis to generate new insights.
@@ -222,11 +225,13 @@ async def generate_deep_insights(
     """
     symbols = request.symbols if request else None
 
-    # Run analysis in background
-    background_tasks.add_task(
-        deep_analysis_engine.run_and_store,
-        symbols=symbols,
+    # Run analysis as a detached task (not BackgroundTasks) so a client
+    # disconnect cannot cancel the multi-minute pipeline mid-flight.
+    generate_task = asyncio.create_task(
+        deep_analysis_engine.run_and_store(symbols=symbols)
     )
+    _detached_analysis_tasks.add(generate_task)
+    generate_task.add_done_callback(_detached_analysis_tasks.discard)
 
     return {
         "message": "Deep analysis started",
@@ -499,7 +504,6 @@ async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_co
 
 @router.post("/autonomous/start", response_model=StartAnalysisResponse)
 async def start_autonomous_analysis(
-    background_tasks: BackgroundTasks,
     request: AutonomousAnalysisRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ):
@@ -509,7 +513,6 @@ async def start_autonomous_analysis(
     Use the /autonomous/status/{task_id} endpoint to poll for progress.
 
     Args:
-        background_tasks: FastAPI background tasks.
         request: Optional analysis parameters.
         db: Database session.
 
@@ -540,13 +543,19 @@ async def start_autonomous_analysis(
     engine = get_autonomous_engine()
     engine.clear_activity_log(task_id=task_id)
 
-    # Start background task
-    background_tasks.add_task(
-        _run_background_analysis,
-        task_id=task_id,
-        max_insights=max_insights,
-        deep_dive_count=deep_dive_count,
+    # Start the analysis as a DETACHED task, not via BackgroundTasks:
+    # Starlette runs background tasks inside the request's ASGI scope, so a
+    # client disconnect (tab close, navigation, idle keep-alive teardown)
+    # cancels the entire multi-minute pipeline mid-flight.
+    analysis_task = asyncio.create_task(
+        _run_background_analysis(
+            task_id=task_id,
+            max_insights=max_insights,
+            deep_dive_count=deep_dive_count,
+        )
     )
+    _detached_analysis_tasks.add(analysis_task)
+    analysis_task.add_done_callback(_detached_analysis_tasks.discard)
 
     return StartAnalysisResponse(
         task_id=task_id,
