@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Loader2, Send, Save } from 'lucide-react';
@@ -32,10 +32,14 @@ export function AnnotationForm({
 }: AnnotationFormProps) {
   const [note, setNote] = useState(initialNote);
 
-  // Reset note when initialNote changes (switching between edit modes)
-  useEffect(() => {
+  // Reset note when initialNote changes (switching between edit modes).
+  // Tracking the prop and adjusting state during render avoids a cascading
+  // setState-in-effect and applies the new value on the same render.
+  const [prevInitialNote, setPrevInitialNote] = useState(initialNote);
+  if (prevInitialNote !== initialNote) {
+    setPrevInitialNote(initialNote);
     setNote(initialNote);
-  }, [initialNote]);
+  }
 
   const charactersRemaining = MAX_CHARACTERS - note.length;
   const isOverLimit = charactersRemaining < 0;

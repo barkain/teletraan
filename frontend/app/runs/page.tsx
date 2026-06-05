@@ -291,7 +291,7 @@ function DurationChart({ runs }: { runs: RunSummary[] }) {
                 borderRadius: '8px',
                 fontSize: 12,
               }}
-              formatter={(value: number | undefined) => [`${formatDuration(value ?? 0)}`, 'Duration']}
+              formatter={(value) => [`${formatDuration(Number(value) || 0)}`, 'Duration']}
             />
             <Bar dataKey="duration" fill={CHART_BLUE} radius={[4, 4, 0, 0]} />
           </BarChart>
@@ -334,7 +334,7 @@ function CostChart({ runs }: { runs: RunSummary[] }) {
                 borderRadius: '8px',
                 fontSize: 12,
               }}
-              formatter={(value: number | undefined) => [`$${(value ?? 0).toFixed(4)}`, 'Cost']}
+              formatter={(value) => [`$${(Number(value) || 0).toFixed(4)}`, 'Cost']}
             />
             <Line
               type="monotone"

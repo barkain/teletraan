@@ -135,8 +135,10 @@ export function useAnalysisTask(options: UseAnalysisTaskOptions = {}): UseAnalys
   // Refs for callbacks to avoid stale closures
   const onCompleteRef = useRef(onComplete);
   const onErrorRef = useRef(onError);
-  onCompleteRef.current = onComplete;
-  onErrorRef.current = onError;
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+    onErrorRef.current = onError;
+  }, [onComplete, onError]);
 
   // Polling ref
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
