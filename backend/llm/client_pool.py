@@ -230,7 +230,7 @@ class ClientPool:
         # Block until a slot is available (this IS the concurrency control)
         logger.debug(f"[POOL] Checkout requested. Queue size: {self._available.qsize()}/{self._size}, initialized: {self._initialized}")
         try:
-            client_or_none = await asyncio.wait_for(self._available.get(), timeout=CHECKOUT_TIMEOUT)
+            await asyncio.wait_for(self._available.get(), timeout=CHECKOUT_TIMEOUT)
         except asyncio.TimeoutError:
             logger.error(f"[POOL] Checkout FAILED. Queue size: {self._available.qsize()}/{self._size}")
             raise TimeoutError(f"Pool checkout timed out after {CHECKOUT_TIMEOUT}s — all slots busy")
@@ -242,23 +242,30 @@ class ClientPool:
         # py3.13 and would otherwise leak the slot permanently). A try/finally
         # guarantees the slot is put back exactly once and the client is
         # always destroyed/disconnected.
+        #
+        # The queue only ever carries None placeholders: every checkout
+        # creates a fresh client and destroys it before returning the slot.
         # ------------------------------------------------------------------
-        # Always discard any cached client — we need a fresh conversation
-        if client_or_none is not None:
-            await self._destroy_client(client_or_none)
-
         client: ClaudeSDKClient | None = None
         try:
             client = await self._create_client()
             self._total_queries += 1
             yield client
         finally:
-            # Destroy after use to prevent conversation bleed and return the
-            # slot. Shielded so cancellation during teardown cannot abort the
-            # cleanup and leak the slot.
-            if client is not None:
-                await asyncio.shield(self._destroy_client(client))
-            await self._available.put(None)  # Return empty slot exactly once
+            try:
+                if client is not None:
+                    # Disconnect in THIS task — the same task that connected
+                    # the client. The SDK's anyio cancel scopes are task-bound:
+                    # disconnecting from another task (e.g. via asyncio.shield,
+                    # which wraps the coroutine in a separate task) raises
+                    # "Attempted to exit cancel scope in a different task" and
+                    # corrupts this task's cancel scope stack, cancelling the
+                    # caller mid-run.
+                    await self._destroy_client(client)
+            finally:
+                # We hold a slot, so queue space is guaranteed; put_nowait
+                # cannot suspend, making the slot return cancellation-proof.
+                self._available.put_nowait(None)
 
     async def shutdown(self) -> None:
         """Drain the pool and disconnect all clients."""
