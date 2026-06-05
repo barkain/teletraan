@@ -46,7 +46,7 @@ async def test_detect_market_regime_prefers_risk_on_growth(monkeypatch: pytest.M
 
     async def fake_fetch_price_history(symbol: str, period: str = "3mo"):
         if symbol == "SPY":
-            return _series(100, 105)
+            return _series(100, 130)
         if symbol == "QQQ":
             return _series(100, 112)
         if symbol == "IWM":
