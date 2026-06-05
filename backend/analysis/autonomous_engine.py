@@ -315,7 +315,7 @@ class AutonomousDeepEngine:
 
     Optimized for speed: uses 3 analysts per symbol (macro context is already
     embedded via Phase 1, correlation is covered by sector strategist),
-    8 concurrent LLM connections, and fire-and-forget pattern extraction.
+    12 concurrent LLM connections, and fire-and-forget pattern extraction.
 
     Falls back to the legacy sector rotation / opportunity hunt pipeline
     if heatmap fetch fails.
@@ -400,8 +400,9 @@ class AutonomousDeepEngine:
         # Phase 1: Macro Scanner
         self.macro_scanner = MacroScanner()
 
-        # Limit concurrent LLM calls to match client pool size
-        self._llm_semaphore = asyncio.Semaphore(8)
+        # Throttle the deep-dive analyst fan-out (see _run_deep_dive); the
+        # client pool enforces the global concurrency cap independently.
+        self._llm_semaphore = asyncio.Semaphore(12)
 
         self._last_analysis_time: datetime | None = None
 

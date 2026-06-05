@@ -30,8 +30,8 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient  # type: ignore
 logger = logging.getLogger(__name__)
 
 # Pool configuration
-POOL_SIZE = 8  # Max concurrent LLM sessions (main.py raises FD limit to 4096; 8 clients use ~80-120 FDs)
-CHECKOUT_TIMEOUT = 60  # seconds to wait for a pool slot before raising TimeoutError
+POOL_SIZE = 12  # Max concurrent LLM sessions (main.py raises FD limit to 4096; 12 clients use ~120-180 FDs)
+CHECKOUT_TIMEOUT = 180  # seconds to wait for a pool slot before raising TimeoutError
 LLM_QUERY_TIMEOUT = 300  # seconds to wait for an LLM query to complete
 
 
@@ -228,11 +228,21 @@ class ClientPool:
         await self.initialize()
 
         # Block until a slot is available (this IS the concurrency control)
+        logger.debug(f"[POOL] Checkout requested. Queue size: {self._available.qsize()}/{self._size}, initialized: {self._initialized}")
         try:
             client_or_none = await asyncio.wait_for(self._available.get(), timeout=CHECKOUT_TIMEOUT)
         except asyncio.TimeoutError:
+            logger.error(f"[POOL] Checkout FAILED. Queue size: {self._available.qsize()}/{self._size}")
             raise TimeoutError(f"Pool checkout timed out after {CHECKOUT_TIMEOUT}s — all slots busy")
 
+        # ------------------------------------------------------------------
+        # From here on we hold a slot and MUST return it exactly once on
+        # every exit path -- normal completion, Exception, or BaseException
+        # (notably asyncio.CancelledError, which is a BaseException in
+        # py3.13 and would otherwise leak the slot permanently). A try/finally
+        # guarantees the slot is put back exactly once and the client is
+        # always destroyed/disconnected.
+        # ------------------------------------------------------------------
         # Always discard any cached client — we need a fresh conversation
         if client_or_none is not None:
             await self._destroy_client(client_or_none)
@@ -240,21 +250,15 @@ class ClientPool:
         client: ClaudeSDKClient | None = None
         try:
             client = await self._create_client()
-
             self._total_queries += 1
             yield client
-
-            # Destroy after use to prevent conversation bleed
-            await self._destroy_client(client)
-            client = None
-            await self._available.put(None)  # Return empty slot
-
-        except Exception:
-            # Error -- discard this client and put a fresh slot back
+        finally:
+            # Destroy after use to prevent conversation bleed and return the
+            # slot. Shielded so cancellation during teardown cannot abort the
+            # cleanup and leak the slot.
             if client is not None:
-                await self._destroy_client(client)
-            await self._available.put(None)
-            raise
+                await asyncio.shield(self._destroy_client(client))
+            await self._available.put(None)  # Return empty slot exactly once
 
     async def shutdown(self) -> None:
         """Drain the pool and disconnect all clients."""
