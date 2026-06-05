@@ -2077,6 +2077,62 @@ class AutonomousDeepEngine:
                 insight["action"] = "BUY"
         return insights
 
+    @staticmethod
+    def _dedupe_insights(insights: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Collapse insights that share a primary symbol.
+
+        The synthesis LLM occasionally anchors two insights on the same
+        ticker (e.g. a single-stock thesis plus a basket framed around the
+        same name). Keep the higher-confidence insight per symbol and merge
+        the dropped insight's related symbols into the survivor so no
+        coverage is lost. Insights without a primary symbol (theme/basket
+        insights) are never collapsed.
+
+        Args:
+            insights: Parsed insight dicts from synthesis.
+
+        Returns:
+            Insights with at most one entry per primary symbol, original
+            order preserved.
+        """
+        if not insights:
+            return insights
+        kept_by_symbol: dict[str, dict[str, Any]] = {}
+        result: list[dict[str, Any]] = []
+        for insight in insights:
+            symbol = (insight.get("primary_symbol") or "").strip().upper()
+            if not symbol:
+                result.append(insight)
+                continue
+            existing = kept_by_symbol.get(symbol)
+            if existing is None:
+                kept_by_symbol[symbol] = insight
+                result.append(insight)
+                continue
+            existing_conf = float(existing.get("confidence") or 0)
+            new_conf = float(insight.get("confidence") or 0)
+            keep, drop = (
+                (existing, insight) if existing_conf >= new_conf else (insight, existing)
+            )
+            if keep is not existing:
+                result[result.index(existing)] = keep
+                kept_by_symbol[symbol] = keep
+            # Merge related symbols from the dropped insight (deduped,
+            # order-preserving, excluding the primary itself).
+            keep["related_symbols"] = list(dict.fromkeys(
+                [s for s in (keep.get("related_symbols") or []) if s]
+                + [
+                    s for s in (drop.get("related_symbols") or [])
+                    if s and s.strip().upper() != symbol
+                ]
+            ))
+            logger.info(
+                f"[AUTO] Dropping duplicate insight for {symbol}: "
+                f"'{str(drop.get('title', ''))[:60]}' (conf {drop.get('confidence')}) "
+                f"in favor of '{str(keep.get('title', ''))[:60]}' (conf {keep.get('confidence')})"
+            )
+        return result
+
     def _build_heatmap_discovery_context(
         self,
         macro_result: MacroScanResult,
@@ -2266,6 +2322,7 @@ class AutonomousDeepEngine:
             self._dump_synthesis_debug(response)
             insights = []
 
+        insights = self._dedupe_insights(insights)
         insights = self._enforce_portfolio_action_rules(insights, portfolio_holdings)
 
         # Adjust confidence based on historical track record
@@ -3585,6 +3642,7 @@ class AutonomousDeepEngine:
             self._dump_synthesis_debug(response)
             insights = []
 
+        insights = self._dedupe_insights(insights)
         insights = self._enforce_portfolio_action_rules(insights, portfolio_holdings)
 
         # Adjust confidence based on historical track record

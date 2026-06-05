@@ -316,6 +316,15 @@ Return JSON:
 - **divergence**: Unusual relationship breakdown with specific tradeable symbols to exploit it
 - **correlation**: Cross-asset relationship insight with specific trade recommendations
 
+## Symbol Uniqueness
+- Each primary_symbol may appear in AT MOST ONE insight. If a ticker fits
+  multiple themes (e.g. a single-stock setup AND a basket/theme play), pick
+  the single strongest framing and fold the rest into that insight's thesis,
+  related_symbols, and secondary_plays.
+- For multi-name basket/theme insights with no single dominant ticker, set
+  primary_symbol to null and list every name in related_symbols instead of
+  anchoring the basket on one arbitrary member.
+
 ## Secondary Plays (Derived Insights)
 For each insight with `related_symbols`, you MUST also provide a `secondary_plays` string explaining WHY each related symbol matters and what it offers relative to the primary symbol. This turns related tickers into actionable intelligence:
 - Explain the relationship (peer, ETF, supplier, beneficiary, hedge, etc.)
@@ -1483,7 +1492,9 @@ Produce {max_insights} HIGH-CONVICTION investment insights. For each:
 ### Selection Criteria:
 - Prioritize opportunities that ALIGN with macro themes and sector rotation
 - Favor setups with clear risk/reward (minimum 2:1)
-- Include mix of opportunity types if possible
+- Include mix of opportunity types if possible — but each symbol may appear
+  as the primary of AT MOST ONE insight; pick the strongest framing per
+  ticker and reference other angles via related symbols/secondary plays
 - Higher confidence for sector leaders in hot sectors
 - Lower confidence for contrarian plays
 
