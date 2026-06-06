@@ -923,8 +923,18 @@ def parse_synthesis_response_full(response: str) -> SynthesisParseResult:
     json_data = _extract_json(response)
 
     if json_data is None:
-        logger.warning("Could not extract JSON from synthesis response")
-        return SynthesisParseResult()
+        # Whole-document parse failed even after repair — recover whatever
+        # insight objects are individually valid instead of dropping the run.
+        salvaged = _salvage_insight_objects(response)
+        if salvaged:
+            logger.warning(
+                "Synthesis JSON was malformed; salvaged %d insight objects individually",
+                len(salvaged),
+            )
+            json_data = {"insights": salvaged}
+        else:
+            logger.warning("Could not extract JSON from synthesis response")
+            return SynthesisParseResult()
 
     result = SynthesisParseResult()
 
@@ -1048,8 +1058,18 @@ def _strip_json_comments(text: str) -> str:
     return re.sub(r'//[^\n]*', '', text)
 
 
+def _repair_llm_json(text: str) -> str:
+    """Fix known LLM JSON emission glitches.
+
+    Observed in production: a stray quote between array elements —
+    '},"{"key"...' where '},{"key"...' was intended — which makes the whole
+    document unparseable and previously dropped every insight in the run.
+    """
+    return re.sub(r'\}\s*,\s*"\s*\{\s*"', '},{"', text)
+
+
 def _try_parse_json(text: str) -> dict[str, Any] | None:
-    """Try to parse text as JSON, stripping comments if needed."""
+    """Try to parse text as JSON, repairing glitches / stripping comments if needed."""
     try:
         result = json.loads(text.strip())
         if isinstance(result, dict):
@@ -1063,7 +1083,37 @@ def _try_parse_json(text: str) -> dict[str, Any] | None:
             return result
     except json.JSONDecodeError:
         pass
+    # Retry after repairing known LLM JSON glitches (combined with comment strip)
+    try:
+        result = json.loads(_repair_llm_json(_strip_json_comments(text)).strip())
+        if isinstance(result, dict):
+            logger.warning("Synthesis JSON required glitch repair to parse")
+            return result
+    except json.JSONDecodeError:
+        pass
     return None
+
+
+def _salvage_insight_objects(text: str) -> list[dict[str, Any]]:
+    """Last-resort recovery: parse each insight object independently.
+
+    When a localized glitch makes the synthesis document unparseable as a
+    whole even after repair, recover every individually valid insight rather
+    than dropping the entire run. Uses raw_decode anchored at each
+    '{"insight_type"' occurrence, so a corrupted object only loses itself —
+    the scan state cannot desync across objects the way a brace-counting
+    walk would after an unbalanced quote.
+    """
+    decoder = json.JSONDecoder()
+    objects: list[dict[str, Any]] = []
+    for match in re.finditer(r'\{\s*"insight_type"', text):
+        try:
+            obj, _ = decoder.raw_decode(text, match.start())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            objects.append(obj)
+    return objects
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
