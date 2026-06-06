@@ -11,14 +11,20 @@ interface ThemeToggleProps {
   variant?: 'default' | 'header';
 }
 
-export function ThemeToggle({ variant = 'default' }: ThemeToggleProps) {
-  const [mounted, setMounted] = React.useState(false);
-  const { theme, setTheme } = useTheme();
+// Detect client-side hydration without a setState-in-effect: the server
+// snapshot is always `false`, the client snapshot is always `true`, so the
+// component re-renders once after hydration with theme-dependent UI enabled.
+function subscribe() {
+  return () => {};
+}
 
-  // Ensure hydration matches by only rendering theme-dependent UI after mount
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
+export function ThemeToggle({ variant = 'default' }: ThemeToggleProps) {
+  const mounted = React.useSyncExternalStore(
+    subscribe,
+    () => true,
+    () => false
+  );
+  const { theme, setTheme } = useTheme();
 
   const toggleTheme = () => {
     setTheme(theme === 'dark' ? 'light' : 'dark');

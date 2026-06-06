@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pytest
 
 
@@ -12,13 +14,21 @@ async def test_sec_filings_adapter_normalizes_recent_filings(monkeypatch: pytest
         "AAPL": {"cik": "0000320193", "company_name": "Apple Inc."}
     }
 
+    today = date.today()
+    filing_dates = [
+        (today - timedelta(days=5)).isoformat(),
+        (today - timedelta(days=10)).isoformat(),
+        (today - timedelta(days=20)).isoformat(),
+        (today - timedelta(days=40)).isoformat(),
+    ]
+
     async def fake_fetch_json(url: str, params=None):
         if "submissions/CIK0000320193.json" in url:
             return {
                 "filings": {
                     "recent": {
                         "form": ["8-K", "4", "10-Q", "13D"],
-                        "filingDate": ["2026-04-28", "2026-04-20", "2026-04-01", "2026-03-15"],
+                        "filingDate": filing_dates,
                         "accessionNumber": [
                             "0000320193-26-000010",
                             "0000320193-26-000011",

@@ -64,6 +64,105 @@ async def test_list_deep_insights_with_data(client: AsyncClient, sample_deep_ins
     assert item["confidence"] == pytest.approx(0.88)  # noqa: S101
 
 
+async def test_list_deep_insights_with_alpha_engine_evidence(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
+    """A row with alpha-engine evidence (no analyst/finding keys) does not 500 the list.
+
+    Regression for the case where ``alpha_synthesis`` persisted
+    ``supporting_evidence`` dicts shaped like
+    ``{"source": "alpha_engine", "overall_score": ..., "confidence": ..., ...}``
+    with no ``analyst``/``finding`` keys, causing ``DeepInsightResponse`` to raise a
+    ValidationError and the whole list endpoint to return 500.
+    """
+    alpha_evidence = [
+        {
+            "source": "alpha_engine",
+            "overall_score": 72.5,
+            "confidence": 0.8,
+            "subscores": {"momentum": 10, "value": 5},
+            "portfolio_holding": False,
+            "expected_horizon_days": 45,
+        }
+    ]
+    insight = _make_deep_insight(
+        title="Alpha Engine Candidate",
+        primary_symbol="ALPHA",
+        supporting_evidence=alpha_evidence,
+        analysts_involved=["alpha_engine"],
+        data_sources=["alpha_engine"],
+    )
+    db_session.add(insight)
+    await db_session.commit()
+    await db_session.refresh(insight)
+
+    resp = await client.get("/api/v1/deep-insights")
+    assert resp.status_code == 200  # noqa: S101
+    body = resp.json()
+    assert body["total"] == 1  # noqa: S101
+    assert len(body["items"]) == 1  # noqa: S101
+
+    item = body["items"][0]
+    assert item["id"] == insight.id  # noqa: S101
+    assert item["title"] == "Alpha Engine Candidate"  # noqa: S101
+
+    # The evidence round-trips with derived analyst/finding plus extra alpha fields.
+    evidence = item["supporting_evidence"][0]
+    assert evidence["analyst"] == "alpha_engine"  # noqa: S101
+    assert evidence["finding"]  # synthesized, non-empty  # noqa: S101
+    assert evidence["source"] == "alpha_engine"  # extra field preserved  # noqa: S101
+    assert evidence["overall_score"] == pytest.approx(72.5)  # noqa: S101
+
+
+def test_alpha_engine_evidence_schema_round_trips():
+    """``DeepInsightResponse`` validates an ORM row with alpha-shaped evidence directly.
+
+    Auth-independent assertion so the regression is covered even if the HTTP
+    client fixture returns 401 (the auth conftest fixture is being fixed in
+    parallel).
+    """
+    from datetime import datetime
+
+    from schemas.deep_insight import DeepInsightResponse
+
+    insight = DeepInsight(
+        id=178,
+        insight_type="opportunity",
+        action="BUY",
+        title="Alpha Engine Candidate",
+        thesis="Alpha engine thesis text.",
+        primary_symbol="ALPHA",
+        related_symbols=[],
+        supporting_evidence=[
+            {
+                "source": "alpha_engine",
+                "overall_score": 72.5,
+                "confidence": 0.8,
+                "subscores": {"momentum": 10, "value": 5},
+                "portfolio_holding": False,
+                "expected_horizon_days": 45,
+            }
+        ],
+        confidence=0.8,
+        time_horizon="swing",
+        risk_factors=[],
+        analysts_involved=["alpha_engine"],
+        data_sources=["alpha_engine"],
+    )
+    insight.created_at = datetime(2026, 6, 5)
+    insight.updated_at = None
+
+    resp = DeepInsightResponse.model_validate(insight)
+    assert resp.id == 178  # noqa: S101
+    evidence = resp.supporting_evidence[0]
+    assert evidence.analyst == "alpha_engine"  # noqa: S101
+    assert evidence.finding  # synthesized, non-empty  # noqa: S101
+    assert evidence.confidence == pytest.approx(0.8)  # noqa: S101
+    # Extra alpha fields round-trip via extra="allow".
+    assert evidence.model_dump()["source"] == "alpha_engine"  # noqa: S101
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/deep-insights/{insight_id}  (get by ID)
 # ---------------------------------------------------------------------------

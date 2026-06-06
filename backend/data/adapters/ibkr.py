@@ -21,7 +21,7 @@ import ssl
 from dataclasses import dataclass
 from typing import Any
 
-import aiohttp
+import aiohttp  # pyright: ignore[reportMissingImports]
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class IBKRAdapter:
             await self._session.close()
             self._session = None
 
-    async def __aenter__(self) -> "IBKRAdapter":
+    async def __aenter__(self) -> IBKRAdapter:
         return self
 
     async def __aexit__(self, *_: Any) -> None:
@@ -134,12 +134,19 @@ class IBKRAdapter:
     # ------------------------------------------------------------------
 
     async def get_accounts(self) -> list[IBKRAccount]:
-        """List all accounts accessible via this gateway session."""
+        """List all accounts accessible via this gateway session.
+
+        Only paper accounts (DU prefix) are returned — live accounts are filtered out.
+        """
         data = await self._get("/v1/api/portfolio/accounts")
         accounts: list[IBKRAccount] = []
         for item in data:
+            account_id = item.get("id", "")
+            if not account_id.startswith("DU"):
+                logger.warning("Skipping live IBKR account %s — only paper accounts allowed", account_id)
+                continue
             accounts.append(IBKRAccount(
-                account_id=item.get("id", ""),
+                account_id=account_id,
                 account_type=item.get("type", ""),
                 display_name=item.get("displayName") or item.get("id", ""),
             ))
@@ -151,6 +158,8 @@ class IBKRAdapter:
 
     async def get_positions(self, account_id: str) -> list[IBKRPosition]:
         """Fetch all positions for an account (paginates automatically)."""
+        if not account_id.startswith("DU"):
+            raise ValueError("Refusing to access live IBKR account. Only paper accounts (DU prefix) are allowed.")
         positions: list[IBKRPosition] = []
         page = 0
         while True:

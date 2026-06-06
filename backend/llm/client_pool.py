@@ -30,7 +30,9 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient  # type: ignore
 logger = logging.getLogger(__name__)
 
 # Pool configuration
-POOL_SIZE = 8  # Max concurrent LLM sessions (main.py raises FD limit to 4096; 8 clients use ~80-120 FDs)
+POOL_SIZE = 12  # Max concurrent LLM sessions (main.py raises FD limit to 4096; 12 clients use ~120-180 FDs)
+CHECKOUT_TIMEOUT = 180  # seconds to wait for a pool slot before raising TimeoutError
+LLM_QUERY_TIMEOUT = 300  # seconds to wait for an LLM query to complete
 
 
 @dataclass
@@ -226,30 +228,44 @@ class ClientPool:
         await self.initialize()
 
         # Block until a slot is available (this IS the concurrency control)
-        client_or_none = await self._available.get()
+        logger.debug(f"[POOL] Checkout requested. Queue size: {self._available.qsize()}/{self._size}, initialized: {self._initialized}")
+        try:
+            await asyncio.wait_for(self._available.get(), timeout=CHECKOUT_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.error(f"[POOL] Checkout FAILED. Queue size: {self._available.qsize()}/{self._size}")
+            raise TimeoutError(f"Pool checkout timed out after {CHECKOUT_TIMEOUT}s — all slots busy")
 
-        # Always discard any cached client — we need a fresh conversation
-        if client_or_none is not None:
-            await self._destroy_client(client_or_none)
-
+        # ------------------------------------------------------------------
+        # From here on we hold a slot and MUST return it exactly once on
+        # every exit path -- normal completion, Exception, or BaseException
+        # (notably asyncio.CancelledError, which is a BaseException in
+        # py3.13 and would otherwise leak the slot permanently). A try/finally
+        # guarantees the slot is put back exactly once and the client is
+        # always destroyed/disconnected.
+        #
+        # The queue only ever carries None placeholders: every checkout
+        # creates a fresh client and destroys it before returning the slot.
+        # ------------------------------------------------------------------
         client: ClaudeSDKClient | None = None
         try:
             client = await self._create_client()
-
             self._total_queries += 1
             yield client
-
-            # Destroy after use to prevent conversation bleed
-            await self._destroy_client(client)
-            client = None
-            await self._available.put(None)  # Return empty slot
-
-        except Exception:
-            # Error -- discard this client and put a fresh slot back
-            if client is not None:
-                await self._destroy_client(client)
-            await self._available.put(None)
-            raise
+        finally:
+            try:
+                if client is not None:
+                    # Disconnect in THIS task — the same task that connected
+                    # the client. The SDK's anyio cancel scopes are task-bound:
+                    # disconnecting from another task (e.g. via asyncio.shield,
+                    # which wraps the coroutine in a separate task) raises
+                    # "Attempted to exit cancel scope in a different task" and
+                    # corrupts this task's cancel scope stack, cancelling the
+                    # caller mid-run.
+                    await self._destroy_client(client)
+            finally:
+                # We hold a slot, so queue space is guaranteed; put_nowait
+                # cannot suspend, making the slot return cancellation-proof.
+                self._available.put_nowait(None)
 
     async def shutdown(self) -> None:
         """Drain the pool and disconnect all clients."""
@@ -320,8 +336,8 @@ async def pool_query_llm(
     sdk_duration_ms = 0.0
     model = ""
 
-    start = time.monotonic()
-    async with pool.checkout() as client:
+    async def _execute_query() -> None:
+        nonlocal response_text, input_tokens, output_tokens, cost_usd, sdk_duration_ms
         await client.query(combined_prompt)
         async for msg in client.receive_response():
             if isinstance(msg, AssistantMessage):
@@ -343,6 +359,14 @@ async def pool_query_llm(
                     + usage.get("cache_read_input_tokens", 0)
                 )
                 output_tokens = usage.get("output_tokens", 0)
+
+    start = time.monotonic()
+    async with pool.checkout() as client:
+        try:
+            await asyncio.wait_for(_execute_query(), timeout=LLM_QUERY_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.error(f"[POOL] {agent_name} TIMED OUT after {LLM_QUERY_TIMEOUT}s")
+            raise
 
     elapsed_ms = (time.monotonic() - start) * 1000
 

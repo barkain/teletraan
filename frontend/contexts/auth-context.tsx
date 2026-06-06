@@ -35,28 +35,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const scheduleRefresh = useCallback(() => {
-    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-    refreshTimerRef.current = setTimeout(async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/v1/auth/refresh`, {
-          method: 'POST',
-          credentials: 'include',
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setAccessToken(data.access_token);
-          scheduleRefresh();
-        } else {
-          // Refresh failed — clear session
+  // The recursive scheduling logic lives in a ref so the timer callback can call
+  // the latest version without a forward self-reference inside useCallback.
+  const scheduleRefreshRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    scheduleRefreshRef.current = () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = setTimeout(async () => {
+        try {
+          const res = await fetch(`${API_URL}/api/v1/auth/refresh`, {
+            method: 'POST',
+            credentials: 'include',
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setAccessToken(data.access_token);
+            scheduleRefreshRef.current();
+          } else {
+            // Refresh failed — clear session
+            setAccessToken(null);
+            setUser(null);
+          }
+        } catch {
           setAccessToken(null);
           setUser(null);
         }
-      } catch {
-        setAccessToken(null);
-        setUser(null);
-      }
-    }, REFRESH_INTERVAL_MS);
+      }, REFRESH_INTERVAL_MS);
+    };
+  });
+
+  const scheduleRefresh = useCallback(() => {
+    scheduleRefreshRef.current();
   }, []);
 
   // On mount: try to restore session via the httpOnly refresh cookie

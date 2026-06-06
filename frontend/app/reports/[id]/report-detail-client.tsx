@@ -24,6 +24,7 @@ import {
   Eye,
 } from 'lucide-react';
 import { ConnectionError, isNetworkError } from '@/components/ui/empty-state';
+import { Markdown } from '@/components/markdown';
 
 // ---- Helpers ----
 
@@ -402,9 +403,7 @@ export default function ReportDetailClient({ params }: ReportDetailPageProps) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-sm leading-relaxed whitespace-pre-wrap">
-              {report.discovery_summary}
-            </div>
+            <Markdown>{report.discovery_summary}</Markdown>
           </CardContent>
         </Card>
       )}

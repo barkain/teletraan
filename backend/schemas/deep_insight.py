@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional, Any
 from enum import Enum
 
@@ -21,9 +21,50 @@ class InsightType(str, Enum):
     CORRELATION = "correlation"
 
 class AnalystEvidence(BaseModel):
-    analyst: str
-    finding: str
+    # Allow extra keys so alpha-engine payloads (source, overall_score, subscores,
+    # portfolio_holding, expected_horizon_days, ...) round-trip without loss.
+    model_config = ConfigDict(extra="allow")
+
+    analyst: str = ""
+    finding: str = ""
     confidence: Optional[float] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_alpha_engine_shape(cls, data: Any) -> Any:
+        """Tolerate alpha-engine evidence dicts that lack ``analyst``/``finding``.
+
+        Legacy DB rows persisted by the alpha engine have the shape
+        ``{"source": "alpha_engine", "overall_score": ..., "confidence": ...,
+        "subscores": {...}, ...}`` with no ``analyst``/``finding`` keys. Derive
+        ``analyst`` from ``source`` and synthesize a human-readable ``finding``
+        from the available score fields so these rows serialize without migration.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        data = dict(data)  # avoid mutating the caller's dict
+
+        if not data.get("analyst"):
+            data["analyst"] = data.get("source") or ""
+
+        if not data.get("finding"):
+            parts: list[str] = []
+            score = data.get("overall_score")
+            if score is not None:
+                try:
+                    parts.append(f"overall_score {float(score):.1f}")
+                except (TypeError, ValueError):
+                    parts.append(f"overall_score {score}")
+            conf = data.get("confidence")
+            if conf is not None:
+                try:
+                    parts.append(f"confidence {float(conf):.2f}")
+                except (TypeError, ValueError):
+                    parts.append(f"confidence {conf}")
+            data["finding"] = ", ".join(parts)
+
+        return data
 
 class DeepInsightBase(BaseModel):
     insight_type: InsightType

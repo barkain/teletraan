@@ -1,10 +1,11 @@
 """Deep Insights API routes."""
 
+import asyncio
 import logging
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,6 +103,9 @@ class StartAnalysisResponse(BaseModel):
 
 router = APIRouter()
 
+# Strong references to detached analysis tasks so they are not GC'd mid-run.
+_detached_analysis_tasks: set[asyncio.Task] = set()
+
 
 @router.get("", response_model=DeepInsightListResponse)
 async def list_deep_insights(
@@ -156,9 +160,27 @@ async def list_deep_insights(
     result = await db.execute(query)
     insights = result.scalars().all()
 
+    # Validate each row independently so a single malformed legacy row
+    # (e.g. alpha-engine evidence missing analyst/finding) cannot 500 the
+    # entire list. Rows that still fail validation are logged and skipped.
+    items: list[DeepInsightResponse] = []
+    skipped = 0
+    for i in insights:
+        try:
+            items.append(DeepInsightResponse.model_validate(i))
+        except Exception as exc:
+            skipped += 1
+            logger.warning(
+                "Skipping deep insight id=%s in list response; failed validation: %s",
+                getattr(i, "id", "?"),
+                exc,
+            )
+
+    # Keep the reported total consistent with what the client can actually
+    # page through when rows were skipped.
     return DeepInsightListResponse(
-        items=[DeepInsightResponse.model_validate(i) for i in insights],
-        total=total or 0,
+        items=items,
+        total=max((total or 0) - skipped, 0),
     )
 
 
@@ -174,12 +196,19 @@ async def get_deep_insight(
     insight = result.scalar_one_or_none()
     if not insight:
         raise HTTPException(status_code=404, detail="Deep insight not found")
-    return DeepInsightResponse.model_validate(insight)
+    try:
+        return DeepInsightResponse.model_validate(insight)
+    except Exception as exc:
+        logger.warning(
+            "Deep insight id=%s failed response validation: %s", insight_id, exc
+        )
+        raise HTTPException(
+            status_code=500, detail="Deep insight failed to serialize"
+        )
 
 
 @router.post("/generate")
 async def generate_deep_insights(
-    background_tasks: BackgroundTasks,
     request: GenerateRequest | None = None,
 ):
     """Trigger deep analysis to generate new insights.
@@ -196,11 +225,13 @@ async def generate_deep_insights(
     """
     symbols = request.symbols if request else None
 
-    # Run analysis in background
-    background_tasks.add_task(
-        deep_analysis_engine.run_and_store,
-        symbols=symbols,
+    # Run analysis as a detached task (not BackgroundTasks) so a client
+    # disconnect cannot cancel the multi-minute pipeline mid-flight.
+    generate_task = asyncio.create_task(
+        deep_analysis_engine.run_and_store(symbols=symbols)
     )
+    _detached_analysis_tasks.add(generate_task)
+    generate_task.add_done_callback(_detached_analysis_tasks.discard)
 
     return {
         "message": "Deep analysis started",
@@ -473,7 +504,6 @@ async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_co
 
 @router.post("/autonomous/start", response_model=StartAnalysisResponse)
 async def start_autonomous_analysis(
-    background_tasks: BackgroundTasks,
     request: AutonomousAnalysisRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ):
@@ -483,7 +513,6 @@ async def start_autonomous_analysis(
     Use the /autonomous/status/{task_id} endpoint to poll for progress.
 
     Args:
-        background_tasks: FastAPI background tasks.
         request: Optional analysis parameters.
         db: Database session.
 
@@ -514,13 +543,19 @@ async def start_autonomous_analysis(
     engine = get_autonomous_engine()
     engine.clear_activity_log(task_id=task_id)
 
-    # Start background task
-    background_tasks.add_task(
-        _run_background_analysis,
-        task_id=task_id,
-        max_insights=max_insights,
-        deep_dive_count=deep_dive_count,
+    # Start the analysis as a DETACHED task, not via BackgroundTasks:
+    # Starlette runs background tasks inside the request's ASGI scope, so a
+    # client disconnect (tab close, navigation, idle keep-alive teardown)
+    # cancels the entire multi-minute pipeline mid-flight.
+    analysis_task = asyncio.create_task(
+        _run_background_analysis(
+            task_id=task_id,
+            max_insights=max_insights,
+            deep_dive_count=deep_dive_count,
+        )
     )
+    _detached_analysis_tasks.add(analysis_task)
+    analysis_task.add_done_callback(_detached_analysis_tasks.discard)
 
     return StartAnalysisResponse(
         task_id=task_id,

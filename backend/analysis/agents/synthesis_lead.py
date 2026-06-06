@@ -316,6 +316,15 @@ Return JSON:
 - **divergence**: Unusual relationship breakdown with specific tradeable symbols to exploit it
 - **correlation**: Cross-asset relationship insight with specific trade recommendations
 
+## Symbol Uniqueness
+- Each primary_symbol may appear in AT MOST ONE insight. If a ticker fits
+  multiple themes (e.g. a single-stock setup AND a basket/theme play), pick
+  the single strongest framing and fold the rest into that insight's thesis,
+  related_symbols, and secondary_plays.
+- For multi-name basket/theme insights with no single dominant ticker, set
+  primary_symbol to null and list every name in related_symbols instead of
+  anchoring the basket on one arbitrary member.
+
 ## Secondary Plays (Derived Insights)
 For each insight with `related_symbols`, you MUST also provide a `secondary_plays` string explaining WHY each related symbol matters and what it offers relative to the primary symbol. This turns related tickers into actionable intelligence:
 - Explain the relationship (peer, ETF, supplier, beneficiary, hedge, etc.)
@@ -914,8 +923,18 @@ def parse_synthesis_response_full(response: str) -> SynthesisParseResult:
     json_data = _extract_json(response)
 
     if json_data is None:
-        logger.warning("Could not extract JSON from synthesis response")
-        return SynthesisParseResult()
+        # Whole-document parse failed even after repair — recover whatever
+        # insight objects are individually valid instead of dropping the run.
+        salvaged = _salvage_insight_objects(response)
+        if salvaged:
+            logger.warning(
+                "Synthesis JSON was malformed; salvaged %d insight objects individually",
+                len(salvaged),
+            )
+            json_data = {"insights": salvaged}
+        else:
+            logger.warning("Could not extract JSON from synthesis response")
+            return SynthesisParseResult()
 
     result = SynthesisParseResult()
 
@@ -1039,8 +1058,18 @@ def _strip_json_comments(text: str) -> str:
     return re.sub(r'//[^\n]*', '', text)
 
 
+def _repair_llm_json(text: str) -> str:
+    """Fix known LLM JSON emission glitches.
+
+    Observed in production: a stray quote between array elements —
+    '},"{"key"...' where '},{"key"...' was intended — which makes the whole
+    document unparseable and previously dropped every insight in the run.
+    """
+    return re.sub(r'\}\s*,\s*"\s*\{\s*"', '},{"', text)
+
+
 def _try_parse_json(text: str) -> dict[str, Any] | None:
-    """Try to parse text as JSON, stripping comments if needed."""
+    """Try to parse text as JSON, repairing glitches / stripping comments if needed."""
     try:
         result = json.loads(text.strip())
         if isinstance(result, dict):
@@ -1054,7 +1083,37 @@ def _try_parse_json(text: str) -> dict[str, Any] | None:
             return result
     except json.JSONDecodeError:
         pass
+    # Retry after repairing known LLM JSON glitches (combined with comment strip)
+    try:
+        result = json.loads(_repair_llm_json(_strip_json_comments(text)).strip())
+        if isinstance(result, dict):
+            logger.warning("Synthesis JSON required glitch repair to parse")
+            return result
+    except json.JSONDecodeError:
+        pass
     return None
+
+
+def _salvage_insight_objects(text: str) -> list[dict[str, Any]]:
+    """Last-resort recovery: parse each insight object independently.
+
+    When a localized glitch makes the synthesis document unparseable as a
+    whole even after repair, recover every individually valid insight rather
+    than dropping the entire run. Uses raw_decode anchored at each
+    '{"insight_type"' occurrence, so a corrupted object only loses itself —
+    the scan state cannot desync across objects the way a brace-counting
+    walk would after an unbalanced quote.
+    """
+    decoder = json.JSONDecoder()
+    objects: list[dict[str, Any]] = []
+    for match in re.finditer(r'\{\s*"insight_type"', text):
+        try:
+            obj, _ = decoder.raw_decode(text, match.start())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            objects.append(obj)
+    return objects
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
@@ -1483,7 +1542,9 @@ Produce {max_insights} HIGH-CONVICTION investment insights. For each:
 ### Selection Criteria:
 - Prioritize opportunities that ALIGN with macro themes and sector rotation
 - Favor setups with clear risk/reward (minimum 2:1)
-- Include mix of opportunity types if possible
+- Include mix of opportunity types if possible — but each symbol may appear
+  as the primary of AT MOST ONE insight; pick the strongest framing per
+  ticker and reference other angles via related symbols/secondary plays
 - Higher confidence for sector leaders in hot sectors
 - Lower confidence for contrarian plays
 

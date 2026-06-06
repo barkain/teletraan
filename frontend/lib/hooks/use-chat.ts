@@ -1,18 +1,18 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { getAccessToken } from '@/lib/auth-store';
 import type { Message, ToolCall, ChatState, SendMessageOptions } from '@/types/chat';
 
 // WebSocket URL - can be configured via environment variable
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/api/v1/chat';
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 // Reconnection settings
 const RECONNECT_INTERVAL = 3000;
 const MAX_RECONNECT_ATTEMPTS = 5;
 
 interface WSMessage {
-  type: 'ack' | 'text' | 'tool_call' | 'tool_result' | 'done' | 'error';
+  type: 'ack' | 'text' | 'tool_call' | 'tool_result' | 'done' | 'error' | 'history_cleared';
   message_id?: string;
   content?: string;
   tool_name?: string;
@@ -47,7 +47,8 @@ export function useChat() {
   const handleWSMessage = useCallback((data: WSMessage) => {
     switch (data.type) {
       case 'ack':
-        // Message acknowledged, nothing to do
+      case 'history_cleared':
+        // Acknowledgments, nothing to do
         break;
 
       case 'text':
@@ -159,7 +160,10 @@ export function useChat() {
     }
 
     try {
-      const ws = new WebSocket(WS_URL);
+      // The backend authenticates WS connections via a token query param
+      // (browsers cannot set an Authorization header on WebSocket upgrades).
+      const token = getAccessToken();
+      const ws = new WebSocket(token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL);
 
       ws.onopen = () => {
         console.log('WebSocket connected');
@@ -309,11 +313,11 @@ export function useChat() {
       error: null,
     }));
 
-    // Also clear on server
-    try {
-      await fetch(`${API_URL}/chat/clear`, { method: 'POST' });
-    } catch (error) {
-      console.error('Failed to clear server chat history:', error);
+    // Server-side history lives on this connection's agent — clear it via a
+    // WS control message. If the socket is closed there is nothing to clear:
+    // the next connection gets a fresh agent.
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'clear' }));
     }
   }, []);
 

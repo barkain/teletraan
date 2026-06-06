@@ -4,9 +4,11 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
-from llm.market_agent import get_market_agent
+from api.deps import get_current_user_ws
+from llm.market_agent import MarketAnalysisAgent
+from models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +68,23 @@ manager = ConnectionManager()
 
 
 @router.websocket("/chat")
-async def chat_websocket(websocket: WebSocket) -> None:
+async def chat_websocket(
+    websocket: WebSocket,
+    user: User = Depends(get_current_user_ws),
+) -> None:
     """WebSocket endpoint for streaming LLM chat responses.
+
+    Requires a valid access token passed as a ``token`` query parameter
+    (browsers cannot set an Authorization header on WebSocket upgrades).
+
+    Each connection gets its own isolated agent instance with independent
+    conversation history — sessions never bleed into one another.
 
     Message Protocol:
     - Client sends: {"id": "msg-id", "message": "user question"}
+    - Client sends (clear): {"type": "clear"} — resets this session's history
     - Server sends (ack): {"type": "ack", "message_id": "msg-id"}
+    - Server sends (history_cleared): {"type": "history_cleared"}
     - Server sends (text): {"type": "text", "content": "response chunk"}
     - Server sends (tool_call): {"type": "tool_call", "tool_name": "...", "tool_args": {...}}
     - Server sends (tool_result): {"type": "tool_result", "tool_name": "...", "tool_result": {...}}
@@ -82,8 +95,9 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
     await manager.connect(websocket, client_id)
 
-    # Get or create agent instance for this client
-    agent = get_market_agent()
+    # Each connection gets its own agent — conversation history is isolated
+    # per session and never bleeds across users/tabs.
+    agent = MarketAnalysisAgent()
 
     try:
         while True:
@@ -95,6 +109,14 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 await manager.send_message(client_id, {
                     "type": "error",
                     "error": "Invalid JSON message"
+                })
+                continue
+
+            # Control message: clear this session's conversation history
+            if data.get("type") == "clear":
+                agent.clear_history()
+                await manager.send_message(client_id, {
+                    "type": "history_cleared"
                 })
                 continue
 
@@ -164,15 +186,3 @@ async def chat_websocket(websocket: WebSocket) -> None:
     except Exception as e:
         logger.error(f"Unexpected error for client {client_id}: {e}")
         manager.disconnect(client_id)
-
-
-@router.post("/chat/clear")
-async def clear_chat() -> dict:
-    """Clear chat history for all sessions.
-
-    Returns:
-        Status message indicating history was cleared.
-    """
-    agent = get_market_agent()
-    agent.clear_history()
-    return {"status": "cleared", "message": "Chat history has been cleared"}

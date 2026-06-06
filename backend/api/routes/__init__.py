@@ -38,7 +38,10 @@ router.include_router(auth_router)
 _auth = [Depends(get_current_user)]
 
 router.include_router(analysis_router, dependencies=_auth)
-router.include_router(chat_router, dependencies=_auth)
+# Chat is WebSocket-only: HTTPBearer cannot resolve on a WS upgrade (it would
+# 500 every connection), so the route authenticates itself via
+# get_current_user_ws (token query param) instead of router-level _auth.
+router.include_router(chat_router)
 router.include_router(data_router, tags=["data"], dependencies=_auth)
 router.include_router(deep_insights_router, prefix="/deep-insights", tags=["deep-insights"], dependencies=_auth)
 router.include_router(insight_conversations_router, tags=["insight-conversations"], dependencies=_auth)

@@ -179,7 +179,7 @@ function HistoricalPerformanceChart({
                               className="w-2 h-2 rounded-full"
                               style={{ backgroundColor: entry.color }}
                             />
-                            <span>{entry.dataKey}:</span>
+                            <span>{String(entry.dataKey)}:</span>
                             <span className="font-medium">
                               {(entry.value as number).toFixed(2)}%
                             </span>

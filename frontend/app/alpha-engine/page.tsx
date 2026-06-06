@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -319,33 +319,29 @@ function PastRunRow({ run, onSelect }: { run: AlphaRun; onSelect: (id: string) =
 // ---------------------------------------------------------------------------
 
 export default function AlphaEnginePage() {
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  // Seed from localStorage synchronously so the task id survives a page reload
+  // without needing an effect-driven setState.
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('alpha_task_id');
+  });
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
-  // Check for active run on mount (page-reload resilience)
+  // Check for active run on mount (page-reload resilience). Adopt the server's
+  // active task id during render — setting state during render of this same
+  // component is allowed and avoids a cascading-render effect.
   const { data: activeTask } = useAlphaActive();
-  useEffect(() => {
-    if (activeTask && !activeTaskId) {
-      setActiveTaskId(activeTask.task_id);
-    }
-  }, [activeTask, activeTaskId]);
-
-  // Load from localStorage as a fallback
-  useEffect(() => {
-    const stored = localStorage.getItem('alpha_task_id');
-    if (stored && !activeTaskId) {
-      setActiveTaskId(stored);
-    }
-  }, [activeTaskId]);
+  if (activeTask && !activeTaskId) {
+    setActiveTaskId(activeTask.task_id);
+  }
 
   const { data: taskStatus } = useAlphaStatus(activeTaskId);
 
-  // When run completes, show its detail automatically
-  useEffect(() => {
-    if (taskStatus?.status === 'completed' && taskStatus.analysis_run_id && !selectedRunId) {
-      setSelectedRunId(taskStatus.analysis_run_id);
-    }
-  }, [taskStatus, selectedRunId]);
+  // When a run completes, show its detail automatically. Derived during render
+  // (rather than in an effect) to avoid a cascading-render setState.
+  if (taskStatus?.status === 'completed' && taskStatus.analysis_run_id && !selectedRunId) {
+    setSelectedRunId(taskStatus.analysis_run_id);
+  }
 
   const startRun = useStartAlphaRun();
   const { data: runsData, isLoading: runsLoading } = useAlphaRuns({ limit: 10 });

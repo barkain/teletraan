@@ -77,13 +77,25 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """
     from main import app  # noqa: E402
     from database import get_db as database_get_db  # noqa: E402
-    from api.deps import get_db as deps_get_db  # noqa: E402
+    from api.deps import get_db as deps_get_db, get_current_user  # noqa: E402
+    from models.user import User  # noqa: E402
 
     async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
+    test_user = User(
+        id=1,
+        username="testuser",
+        hashed_password="not-a-real-hash",
+        is_active=True,
+    )
+
+    async def _override_get_current_user() -> User:
+        return test_user
+
     app.dependency_overrides[database_get_db] = _override_get_db
     app.dependency_overrides[deps_get_db] = _override_get_db
+    app.dependency_overrides[get_current_user] = _override_get_current_user
 
     transport = ASGITransport(app=app)  # type: ignore[arg-type]
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

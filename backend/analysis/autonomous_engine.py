@@ -315,7 +315,7 @@ class AutonomousDeepEngine:
 
     Optimized for speed: uses 3 analysts per symbol (macro context is already
     embedded via Phase 1, correlation is covered by sector strategist),
-    8 concurrent LLM connections, and fire-and-forget pattern extraction.
+    12 concurrent LLM connections, and fire-and-forget pattern extraction.
 
     Falls back to the legacy sector rotation / opportunity hunt pipeline
     if heatmap fetch fails.
@@ -400,8 +400,9 @@ class AutonomousDeepEngine:
         # Phase 1: Macro Scanner
         self.macro_scanner = MacroScanner()
 
-        # Limit concurrent LLM calls to match client pool size
-        self._llm_semaphore = asyncio.Semaphore(8)
+        # Throttle the deep-dive analyst fan-out (see _run_deep_dive); the
+        # client pool enforces the global concurrency cap independently.
+        self._llm_semaphore = asyncio.Semaphore(12)
 
         self._last_analysis_time: datetime | None = None
 
@@ -1249,8 +1250,15 @@ class AutonomousDeepEngine:
             reports = await self._run_analysts_for_symbol(sym, discovery_context, pre_built_context=pre_context)
             return sym, reports
 
+        async def _with_timeout(coro, sym):
+            try:
+                return await asyncio.wait_for(coro, timeout=self.timeout_seconds * 3)
+            except asyncio.TimeoutError:
+                logger.error(f"Symbol {sym} analysis timed out after {self.timeout_seconds * 3}s")
+                return asyncio.TimeoutError(f"{sym} timed out")
+
         gather_results = await asyncio.gather(
-            *[_analyze_symbol(sym) for sym in symbols_to_analyze],
+            *[_with_timeout(_analyze_symbol(sym), sym) for sym in symbols_to_analyze],
             return_exceptions=True,
         )
 
@@ -1592,8 +1600,15 @@ class AutonomousDeepEngine:
                 reports = await self._run_analysts_for_symbol(sym, discovery_context)
                 return sym, reports
 
+            async def _with_timeout(coro, sym):
+                try:
+                    return await asyncio.wait_for(coro, timeout=self.timeout_seconds * 3)
+                except asyncio.TimeoutError:
+                    logger.error(f"Symbol {sym} analysis timed out after {self.timeout_seconds * 3}s")
+                    return asyncio.TimeoutError(f"{sym} timed out")
+
             coverage_results = await asyncio.gather(
-                *[_analyze_additional(sym) for sym in additional_symbols],
+                *[_with_timeout(_analyze_additional(sym), sym) for sym in additional_symbols],
                 return_exceptions=True,
             )
 
@@ -1977,8 +1992,16 @@ class AutonomousDeepEngine:
                 return None
 
         # Run all cluster analyses concurrently
+        async def _with_cluster_timeout(coro, cluster):
+            theme = cluster.get("theme", "unknown")
+            try:
+                return await asyncio.wait_for(coro, timeout=self.timeout_seconds * 3)
+            except asyncio.TimeoutError:
+                logger.error(f"Cluster '{theme}' analysis timed out after {self.timeout_seconds * 3}s")
+                return asyncio.TimeoutError(f"Cluster '{theme}' timed out")
+
         gather_results = await asyncio.gather(
-            *[_analyze_one_cluster(c) for c in clusters],
+            *[_with_cluster_timeout(_analyze_one_cluster(c), c) for c in clusters],
             return_exceptions=True,
         )
         for r in gather_results:
@@ -2013,14 +2036,14 @@ class AutonomousDeepEngine:
         return lines
 
     @staticmethod
-    def _enforce_portfolio_sell_rules(
+    def _enforce_portfolio_action_rules(
         insights: list[dict[str, Any]],
         portfolio_holdings: dict[str, dict[str, float]] | None,
     ) -> list[dict[str, Any]]:
-        """Convert SELL/STRONG_SELL to AVOID for stocks not in portfolio.
+        """Enforce portfolio-aware action rules.
 
-        This is a hard validation layer ensuring sell recommendations only
-        apply to stocks the user actually owns.
+        - SELL/STRONG_SELL on non-held stocks → AVOID
+        - HOLD/BUY_MORE on non-held stocks → WATCH/BUY respectively
 
         Args:
             insights: Parsed insight dicts from synthesis.
@@ -2035,12 +2058,80 @@ class AutonomousDeepEngine:
         for insight in insights:
             action = insight.get("action", "")
             symbol = insight.get("primary_symbol", "")
-            if action in ("SELL", "STRONG_SELL") and symbol and symbol.upper() not in held_symbols:
+            if not symbol or symbol.upper() in held_symbols:
+                continue
+            if action in ("SELL", "STRONG_SELL"):
                 logger.info(
                     f"[AUTO] Converting {action} → AVOID for {symbol} (not in portfolio)"
                 )
                 insight["action"] = "AVOID"
+            elif action == "HOLD":
+                logger.info(
+                    f"[AUTO] Converting HOLD → WATCH for {symbol} (not in portfolio)"
+                )
+                insight["action"] = "WATCH"
+            elif action == "BUY_MORE":
+                logger.info(
+                    f"[AUTO] Converting BUY_MORE → BUY for {symbol} (not in portfolio)"
+                )
+                insight["action"] = "BUY"
         return insights
+
+    @staticmethod
+    def _dedupe_insights(insights: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Collapse insights that share a primary symbol.
+
+        The synthesis LLM occasionally anchors two insights on the same
+        ticker (e.g. a single-stock thesis plus a basket framed around the
+        same name). Keep the higher-confidence insight per symbol and merge
+        the dropped insight's related symbols into the survivor so no
+        coverage is lost. Insights without a primary symbol (theme/basket
+        insights) are never collapsed.
+
+        Args:
+            insights: Parsed insight dicts from synthesis.
+
+        Returns:
+            Insights with at most one entry per primary symbol, original
+            order preserved.
+        """
+        if not insights:
+            return insights
+        kept_by_symbol: dict[str, dict[str, Any]] = {}
+        result: list[dict[str, Any]] = []
+        for insight in insights:
+            symbol = (insight.get("primary_symbol") or "").strip().upper()
+            if not symbol:
+                result.append(insight)
+                continue
+            existing = kept_by_symbol.get(symbol)
+            if existing is None:
+                kept_by_symbol[symbol] = insight
+                result.append(insight)
+                continue
+            existing_conf = float(existing.get("confidence") or 0)
+            new_conf = float(insight.get("confidence") or 0)
+            keep, drop = (
+                (existing, insight) if existing_conf >= new_conf else (insight, existing)
+            )
+            if keep is not existing:
+                result[result.index(existing)] = keep
+                kept_by_symbol[symbol] = keep
+            # Merge related symbols from the dropped insight (deduped,
+            # order-preserving, excluding the primary itself).
+            keep["related_symbols"] = list(dict.fromkeys(
+                [s for s in (keep.get("related_symbols") or []) if s]
+                + [
+                    s for s in (drop.get("related_symbols") or [])
+                    if s and s.strip().upper() != symbol
+                ]
+            ))
+            logger.info(
+                f"[AUTO] Dropping duplicate insight for {symbol}: "
+                f"'{str(drop.get('title', ''))[:60]}' (conf {drop.get('confidence')}) "
+                f"in favor of '{str(keep.get('title', ''))[:60]}' (conf {keep.get('confidence')})"
+            )
+        return result
 
     def _build_heatmap_discovery_context(
         self,
@@ -2231,7 +2322,8 @@ class AutonomousDeepEngine:
             self._dump_synthesis_debug(response)
             insights = []
 
-        insights = self._enforce_portfolio_sell_rules(insights, portfolio_holdings)
+        insights = self._dedupe_insights(insights)
+        insights = self._enforce_portfolio_action_rules(insights, portfolio_holdings)
 
         # Adjust confidence based on historical track record
         try:
@@ -2897,8 +2989,15 @@ class AutonomousDeepEngine:
                     result.errors.append(f"Deep dive {sym}: {str(e)}")
                     return sym, None
 
+            async def _with_timeout(coro, sym):
+                try:
+                    return await asyncio.wait_for(coro, timeout=self.timeout_seconds * 3)
+                except asyncio.TimeoutError:
+                    logger.error(f"Symbol {sym} analysis timed out after {self.timeout_seconds * 3}s")
+                    return asyncio.TimeoutError(f"{sym} timed out")
+
             gather_results = await asyncio.gather(
-                *[_analyze_one(sym) for sym in symbols_to_analyze],
+                *[_with_timeout(_analyze_one(sym), sym) for sym in symbols_to_analyze],
                 return_exceptions=True,
             )
             for r in gather_results:
@@ -3365,7 +3464,17 @@ class AutonomousDeepEngine:
             tasks.append(task)
             analyst_names.append(analyst_name)
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        async def _with_analyst_timeout(coro, name):
+            try:
+                return await asyncio.wait_for(coro, timeout=self.timeout_seconds * 2)
+            except asyncio.TimeoutError:
+                logger.error(f"Analyst {name} for {symbol} timed out after {self.timeout_seconds * 2}s")
+                return asyncio.TimeoutError(f"{name} timed out for {symbol}")
+
+        results = await asyncio.gather(
+            *[_with_analyst_timeout(t, n) for t, n in zip(tasks, analyst_names)],
+            return_exceptions=True,
+        )
 
         for analyst_name, analyst_result in zip(analyst_names, results):
             if isinstance(analyst_result, Exception):
@@ -3533,7 +3642,8 @@ class AutonomousDeepEngine:
             self._dump_synthesis_debug(response)
             insights = []
 
-        insights = self._enforce_portfolio_sell_rules(insights, portfolio_holdings)
+        insights = self._dedupe_insights(insights)
+        insights = self._enforce_portfolio_action_rules(insights, portfolio_holdings)
 
         # Adjust confidence based on historical track record
         try:
