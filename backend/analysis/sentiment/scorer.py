@@ -147,8 +147,16 @@ class SentimentScorer:
 
         try:
             if _HAS_FINVADER:
+                # indicator="compound" is REQUIRED: finvader() only assigns its
+                # return value inside the indicator branches, so omitting it
+                # raises UnboundLocalError (silently swallowed below -> 0.0).
                 return float(
-                    finvader(text, use_sentibignomics=True, use_henry=True)  # type: ignore[name-defined]
+                    finvader(  # type: ignore[name-defined]
+                        text,
+                        indicator="compound",
+                        use_sentibignomics=True,
+                        use_henry=True,
+                    )
                 )
             if _HAS_VADER and self._vader_analyzer is not None:
                 scores = self._vader_analyzer.polarity_scores(text)  # type: ignore[union-attr]
