@@ -2945,8 +2945,9 @@ def _build_analysis_sources_html(ins: DeepInsight, include_market_data: bool = T
     ta = ins.technical_analysis_data
     pred = ins.prediction_market_data if include_market_data else None
     sent = ins.sentiment_data if include_market_data else None
+    news = ins.news_data if include_market_data else None
 
-    if not ta and not pred and not sent:
+    if not ta and not pred and not sent and not news:
         return ""
 
     sections: list[str] = []
@@ -3087,6 +3088,12 @@ def _build_analysis_sources_html(ins: DeepInsight, include_market_data: bool = T
         sent_html = _build_reddit_sentiment_html(sent, ta=ta, symbol=ins.primary_symbol)
         if sent_html:
             sections.append(sent_html)
+
+    # --- News Sentiment (delegated to extracted helper) ---
+    if news and isinstance(news, dict):
+        news_html = _build_news_html(news, symbol=ins.primary_symbol)
+        if news_html:
+            sections.append(news_html)
 
     if not sections:
         return ""
@@ -4703,6 +4710,172 @@ def _build_reddit_sentiment_html(sent: dict, ta: dict | None = None, symbol: str
             '</div>'
         )
     return ""
+
+
+def _build_news_html(news: dict, symbol: str | None = None) -> str:
+    """Render financial-news sentiment for a given news_data dict.
+
+    Models the Reddit sentiment renderer. The ``news_data`` shape follows the
+    news-intelligence contract: ``{as_of, market:{sentiment_score,label,
+    article_count,trend}, per_symbol:[{symbol,sentiment_score,label,trend,
+    article_count,events,top_article:{headline,source,url}}], vacuum:[symbols]}``.
+
+    *symbol* is the insight's primary symbol, used to surface its row first.
+    Returns an empty string when there is nothing meaningful to show.
+    """
+    if not news or not isinstance(news, dict):
+        return ""
+
+    market = news.get("market") or {}
+    per_symbol = news.get("per_symbol") or []
+    vacuum = news.get("vacuum") or []
+
+    if not isinstance(per_symbol, list):
+        per_symbol = []
+    if not isinstance(vacuum, list):
+        vacuum = []
+
+    market_label = market.get("label") if isinstance(market, dict) else None
+    market_score = market.get("sentiment_score") if isinstance(market, dict) else None
+    market_articles = market.get("article_count") if isinstance(market, dict) else None
+    market_trend = market.get("trend") if isinstance(market, dict) else None
+
+    # Nothing to render at all.
+    if not market_label and not per_symbol and not vacuum:
+        return ""
+
+    def _score_color(score: float) -> str:
+        if score >= 0.15:
+            return "#10B981"
+        if score <= -0.15:
+            return "#EF4444"
+        return "#94a3b8"
+
+    def _trend_arrow(trend: str | None) -> str:
+        t = str(trend or "").lower()
+        if "up" in t or "improv" in t or "rising" in t:
+            return "&#8593;"  # up arrow
+        if "down" in t or "deterior" in t or "falling" in t:
+            return "&#8595;"  # down arrow
+        return "&#8594;"  # right arrow (flat)
+
+    news_html = (
+        '<div class="src-section">'
+        '<div class="src-section-title">News Sentiment</div>'
+    )
+
+    # Market tone line
+    if market_label:
+        m_score = float(market_score) if market_score is not None else 0.0
+        m_color = _score_color(m_score)
+        explain_parts: list[str] = []
+        if market_score is not None:
+            explain_parts.append(f"score {m_score:+.2f}")
+        if market_articles:
+            explain_parts.append(f"{int(market_articles)} articles")
+        if market_trend:
+            explain_parts.append(f"trend {_esc(str(market_trend))}")
+        explain = ", ".join(explain_parts)
+        news_html += (
+            '<div class="src-sent-mood">'
+            f'<span class="src-sent-dot" style="background:{m_color};box-shadow:0 0 6px {m_color};"></span>'
+            f'<span style="color:{m_color};">{_esc(str(market_label).title())}</span>'
+            f'<span style="margin-left:6px;opacity:0.7;">{_trend_arrow(market_trend)}</span>'
+            '</div>'
+        )
+        if explain:
+            news_html += f'<div class="src-sent-explain">Market news tone: {explain}.</div>'
+
+    # Per-symbol rows — surface the insight's primary symbol first.
+    sym_rows = [s for s in per_symbol if isinstance(s, dict)]
+    if symbol:
+        sym_upper = symbol.upper()
+        sym_rows.sort(key=lambda s: 0 if str(s.get("symbol", "")).upper() == sym_upper else 1)
+
+    sym_items_html = ""
+    for sym_data in sym_rows[:6]:
+        sym_name = sym_data.get("symbol", "?")
+        score = float(sym_data.get("sentiment_score", 0) or 0)
+        label = sym_data.get("label") or (
+            "Positive" if score >= 0.15 else "Negative" if score <= -0.15 else "Neutral"
+        )
+        article_count = int(sym_data.get("article_count", 0) or 0)
+        trend = sym_data.get("trend")
+        events = sym_data.get("events") or []
+        top_article = sym_data.get("top_article") or {}
+
+        bar_pct = min(int(abs(score) * 100), 100)
+        bar_color = _score_color(score)
+
+        sym_items_html += (
+            '<div style="margin:6px 0;font-size:0.8em;">'
+            '<div style="display:flex;align-items:center;gap:8px;">'
+            f'<span style="font-family:monospace;font-weight:600;width:50px;">{_esc(str(sym_name))}</span>'
+            '<div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">'
+            f'<div style="height:100%;width:{bar_pct}%;background:{bar_color};border-radius:3px;"></div>'
+            '</div>'
+            f'<span style="color:{bar_color};width:60px;text-align:right;">{_esc(str(label)).title()}</span>'
+            f'<span style="opacity:0.6;">{_trend_arrow(trend)}</span>'
+            f'<span style="opacity:0.6;font-size:0.85em;">{article_count} articles</span>'
+            '</div>'
+        )
+
+        # Event chips
+        if isinstance(events, list) and events:
+            chips = "".join(
+                f'<span class="src-sent-ticker">{_esc(str(ev))}</span>'
+                for ev in events[:4]
+                if ev
+            )
+            if chips:
+                sym_items_html += f'<div class="src-sent-tickers" style="margin-top:3px;">{chips}</div>'
+
+        # Top headline (linked when a URL is present)
+        if isinstance(top_article, dict) and top_article.get("headline"):
+            headline = _esc(str(top_article.get("headline")))
+            source = top_article.get("source")
+            url = top_article.get("url")
+            source_text = f" — {_esc(str(source))}" if source else ""
+            if url:
+                headline_html = (
+                    f'<a href="{_esc(str(url))}" target="_blank" rel="noopener noreferrer" '
+                    f'style="color:#93c5fd;text-decoration:none;">{headline}</a>'
+                )
+            else:
+                headline_html = headline
+            sym_items_html += (
+                '<div style="margin-top:2px;opacity:0.8;font-size:0.9em;">'
+                f'{headline_html}{source_text}'
+                '</div>'
+            )
+
+        sym_items_html += '</div>'
+
+    if sym_items_html:
+        news_html += (
+            '<div style="margin-top:8px;">'
+            '<div style="font-size:0.75em;opacity:0.7;margin-bottom:4px;">News by Symbol</div>'
+            f'{sym_items_html}'
+            '</div>'
+        )
+
+    # News-vacuum line (symbols with no meaningful news coverage)
+    vacuum_syms = [str(v) for v in vacuum if v]
+    if vacuum_syms:
+        news_html += (
+            '<div class="src-sent-explain" style="margin-top:6px;font-style:italic;opacity:0.7;">'
+            f'No recent news coverage for: {_esc(", ".join(vacuum_syms))}.'
+            '</div>'
+        )
+
+    news_html += (
+        '<div class="src-source-label">'
+        'Financial news headlines, sentiment-scored. '
+        'News reaction can lead or lag price action.'
+        '</div>'
+    )
+    news_html += '</div>'
+    return news_html
 
 
 def _build_market_mood_section(insights: list[DeepInsight]) -> str:

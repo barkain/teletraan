@@ -105,6 +105,7 @@ class DeepInsightResponse(DeepInsightBase):
     technical_analysis_data: dict[str, Any] | None = None
     prediction_market_data: dict[str, Any] | None = None
     sentiment_data: dict[str, Any] | None = None
+    news_data: dict[str, Any] | None = None
     valuation_data: dict[str, Any] | None = None
 
     class Config:

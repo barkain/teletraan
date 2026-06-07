@@ -30,6 +30,7 @@ import {
   GitBranch,
   PieChart,
   Layers,
+  Newspaper,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
@@ -78,7 +79,7 @@ interface InsightDetailViewProps {
 // Design System Constants
 // ============================================
 
-type AnalysisDimensionType = 'technical' | 'macro' | 'sector' | 'risk' | 'correlation' | 'sentiment' | 'prediction';
+type AnalysisDimensionType = 'technical' | 'macro' | 'sector' | 'risk' | 'correlation' | 'sentiment' | 'news' | 'prediction';
 
 interface DimensionConfig {
   label: string;
@@ -137,6 +138,14 @@ const DIMENSION_CONFIG: Record<AnalysisDimensionType, DimensionConfig> = {
     borderColor: 'border-l-cyan-500',
     bgColor: 'bg-cyan-500/5',
     badgeBg: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',
+  },
+  news: {
+    label: 'News Sentiment',
+    icon: Newspaper,
+    color: 'text-sky-500 dark:text-sky-400',
+    borderColor: 'border-l-sky-500',
+    bgColor: 'bg-sky-500/5',
+    badgeBg: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
   },
   prediction: {
     label: 'Prediction Markets',
@@ -1484,6 +1493,171 @@ function SentimentSection({
   );
 }
 
+/** Section: News Sentiment
+ *
+ * Financial-news sentiment is a scoring augmentation surfaced as part of the
+ * deep-analysis data (not a standalone feed). Driven entirely by
+ * `insight.news_data`; renders nothing when no news was fetched.
+ */
+function NewsSentimentSection({ insight }: { insight: DeepInsight }) {
+  const news = insight.news_data;
+  if (!news) return null;
+
+  const market = news.market;
+  const perSymbol = news.per_symbol ?? [];
+  const vacuum = news.vacuum ?? [];
+
+  // Nothing meaningful to show.
+  if (!market?.label && perSymbol.length === 0 && vacuum.length === 0) {
+    return null;
+  }
+
+  const labelFor = (score: number, fallback?: string): string => {
+    if (fallback) return fallback;
+    if (score >= 0.15) return 'Positive';
+    if (score <= -0.15) return 'Negative';
+    return 'Neutral';
+  };
+
+  const colorFor = (score: number): string =>
+    score >= 0.15 ? 'bg-green-500' : score <= -0.15 ? 'bg-red-500' : 'bg-gray-400';
+
+  const textColorFor = (score: number): string =>
+    score >= 0.15 ? 'text-green-500' : score <= -0.15 ? 'text-red-500' : 'text-muted-foreground';
+
+  const trendArrow = (trend?: string): string => {
+    const t = (trend ?? '').toLowerCase();
+    if (t.includes('up') || t.includes('improv') || t.includes('rising')) return '↑';
+    if (t.includes('down') || t.includes('deterior') || t.includes('falling')) return '↓';
+    return '→';
+  };
+
+  return (
+    <DimensionSectionCard dimension="news" defaultOpen={perSymbol.length > 0}>
+      <p className="text-sm text-muted-foreground italic leading-relaxed mb-3">
+        Financial-news sentiment scores recent headlines to gauge how the news flow is leaning
+        for these symbols. It feeds the analysis as a signal, not a recommendation.
+      </p>
+
+      <div className="space-y-4">
+        {/* Market tone */}
+        {market?.label && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Market News Tone:</span>
+              <Badge className={cn('text-sm px-3 py-1', getMoodBadgeClass(market.label))}>
+                {market.label}
+              </Badge>
+              {market.trend && (
+                <span className="text-sm text-muted-foreground">{trendArrow(market.trend)}</span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground pl-1 leading-relaxed">
+              {market.sentiment_score != null && (
+                <>Score {market.sentiment_score >= 0 ? '+' : ''}{market.sentiment_score.toFixed(2)}</>
+              )}
+              {market.article_count != null && (
+                <> across {market.article_count} article{market.article_count === 1 ? '' : 's'}</>
+              )}
+              {market.trend && <> — trend {market.trend}</>}.
+            </p>
+          </div>
+        )}
+
+        {/* Per-symbol news sentiment */}
+        {perSymbol.length > 0 && (
+          <div>
+            <span className="text-xs font-medium text-muted-foreground block mb-2">
+              News by Symbol
+            </span>
+            <div className="space-y-3">
+              {perSymbol.map((sym, i) => {
+                const score = sym.sentiment_score ?? 0;
+                const barPct = Math.min(Math.round(Math.abs(score) * 100), 100);
+                const label = labelFor(score, sym.label);
+                return (
+                  <div key={i}>
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="font-mono font-semibold w-16 shrink-0">{sym.symbol}</span>
+                      <div className="flex-1">
+                        <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className={cn('h-full rounded-full transition-all', colorFor(score))}
+                            style={{ width: `${barPct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <span className={cn('text-xs font-medium w-16 text-right', textColorFor(score))}>
+                        {label}
+                      </span>
+                      {sym.trend && (
+                        <span className="text-xs text-muted-foreground w-4 text-center">
+                          {trendArrow(sym.trend)}
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground w-20 text-right">
+                        {sym.article_count} article{sym.article_count === 1 ? '' : 's'}
+                      </span>
+                    </div>
+
+                    {/* Event chips */}
+                    {sym.events && sym.events.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-1.5 pl-[76px]">
+                        {sym.events.slice(0, 4).map((ev, j) => (
+                          <Badge
+                            key={j}
+                            variant="outline"
+                            className="text-[10px] px-2 py-0.5 font-normal"
+                          >
+                            {ev}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Top headline */}
+                    {sym.top_article?.headline && (
+                      <p className="text-[11px] text-muted-foreground/80 pl-[76px] mt-1 leading-relaxed">
+                        {sym.top_article.url ? (
+                          <a
+                            href={sym.top_article.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sky-500 dark:text-sky-400 hover:underline"
+                          >
+                            {sym.top_article.headline}
+                          </a>
+                        ) : (
+                          sym.top_article.headline
+                        )}
+                        {sym.top_article.source && (
+                          <span className="text-muted-foreground/60"> — {sym.top_article.source}</span>
+                        )}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* News-vacuum note */}
+        {vacuum.length > 0 && (
+          <p className="text-xs text-muted-foreground italic">
+            No recent news coverage for: {vacuum.join(', ')}.
+          </p>
+        )}
+
+        {/* Source attribution */}
+        <p className="text-[10px] text-muted-foreground/60 pt-2 border-t border-border/20">
+          Source: financial news headlines, sentiment-scored. News reaction can lead or lag price action.
+        </p>
+      </div>
+    </DimensionSectionCard>
+  );
+}
+
 /** Section: Prediction Markets */
 function PredictionMarketsSection({
   insight,
@@ -1773,6 +1947,7 @@ function InsightDetailsPanel({
       risk: [],
       correlation: [],
       sentiment: [],
+      news: [],
       prediction: [],
     };
     const ungrouped: AnalystEvidence[] = [];
@@ -1815,6 +1990,9 @@ function InsightDetailsPanel({
           insight={insight}
           evidence={evidenceByDimension.grouped.sentiment}
         />
+
+        {/* 4b. News Sentiment Section */}
+        <NewsSentimentSection insight={insight} />
 
         {/* 5. Prediction Markets Section */}
         <PredictionMarketsSection

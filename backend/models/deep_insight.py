@@ -147,6 +147,7 @@ class DeepInsight(TimestampMixin, Base):
     technical_analysis_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     prediction_market_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     sentiment_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    news_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     valuation_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     # Lifecycle management

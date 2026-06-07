@@ -63,6 +63,21 @@ try:
 except ImportError:
     _HAS_SENTIMENT = False
 
+# ---------------------------------------------------------------------------
+# Optional financial-news sentiment — graceful degradation if module absent.
+# News sentiment is a scoring augmentation for the deep analysis (issue #20):
+# it feeds the engine, it is not a standalone user feed.
+# ---------------------------------------------------------------------------
+try:
+    from analysis.news_intelligence import (
+        get_news_intelligence,
+        format_news_context as _format_news_context,
+    )
+
+    _HAS_NEWS = True
+except ImportError:
+    _HAS_NEWS = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -165,6 +180,7 @@ class MarketContextBuilder:
         include_rich_technical: bool = False,
         include_predictions: bool = False,
         include_sentiment: bool = False,
+        include_news: bool = False,
         include_fundamentals: bool = False,
         include_options_flow: bool = False,
         include_short_interest: bool = False,
@@ -188,6 +204,10 @@ class MarketContextBuilder:
                 silently degrades otherwise.
             include_sentiment: Whether to include Reddit sentiment data.
                 Requires reddit_sentiment adapter; silently degrades otherwise.
+            include_news: Whether to include financial-news sentiment
+                intelligence (per-symbol news scores keyed by symbol under the
+                ``news`` key). Gated behind the NEWS_SENTIMENT_ENABLED config
+                flag; best-effort and silently degrades to empty on failure.
             include_fundamentals: Whether to include fundamental/valuation data
                 from yfinance (P/E, margins, growth, analyst targets, etc.).
                 Gracefully degrades if data is unavailable.
@@ -211,6 +231,8 @@ class MarketContextBuilder:
             - rich_technical: (optional) Dict mapping symbols to rich TA data
             - predictions: (optional) Dict with prediction market data
             - sentiment: (optional) Dict with Reddit sentiment data
+            - news: (optional) Dict with financial-news sentiment intelligence:
+                {as_of, market, per_symbol: {SYMBOL: {...}}, vacuum: [...]}
             - fundamentals: (optional) Dict mapping symbols to fundamental data
             - economic_indicators: List of economic indicator readings
             - sector_performance: Dict of sector ETF performance metrics
@@ -228,6 +250,7 @@ class MarketContextBuilder:
             include_rich_technical,
             include_predictions,
             include_sentiment,
+            include_news,
             include_fundamentals,
             include_options_flow,
             include_short_interest,
@@ -303,6 +326,12 @@ class MarketContextBuilder:
         if include_sentiment and _HAS_SENTIMENT:
             context["sentiment"] = await self._get_sentiment_data(symbols)
 
+        # Financial-news sentiment intelligence (scoring augmentation)
+        if include_news and _HAS_NEWS:
+            news = await self._get_news_data(symbols)
+            if news:
+                context["news"] = news
+
         # Fundamental/valuation data from yfinance
         if include_fundamentals:
             context["fundamentals"] = await self._get_fundamental_data(symbols, context)
@@ -340,6 +369,12 @@ class MarketContextBuilder:
         if context.get("sentiment"):
             logger.info(
                 f"Context built: sentiment data with mood={context['sentiment'].get('overall_mood', 'unknown')}"
+            )
+        if context.get("news"):
+            logger.info(
+                "Context built: news sentiment for %d symbols (market tone=%s)",
+                len(context["news"].get("per_symbol", {})),
+                (context["news"].get("market") or {}).get("label", "unknown"),
             )
         if context.get("fundamentals"):
             logger.info(
@@ -408,6 +443,66 @@ class MarketContextBuilder:
             return sentiment
         except Exception:
             logger.warning("Failed to fetch Reddit sentiment data", exc_info=True)
+            return {}
+
+    async def _get_news_data(
+        self,
+        symbols: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Fetch financial-news sentiment intelligence for *symbols*.
+
+        Gated behind the NEWS_SENTIMENT_ENABLED config flag (default True).
+        Best-effort: degrades to an empty dict on any failure so the analysis
+        pipeline never breaks on news problems.
+
+        The underlying ``get_news_intelligence`` returns ``per_symbol`` as a
+        list; we re-key it into a ``{SYMBOL: record}`` dict so downstream
+        consumers (e.g. the alpha engine) can do O(1) per-symbol lookups while
+        keeping the original ``market``/``vacuum``/``as_of`` fields intact.
+
+        Args:
+            symbols: Optional list of symbols for per-symbol news sentiment.
+
+        Returns:
+            Dict with keys: as_of, market, per_symbol (keyed by symbol),
+            vacuum. Empty dict when disabled, unavailable, or on failure.
+        """
+        if not symbols:
+            return {}
+
+        # Gate behind the shared config flag (default True). Imported lazily so
+        # context building has no hard dependency on a particular config shape.
+        try:
+            from config import get_settings
+
+            if not getattr(get_settings(), "NEWS_SENTIMENT_ENABLED", True):
+                return {}
+        except Exception:
+            # If config can't be read, fall through to the default-on behaviour.
+            pass
+
+        try:
+            intelligence = await get_news_intelligence(symbols, days=7)
+            if not intelligence:
+                return {}
+
+            # Re-key per_symbol list -> {SYMBOL: record} for fast lookups.
+            per_symbol_list = intelligence.get("per_symbol", []) or []
+            per_symbol_map: dict[str, Any] = {}
+            for record in per_symbol_list:
+                if isinstance(record, dict):
+                    sym = str(record.get("symbol") or "").upper()
+                    if sym:
+                        per_symbol_map[sym] = record
+
+            return {
+                "as_of": intelligence.get("as_of"),
+                "market": intelligence.get("market", {}),
+                "per_symbol": per_symbol_map,
+                "vacuum": intelligence.get("vacuum", []),
+            }
+        except Exception:
+            logger.warning("Failed to fetch news sentiment data", exc_info=True)
             return {}
 
     async def _get_stock_ids(
@@ -2211,6 +2306,29 @@ def format_sentiment_context(sentiment: dict[str, Any]) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+def format_news_context(news: dict[str, Any] | None) -> str:
+    """Format financial-news sentiment as a markdown block for LLM agents.
+
+    Thin passthrough to ``analysis.news_intelligence.format_news_context`` so
+    callers that already import the other ``format_*`` helpers from this module
+    have a single import surface. The underlying formatter expects the original
+    ``get_news_intelligence`` shape (``per_symbol`` as a list); this passthrough
+    accepts the context-builder shape (``per_symbol`` re-keyed as a dict) and
+    normalises it back to a list before delegating. Returns '' when there is no
+    usable data so callers can omit the section.
+    """
+    if not news or not _HAS_NEWS:
+        return ""
+
+    per_symbol = news.get("per_symbol")
+    # The context-builder stores per_symbol as a {SYMBOL: record} dict; the
+    # underlying formatter wants a list. Normalise without mutating the input.
+    if isinstance(per_symbol, dict):
+        news = {**news, "per_symbol": list(per_symbol.values())}
+
+    return _format_news_context(news)
 
 
 # Singleton instance for easy import

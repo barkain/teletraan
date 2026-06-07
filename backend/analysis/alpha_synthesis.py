@@ -84,6 +84,29 @@ def _time_horizon_label(days: int | None) -> str:
     return "long-term"
 
 
+def _sentiment_data_for(candidate: Any) -> dict[str, Any] | None:
+    """Extract the persisted sentiment_data block from a scored candidate.
+
+    Defensive/optional: the alpha engine folds financial-news sentiment into the
+    existing sentiment evidence (under a ``news`` key). We surface that news
+    block at the top level of ``sentiment_data`` too, so deep-analysis output
+    shows news sentiment alongside the Reddit signal without changing the engine
+    contract. Returns ``None`` when there is no sentiment evidence at all.
+    """
+    evidence = getattr(candidate, "evidence", None)
+    if not isinstance(evidence, dict):
+        return None
+    sentiment = evidence.get("sentiment")
+    if not isinstance(sentiment, dict):
+        return sentiment  # could be None or a primitive — pass through unchanged
+
+    # Promote the nested news evidence to a top-level key for visibility.
+    news = sentiment.get("news")
+    if news and "news_sentiment" not in sentiment:
+        return {**sentiment, "news_sentiment": news}
+    return sentiment
+
+
 def build_alpha_candidate_context(
     candidates: list[Any],
     portfolio_overlay: dict[str, Any],
@@ -292,7 +315,7 @@ async def synthesize_alpha_run(
             },
             technical_analysis_data={"subscores": candidate.subscores},
             prediction_market_data={"boost": candidate.evidence.get("prediction_boost") if candidate.evidence else None},
-            sentiment_data=candidate.evidence.get("sentiment") if candidate.evidence else None,
+            sentiment_data=_sentiment_data_for(candidate),
             lifecycle_state="active",
             last_evaluated_at=datetime.utcnow(),
             staleness_score=0.0,

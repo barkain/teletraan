@@ -299,6 +299,25 @@ export interface DeepInsight {
       bearish_count?: number;
     }>;
   } | null;
+  news_data?: {
+    as_of?: string;
+    market?: {
+      sentiment_score?: number;
+      label?: string;
+      article_count?: number;
+      trend?: string;
+    };
+    per_symbol?: Array<{
+      symbol: string;
+      sentiment_score: number;
+      label: string;
+      article_count: number;
+      trend: string;
+      events?: string[];
+      top_article?: { headline: string; source: string; url?: string };
+    }>;
+    vacuum?: string[];
+  } | null;
 }
 
 export interface DeepInsightListResponse {

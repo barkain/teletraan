@@ -446,6 +446,62 @@ def _sentiment_lookup(sentiment: dict[str, Any] | None) -> dict[str, dict[str, A
     return lookup
 
 
+def _news_lookup(news: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """Build a {SYMBOL: news-intelligence record} lookup from the news context.
+
+    The context builder stores ``news['per_symbol']`` as a {SYMBOL: record}
+    dict, but older shapes used a list — accept both defensively. Returns an
+    empty dict when news is absent so the sentiment factor degrades gracefully.
+    """
+    lookup: dict[str, dict[str, Any]] = {}
+    if not news:
+        return lookup
+    per_symbol = news.get("per_symbol")
+    if isinstance(per_symbol, dict):
+        for symbol, row in per_symbol.items():
+            if isinstance(row, dict):
+                lookup[str(symbol).upper()] = row
+    elif isinstance(per_symbol, list):
+        for row in per_symbol:
+            if isinstance(row, dict):
+                symbol = str(row.get("symbol") or "").upper()
+                if symbol:
+                    lookup[symbol] = row
+    return lookup
+
+
+def _news_score(symbol: str, news_lookup: dict[str, dict[str, Any]]) -> tuple[float | None, dict[str, Any]]:
+    """Map a symbol's news sentiment onto the 0-100 sentiment-factor scale.
+
+    Returns ``(None, evidence)`` when there is no usable news coverage for the
+    symbol so the caller can fall back to the Reddit-only score unchanged. The
+    raw FinVADER-style compound score lives on [-1, +1]; we shift/scale it to
+    [0, 100] exactly like ``_sentiment_score`` does for the Reddit score, so the
+    two are blended on the same scale.
+    """
+    row = news_lookup.get(symbol.upper())
+    if not row:
+        return None, {"news": "missing"}
+    # Only treat news as a real signal when there is actual coverage; a zeroed
+    # record (article_count == 0) carries no information and must not pull the
+    # blended score toward neutral.
+    if not row.get("article_count"):
+        return None, {"news": "no_coverage"}
+    raw = row.get("sentiment_score")
+    if raw is None:
+        return None, {"news": "neutral", "source": row}
+    raw = float(raw)
+    score = _clamp((raw + 1.0) / 2.0 * 100.0, 0.0, 100.0)
+    return score, {
+        "news": raw,
+        "label": row.get("label"),
+        "article_count": row.get("article_count"),
+        "trend": row.get("trend"),
+        "events": row.get("events"),
+        "top_article": row.get("top_article"),
+    }
+
+
 def _score_fundamentals(
     fundamentals: dict[str, Any] | None,
     latest_price: float | None,
@@ -759,19 +815,67 @@ def _macro_alignment_score(regime_name: str, sector: str | None) -> float:
     return 65.0
 
 
-def _sentiment_score(symbol: str, sentiment_lookup: dict[str, dict[str, Any]]) -> tuple[float, dict[str, Any]]:
-    row = sentiment_lookup.get(symbol.upper())
-    if not row:
-        return 50.0, {"sentiment": "missing"}
+def _sentiment_score(
+    symbol: str,
+    sentiment_lookup: dict[str, dict[str, Any]],
+    news_lookup: dict[str, dict[str, Any]] | None = None,
+) -> tuple[float, dict[str, Any]]:
+    """Per-symbol sentiment factor (0-100), blending Reddit + financial news.
 
-    raw = row.get("sentiment_score")
-    if raw is None:
-        raw = row.get("overall_score")
-    if raw is None:
-        return 50.0, {"sentiment": "neutral", "source": row}
-    raw = float(raw)
-    score = _clamp((raw + 1.0) / 2.0 * 100.0, 0.0, 100.0)
-    return score, {"sentiment": raw, "source": row}
+    News sentiment is folded into the EXISTING sentiment factor rather than
+    given its own composite weight, so the overall weighting scheme is
+    unchanged. The blend is a simple equal-weight average of the Reddit score
+    and the news score, but only when both are present:
+      - Reddit only  -> Reddit score (legacy behaviour, unchanged).
+      - News only    -> news score (so coverage still moves the factor when
+                        WSB is silent on the name).
+      - Both present -> 50/50 average of the two.
+      - Neither      -> neutral 50.0 (legacy behaviour, unchanged).
+    """
+    news_lookup = news_lookup or {}
+    news_factor, news_evidence = _news_score(symbol, news_lookup)
+
+    row = sentiment_lookup.get(symbol.upper())
+    reddit_factor: float | None = None
+    reddit_raw: float | None = None
+    if row:
+        raw = row.get("sentiment_score")
+        if raw is None:
+            raw = row.get("overall_score")
+        if raw is not None:
+            reddit_raw = float(raw)
+            reddit_factor = _clamp((reddit_raw + 1.0) / 2.0 * 100.0, 0.0, 100.0)
+
+    # Blend the two factors on the shared 0-100 scale.
+    if reddit_factor is not None and news_factor is not None:
+        blended = (reddit_factor + news_factor) / 2.0
+        source = "reddit+news"
+    elif reddit_factor is not None:
+        blended = reddit_factor
+        source = "reddit"
+    elif news_factor is not None:
+        blended = news_factor
+        source = "news"
+    else:
+        # No Reddit signal and no news signal — stay neutral.
+        evidence: dict[str, Any] = {"sentiment": "missing", "source_kind": "none"}
+        if news_evidence:
+            evidence["news"] = news_evidence
+        if row:
+            evidence["sentiment"] = "neutral"
+            evidence["source"] = row
+        return 50.0, evidence
+
+    evidence = {
+        "sentiment": reddit_raw if reddit_raw is not None else "missing",
+        "source_kind": source,
+        "blended_score": round(blended, 2),
+    }
+    if row:
+        evidence["source"] = row
+    if news_factor is not None:
+        evidence["news"] = news_evidence
+    return _clamp(blended, 0.0, 100.0), evidence
 
 
 def _thesis_type(technical: float, fundamental: float, valuation: float, flow: float, catalyst: float) -> tuple[str, int]:
@@ -912,6 +1016,7 @@ async def run_daily_factor_scoring(
         include_rich_technical=True,
         include_predictions=True,
         include_sentiment=True,
+        include_news=True,
         include_fundamentals=True,
         include_options_flow=True,
         include_short_interest=True,
@@ -928,6 +1033,7 @@ async def run_daily_factor_scoring(
     analyst_revisions = context.get("analyst_revisions", {}) or {}
     sector_performance = context.get("sector_performance", {}) or {}
     sentiment_lookup = _sentiment_lookup(context.get("sentiment"))
+    news_lookup = _news_lookup(context.get("news"))
     market_summary = context.get("market_summary", {}) or {}
 
     spy_history = price_history.get("SPY", [])
@@ -962,7 +1068,7 @@ async def run_daily_factor_scoring(
             fundamental_data,
             _latest_close(history),
         )
-        sentiment_score, sentiment_evidence = _sentiment_score(symbol, sentiment_lookup)
+        sentiment_score, sentiment_evidence = _sentiment_score(symbol, sentiment_lookup, news_lookup)
         macro_score = _macro_alignment_score(regime.name, sector)
 
         options_flow_score = float(options_flow_data.get("signal_score") or 0.0) if isinstance(options_flow_data, dict) else 0.0

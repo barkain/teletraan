@@ -363,6 +363,12 @@ When prediction market and/or sentiment data is available, include an alignment 
 - If thesis is bearish AND sentiment is bullish -> potential risk (crowd may be wrong, or you may be)
 - Strong alignment -> higher conviction, but watch for crowded trade risk
 
+**News & Sentiment Alignment:** When a News Sentiment block (professional financial-headline sentiment) is provided, weigh it when assigning conviction. This is distinct from the retail/social sentiment above.
+- Confirm a bullish thesis when news sentiment is POSITIVE and the momentum trend is IMPROVING; raise conviction.
+- Flag risk when news sentiment is DETERIORATING, or when a regulatory/legal/M&A event type is present — these can reprice a name quickly regardless of technicals.
+- Treat a news vacuum (a held/candidate symbol with little or no coverage) as elevated surprise risk and lower conviction slightly.
+- Explicitly note any divergence between news sentiment and the technical/macro picture.
+
 Include a brief "Alternative Data Summary" in your synthesis noting the alignment/divergence of these signals.
 
 ## Thematic Analysis Integration
@@ -529,6 +535,17 @@ def format_synthesis_context(analyst_reports: dict[str, Any]) -> str:
         if sentiment_text:
             context_parts.append("")
             context_parts.append(sentiment_text)
+
+    # Professional news sentiment data (optional)
+    news = analyst_reports.get("news")
+    if news:
+        from analysis.news_intelligence import format_news_context  # type: ignore[import-not-found]
+
+        news_text = format_news_context(news)
+        if news_text:
+            context_parts.append("")
+            context_parts.append("## News Sentiment")
+            context_parts.append(news_text)
 
     context_parts.append("")
     context_parts.append("=" * 60)
@@ -1547,6 +1564,13 @@ Produce {max_insights} HIGH-CONVICTION investment insights. For each:
   ticker and reference other angles via related symbols/secondary plays
 - Higher confidence for sector leaders in hot sectors
 - Lower confidence for contrarian plays
+
+### News & Sentiment Alignment:
+When a News Sentiment block (professional financial-headline sentiment + momentum trend + event types + news-vacuum list) is provided, weigh it when assigning confidence:
+- Confirm/raise conviction for a bullish thesis when news sentiment is POSITIVE and IMPROVING.
+- Flag risk and trim confidence when news is DETERIORATING, or when a regulatory/legal/M&A event is present for the symbol.
+- Treat a news vacuum (symbol with little/no coverage) as elevated surprise risk and lower confidence slightly.
+- Note any divergence between news sentiment and the technical/macro picture in the thesis or key_risks.
 
 ### Quality Requirements:
 - Entry zone should be specific, not vague

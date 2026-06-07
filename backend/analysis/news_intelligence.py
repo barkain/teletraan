@@ -301,7 +301,12 @@ def format_news_context(intelligence: dict[str, Any] | None, max_symbols: int = 
         for h in market.get("top_headlines", [])[:3]:
             lines.append(f"  - [{h.get('sentiment_label', 'NEUTRAL')}] {h.get('headline', '')} ({h.get('source', '')})")
 
-    per_symbol = [s for s in intelligence.get("per_symbol", []) if s.get("article_count")]
+    # Accept per_symbol as a list (pipeline shape) or a {SYMBOL: record} dict
+    # (context_builder re-keys it for O(1) lookup) so either caller is safe.
+    raw_per_symbol = intelligence.get("per_symbol", [])
+    if isinstance(raw_per_symbol, dict):
+        raw_per_symbol = list(raw_per_symbol.values())
+    per_symbol = [s for s in raw_per_symbol if isinstance(s, dict) and s.get("article_count")]
     if per_symbol:
         lines.append("")
         lines.append("**Per-Symbol News Sentiment (recent window):**")

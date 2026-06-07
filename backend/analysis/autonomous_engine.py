@@ -96,7 +96,14 @@ from analysis.agents.synthesis_lead import (  # type: ignore[import-not-found]
     build_pattern_context,
     build_track_record_context,
 )
-from analysis.context_builder import MarketContextBuilder  # type: ignore[import-not-found]
+from analysis.context_builder import (  # type: ignore[import-not-found]
+    MarketContextBuilder,
+    format_sentiment_context,
+)
+from analysis.news_intelligence import (  # type: ignore[import-not-found]
+    get_news_intelligence,
+    format_news_context,
+)
 from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
 from analysis.pattern_extractor import PatternExtractor  # type: ignore[import-not-found]
 from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
@@ -411,6 +418,10 @@ class AutonomousDeepEngine:
         self._investor_result: InvestorIntelligenceResult | None = None
         self._investor_data: dict = {}
 
+        # Alternative-data prefetch buffers (populated during Phase 1)
+        self._sentiment_data: dict | None = None  # Reddit social sentiment
+        self._news_data: dict | None = None  # Financial-news sentiment intelligence
+
         # Stock thematic descriptions (populated during Phase 3.5)
         self._stock_descriptions: dict[str, str] = {}
         self._stock_clusters: list[dict[str, Any]] = []
@@ -492,6 +503,140 @@ class AutonomousDeepEngine:
         except Exception as e:
             logger.warning(f"Failed to pre-fetch sentiment data: {e}")
             return {}
+
+    def _news_sentiment_enabled(self) -> bool:
+        """Read the NEWS_SENTIMENT_ENABLED feature flag (defaults to True)."""
+        try:
+            from config import get_settings  # type: ignore[import-not-found]
+
+            return bool(getattr(get_settings(), "NEWS_SENTIMENT_ENABLED", True))
+        except Exception:
+            return True
+
+    async def _prefetch_news_data(self, symbols: list[str] | None = None) -> dict:
+        """Pre-fetch financial-news sentiment intelligence (best-effort).
+
+        At Phase-1 prefetch time the candidate symbols are not known yet, so we
+        only fetch market-level news tone (``get_news_intelligence([], days=3)``).
+        The richer per-symbol fetch happens at synthesis once candidates are
+        identified (see ``_run_synthesis*``).
+
+        Args:
+            symbols: Optional candidate symbols. When empty/None only market tone
+                is fetched.
+
+        Returns:
+            News-intelligence dict, or empty dict on failure / when disabled.
+        """
+        if not self._news_sentiment_enabled():
+            return {}
+        try:
+            days = 7 if symbols else 3
+            intel = await get_news_intelligence(symbols or [], days=days)
+            market = intel.get("market", {}) if isinstance(intel, dict) else {}
+            logger.info(
+                "Pre-fetched news intelligence: market tone=%s (%s articles), %s symbols",
+                market.get("label", "NEUTRAL"),
+                market.get("article_count", 0),
+                len(intel.get("per_symbol", [])) if isinstance(intel, dict) else 0,
+            )
+            return intel
+        except Exception as e:
+            logger.warning(f"Failed to pre-fetch news data (non-fatal): {e}")
+            return {}
+
+    def _news_data_for_symbol(self, symbol: str | None) -> dict | None:
+        """Build the news_data slice to persist on a DeepInsight row.
+
+        Returns the market tone plus the matching per-symbol entry (when found),
+        falling back to the whole news dict. ``None`` when no news was captured.
+        """
+        news = getattr(self, "_news_data", None)
+        if not news:
+            return None
+        if not symbol:
+            return news
+        try:
+            sym = symbol.upper().strip()
+            per_symbol = news.get("per_symbol", []) if isinstance(news, dict) else []
+            matched = next(
+                (s for s in per_symbol if str(s.get("symbol", "")).upper() == sym),
+                None,
+            )
+            if matched is None:
+                return news
+            return {
+                "as_of": news.get("as_of"),
+                "market": news.get("market"),
+                "per_symbol": [matched],
+                "vacuum": [v for v in news.get("vacuum", []) if str(v).upper() == sym],
+            }
+        except Exception:
+            return news
+
+    def _set_insight_news_data(self, insight: DeepInsight, symbol: str | None) -> None:
+        """Defensively attach news_data to an insight (column added by a peer agent).
+
+        Uses ``setattr`` guarded by ``hasattr`` so this is a no-op until the
+        ``news_data`` mapped column exists, and never breaks the pipeline.
+        """
+        try:
+            if hasattr(DeepInsight, "news_data"):
+                insight.news_data = self._news_data_for_symbol(symbol) or None
+        except Exception as e:
+            logger.debug("Could not set news_data on insight (non-fatal): %s", e)
+
+    async def _build_news_and_sentiment_context(self, candidate_symbols: list[str]) -> str:
+        """Build the synthesis-time news + social-sentiment context block.
+
+        Fetches per-symbol news intelligence for the deep-dive candidates (so the
+        synthesis LLM sees headline-level sentiment per name), merges it with the
+        Phase-1 market-tone fetch onto ``self._news_data``, and also renders the
+        Phase-1 Reddit sentiment that was previously captured but never fed to the
+        synthesis LLM. Best-effort: any failure yields an empty section.
+
+        Args:
+            candidate_symbols: Deep-dive / opportunity symbols feeding synthesis.
+
+        Returns:
+            Markdown block (possibly empty) to append to the synthesis context.
+        """
+        parts: list[str] = []
+
+        # --- Financial-news sentiment (per-symbol, gated on the feature flag) ---
+        if self._news_sentiment_enabled():
+            try:
+                uniq = list(dict.fromkeys(
+                    s.upper().strip() for s in (candidate_symbols or []) if s and s.strip()
+                ))
+                news_intel = await self._prefetch_news_data(uniq) if uniq else (self._news_data or {})
+                if news_intel:
+                    # Merge: keep market tone from whichever fetch has it; prefer
+                    # the per-symbol fetch (richer) for per_symbol/vacuum slices.
+                    merged = dict(self._news_data or {})
+                    merged.update(news_intel)
+                    if not merged.get("market") and (self._news_data or {}).get("market"):
+                        merged["market"] = self._news_data["market"]
+                    self._news_data = merged
+                    news_block = format_news_context(merged)
+                    if news_block:
+                        parts.append(news_block)
+            except Exception as e:
+                logger.warning(f"[AUTO] News context build failed (non-fatal): {e}")
+
+        # --- Social sentiment (Reddit) -- close the existing capture/feed gap ---
+        try:
+            sentiment = getattr(self, "_sentiment_data", None)
+            if sentiment:
+                sentiment_block = format_sentiment_context(sentiment)
+                if sentiment_block:
+                    parts.append(sentiment_block)
+        except Exception as e:
+            logger.warning(f"[AUTO] Sentiment context build failed (non-fatal): {e}")
+
+        if not parts:
+            return ""
+        return "\n\n" + "\n\n".join(parts)
 
     async def _prefetch_investor_data(self) -> dict:
         """Pre-fetch investor positions and commentary (I/O phase)."""
@@ -803,9 +948,18 @@ class AutonomousDeepEngine:
             heatmap_coro = self._run_heatmap_fetch()
             prediction_coro = self._prefetch_prediction_data()
             sentiment_coro = self._prefetch_sentiment_data()
+            news_coro = self._prefetch_news_data()
             investor_coro = self._prefetch_investor_data()
-            phase1_result, phase2_result, prediction_data, sentiment_data, investor_data = await asyncio.gather(
-                macro_coro, heatmap_coro, prediction_coro, sentiment_coro, investor_coro,
+            (
+                phase1_result,
+                phase2_result,
+                prediction_data,
+                sentiment_data,
+                news_data,
+                investor_data,
+            ) = await asyncio.gather(
+                macro_coro, heatmap_coro, prediction_coro, sentiment_coro,
+                news_coro, investor_coro,
                 return_exceptions=True,
             )
 
@@ -816,6 +970,9 @@ class AutonomousDeepEngine:
             if isinstance(sentiment_data, BaseException):
                 logger.warning(f"Sentiment pre-fetch failed: {sentiment_data}")
                 sentiment_data = {}
+            if isinstance(news_data, BaseException):
+                logger.warning(f"News pre-fetch failed: {news_data}")
+                news_data = {}
             if isinstance(investor_data, BaseException):
                 logger.warning(f"Investor data pre-fetch failed: {investor_data}")
                 investor_data = {}
@@ -823,6 +980,7 @@ class AutonomousDeepEngine:
             # Store pre-fetched data on instance for downstream access
             self._prediction_data = prediction_data
             self._sentiment_data = sentiment_data
+            self._news_data = news_data
             self._investor_data = investor_data
 
             # Build pre-fetch phase summary
@@ -2304,7 +2462,15 @@ class AutonomousDeepEngine:
                 f"{self._quant_context}"
             )
 
-        full_context = f"{autonomous_context}{portfolio_context}{thematic_context}{investor_context}{quant_context_block}\n\n{synthesis_context}"
+        # News + social-sentiment augmentation (per-symbol news for the
+        # deep-dive candidates + the Phase-1 Reddit sentiment capture).
+        news_sentiment_context = await self._build_news_and_sentiment_context(symbols)
+
+        full_context = (
+            f"{autonomous_context}{portfolio_context}{thematic_context}"
+            f"{investor_context}{quant_context_block}{news_sentiment_context}"
+            f"\n\n{synthesis_context}"
+        )
 
         # Query LLM
         response = await self._query_llm(enhanced_prompt, full_context, "synthesis", "synthesis")
@@ -2687,6 +2853,8 @@ class AutonomousDeepEngine:
                     sentiment_data=getattr(self, '_sentiment_data', None) or None,
                     technical_analysis_data=self._extract_ta_for_symbol(primary_symbol, pre_context) if pre_context and primary_symbol else None,
                 )
+                # Persist news sentiment slice (column added by a peer agent).
+                self._set_insight_news_data(insight, primary_symbol)
 
                 session.add(insight)
 
@@ -3624,7 +3792,17 @@ class AutonomousDeepEngine:
             self._flatten_analyst_reports(analyst_reports)
         )
 
-        full_context = f"{autonomous_context}{portfolio_context}\n\n{synthesis_context}"
+        # News + social-sentiment augmentation (per-symbol news for the
+        # candidate symbols + the Phase-1 Reddit sentiment capture).
+        legacy_candidate_symbols = [c.symbol for c in candidates.candidates[:10]]
+        news_sentiment_context = await self._build_news_and_sentiment_context(
+            legacy_candidate_symbols
+        )
+
+        full_context = (
+            f"{autonomous_context}{portfolio_context}"
+            f"{news_sentiment_context}\n\n{synthesis_context}"
+        )
 
         # Query LLM
         response = await self._query_llm(enhanced_prompt, full_context, "synthesis", "synthesis")
@@ -3907,6 +4085,8 @@ class AutonomousDeepEngine:
                     sentiment_data=getattr(self, '_sentiment_data', None) or None,
                     technical_analysis_data=None,  # No pre_context in legacy pipeline
                 )
+                # Persist news sentiment slice (column added by a peer agent).
+                self._set_insight_news_data(insight, data.get("primary_symbol"))
 
                 session.add(insight)
 

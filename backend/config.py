@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     # Data Source Integrations
     PREDICTION_MARKETS_ENABLED: bool = True
     REDDIT_SENTIMENT_ENABLED: bool = True
+    NEWS_SENTIMENT_ENABLED: bool = True  # Financial-news sentiment augmentation for deep analysis
     POLYMARKET_RATE_LIMIT: int = 30  # Max requests/minute to Polymarket APIs
     KALSHI_RATE_LIMIT: int = 20  # Max requests/minute to Kalshi API
 
