@@ -133,6 +133,13 @@ When prediction market data is available, incorporate market-implied probabiliti
 
 These represent real-money bets on macro outcomes and should be weighed alongside traditional indicators.
 
+## Macro-Economic News
+When a Macro-Economic News block is available, weigh it directly in the regime call:
+- Per-topic tone (monetary policy, inflation, employment, growth, trade, rates, geopolitical) signals which forces are driving the tape
+- Hawkish/deteriorating monetary-policy or inflation news supports Risk-Off / Transitional; easing or cooling-inflation news supports Risk-On
+- Escalating trade or geopolitical news raises tail risk; fold it into regime_confidence and key risks
+- Treat the news tone as a forward-looking complement to the price/yield/VIX indicators, and note when they diverge
+
 ## Social Sentiment Overview
 When Reddit sentiment data is available, note the overall retail investor mood:
 - Overall market sentiment score and direction
@@ -803,6 +810,14 @@ class MacroScanner:
             Formatted data string with alternative data appended (if available).
         """
         parts = [formatted_data]
+
+        macro_news = context.get("macro_news")
+        if macro_news:
+            from analysis.news_intelligence import format_macro_news_context  # type: ignore[import-not-found]
+
+            macro_news_text = format_macro_news_context(macro_news)
+            if macro_news_text:
+                parts.append(macro_news_text)
 
         predictions = context.get("predictions")
         if predictions:

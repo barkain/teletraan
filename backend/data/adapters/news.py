@@ -329,6 +329,47 @@ class NewsAdapter:
         self._set_cached(cache_key, merged, _MARKET_TTL)
         return merged
 
+    # Macro-economic news queries, grouped by topic. The topic label is
+    # attached to each returned article under "macro_topic" so the
+    # intelligence layer can build a per-topic breakdown without re-classifying.
+    _MACRO_QUERIES: dict[str, tuple[str, ...]] = {
+        "monetary_policy": ("Federal Reserve interest rate decision", "FOMC rate cut hike"),
+        "inflation": ("inflation CPI report", "PCE price index"),
+        "employment": ("jobs report nonfarm payrolls", "unemployment rate"),
+        "growth": ("GDP economic growth", "recession risk outlook"),
+        "trade": ("tariffs trade policy", "trade war"),
+        "rates": ("Treasury yields bond market",),
+        "geopolitical": ("geopolitical risk markets",),
+    }
+
+    async def get_macro_news(self, days: int = 3, limit: int = 40) -> list[dict[str, Any]]:
+        """Return macro-economic headlines tagged with a ``macro_topic``.
+
+        Covers monetary policy, inflation, employment, growth, trade, rates and
+        geopolitics — the drivers of market regime — for the MacroScanner.
+        """
+        cache_key = f"macro:{days}:{limit}"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+
+        async def _topic(topic: str, queries: tuple[str, ...]) -> list[dict[str, Any]]:
+            batches = await asyncio.gather(
+                *(self._fetch_google_news(q, None, days) for q in queries)
+            )
+            arts = [a for b in batches for a in b]
+            for a in arts:
+                a["macro_topic"] = topic
+            return arts
+
+        per_topic = await asyncio.gather(
+            *(_topic(t, qs) for t, qs in self._MACRO_QUERIES.items())
+        )
+        merged = _dedupe_articles([a for batch in per_topic for a in batch])
+        merged = _within_days(merged, days)[:limit]
+        self._set_cached(cache_key, merged, _MARKET_TTL)
+        return merged
+
     async def close(self) -> None:
         if self._session and not self._session.closed:
             await self._session.close()

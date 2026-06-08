@@ -421,6 +421,7 @@ class AutonomousDeepEngine:
         # Alternative-data prefetch buffers (populated during Phase 1)
         self._sentiment_data: dict | None = None  # Reddit social sentiment
         self._news_data: dict | None = None  # Financial-news sentiment intelligence
+        self._macro_news_data: dict | None = None  # Macro-economic news for the regime scan
 
         # Stock thematic descriptions (populated during Phase 3.5)
         self._stock_descriptions: dict[str, str] = {}
@@ -982,6 +983,13 @@ class AutonomousDeepEngine:
             self._sentiment_data = sentiment_data
             self._news_data = news_data
             self._investor_data = investor_data
+
+            # Merge macro-economic news (fetched inside the macro scan) into the
+            # news payload so it persists and displays alongside market tone.
+            if self._macro_news_data:
+                if not isinstance(self._news_data, dict):
+                    self._news_data = {}
+                self._news_data["macro"] = self._macro_news_data
 
             # Build pre-fetch phase summary
             prediction_count = len(prediction_data) if isinstance(prediction_data, dict) else 0
@@ -3310,8 +3318,32 @@ class AutonomousDeepEngine:
         )
         start_time = datetime.utcnow()
 
+        # Fetch macro-economic news so the regime call is news-aware (best-effort,
+        # ~1-2s cached vs the multi-second LLM scan, so the added latency is
+        # negligible). Stored on self._news_data["macro"] for persistence/display.
+        macro_context: dict[str, Any] | None = None
+        if self._news_sentiment_enabled():
+            try:
+                from analysis.news_intelligence import get_macro_news_intelligence  # type: ignore[import-not-found]
+
+                macro_news = await get_macro_news_intelligence(days=3)
+                if macro_news and macro_news.get("article_count"):
+                    macro_context = {"macro_news": macro_news}
+                    # Stash on a dedicated attr — the Phase-1 gather reassigns
+                    # self._news_data afterwards, so mutating it here would be
+                    # clobbered. Merged back in after the prefetch assignment.
+                    self._macro_news_data = macro_news
+                    logger.info(
+                        "Macro news: tone=%s (%s articles, %s topics)",
+                        macro_news.get("label"),
+                        macro_news.get("article_count"),
+                        len(macro_news.get("by_topic", {})),
+                    )
+            except Exception as exc:  # noqa: BLE001 - macro news must never break the scan
+                logger.warning("Macro news fetch failed (non-fatal): %s", exc)
+
         try:
-            scan_result = await self.macro_scanner.scan()
+            scan_result = await self.macro_scanner.scan(context=macro_context)
             duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
 
             # Read token metadata from the scanner's last LLM result

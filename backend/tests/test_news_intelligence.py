@@ -3,12 +3,15 @@
 from datetime import datetime, timedelta, timezone
 
 from analysis.news_intelligence import (
+    _MACRO_TOPIC_LABELS,
     classify_event,
     compute_symbol_news_intelligence,
     detect_news_vacuum,
+    format_macro_news_context,
     format_news_context,
     score_articles,
 )
+from data.adapters.news import NewsAdapter
 
 
 def _article(headline, summary="", days_ago=1):
@@ -86,6 +89,34 @@ def test_detect_news_vacuum():
         "CCC": {"article_count": 0},
     }
     assert detect_news_vacuum(by_symbol) == ["BBB", "CCC"]
+
+
+def test_every_macro_query_topic_has_a_label():
+    # The adapter tags articles with macro_topic keys; the intelligence layer
+    # must have a display label for each, or topics silently vanish from output.
+    for topic in NewsAdapter._MACRO_QUERIES:
+        assert topic in _MACRO_TOPIC_LABELS
+
+
+def test_format_macro_news_context_renders_and_empties():
+    assert format_macro_news_context(None) == ""
+    assert format_macro_news_context({"article_count": 0}) == ""
+    macro = {
+        "sentiment_score": -0.2, "label": "NEGATIVE", "article_count": 25,
+        "by_topic": {
+            "monetary_policy": {"label": "Monetary Policy / Fed", "article_count": 6,
+                                 "sentiment_score": -0.3, "sentiment_label": "NEGATIVE",
+                                 "top_headline": {"headline": "Fed signals more hikes", "source": "WSJ"}},
+            "geopolitical": {"label": "Geopolitical", "article_count": 4,
+                              "sentiment_score": -0.5, "sentiment_label": "NEGATIVE",
+                              "top_headline": {"headline": "Conflict escalates", "source": "Reuters"}},
+        },
+    }
+    out = format_macro_news_context(macro)
+    assert "## Macro-Economic News" in out
+    assert "Monetary Policy / Fed: -0.30 (NEGATIVE)" in out
+    assert "Fed signals more hikes" in out
+    assert "Geopolitical: -0.50 (NEGATIVE)" in out
 
 
 def test_format_news_context_renders_and_empties():

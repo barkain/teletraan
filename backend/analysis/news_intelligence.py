@@ -262,6 +262,105 @@ async def get_news_intelligence(
     }
 
 
+_MACRO_TOPIC_LABELS: dict[str, str] = {
+    "monetary_policy": "Monetary Policy / Fed",
+    "inflation": "Inflation",
+    "employment": "Employment",
+    "growth": "Growth / Recession",
+    "trade": "Trade / Tariffs",
+    "rates": "Rates / Yields",
+    "geopolitical": "Geopolitical",
+}
+
+
+async def get_macro_news_intelligence(days: int = 3, limit: int = 40) -> dict[str, Any]:
+    """Fetch + score macro-economic news into a regime-relevant signal.
+
+    Returns {as_of, sentiment_score, label, article_count, by_topic, top_headlines}.
+    by_topic maps each macro topic -> {label, article_count, sentiment_score,
+    sentiment_label, top_headline}. Best-effort: returns a zeroed record on
+    failure (the adapter never raises).
+    """
+    adapter = get_news_adapter()
+    articles = await adapter.get_macro_news(days=days, limit=limit)
+    scored = score_articles(articles)
+
+    if not scored:
+        return {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "sentiment_score": 0.0,
+            "label": "NEUTRAL",
+            "article_count": 0,
+            "by_topic": {},
+            "top_headlines": [],
+        }
+
+    now = datetime.now(timezone.utc)
+    weights = [_recency_weight(a.get("published_at"), now, days) for a in scored]
+    total_w = sum(weights) or 1.0
+    agg = round(sum(a["sentiment_score"] * w for a, w in zip(scored, weights)) / total_w, 4)
+
+    by_topic: dict[str, Any] = {}
+    for topic, label in _MACRO_TOPIC_LABELS.items():
+        topic_arts = [a for a in scored if a.get("macro_topic") == topic]
+        if not topic_arts:
+            continue
+        t_score = round(sum(a["sentiment_score"] for a in topic_arts) / len(topic_arts), 4)
+        top = max(topic_arts, key=lambda a: abs(a["sentiment_score"]))
+        by_topic[topic] = {
+            "label": label,
+            "article_count": len(topic_arts),
+            "sentiment_score": t_score,
+            "sentiment_label": _label(t_score),
+            "top_headline": {"headline": top["headline"], "source": top["source"]},
+        }
+
+    top_headlines = sorted(scored, key=lambda a: abs(a["sentiment_score"]), reverse=True)[:6]
+    return {
+        "as_of": now.isoformat(),
+        "sentiment_score": agg,
+        "label": _label(agg),
+        "article_count": len(scored),
+        "by_topic": by_topic,
+        "top_headlines": [
+            {"headline": a["headline"], "source": a["source"],
+             "sentiment_label": a["sentiment_label"],
+             "topic": _MACRO_TOPIC_LABELS.get(a.get("macro_topic", ""), "")}
+            for a in top_headlines
+        ],
+    }
+
+
+def format_macro_news_context(macro: dict[str, Any] | None) -> str:
+    """Render macro-news intelligence into a markdown block for the MacroScanner.
+
+    Returns '' when there is no usable data so the caller can omit the section.
+    """
+    if not macro or not macro.get("article_count"):
+        return ""
+    lines = [
+        "## Macro-Economic News",
+        f"**Overall macro-news tone:** {macro.get('label', 'NEUTRAL')} "
+        f"(score {macro.get('sentiment_score', 0):+.2f}, {macro.get('article_count', 0)} articles)",
+    ]
+    by_topic = macro.get("by_topic") or {}
+    if by_topic:
+        lines.append("**By topic:**")
+        for topic in _MACRO_TOPIC_LABELS:
+            t = by_topic.get(topic)
+            if not t:
+                continue
+            line = (
+                f"- {t['label']}: {t['sentiment_score']:+.2f} ({t['sentiment_label']}) | "
+                f"{t['article_count']} articles"
+            )
+            head = (t.get("top_headline") or {}).get("headline")
+            if head:
+                line += f" | \"{head}\""
+            lines.append(line)
+    return "\n".join(lines)
+
+
 async def _gather(adapter: Any, symbols: list[str], days: int, limit_per_symbol: int):
     import asyncio
     news_by_symbol, market_articles = await asyncio.gather(
