@@ -22,6 +22,7 @@ async def run_autonomous_analysis_pipeline(
     task_id: str,
     max_insights: int,
     deep_dive_count: int,
+    policy: "str | dict | None" = None,
 ) -> None:
     """Execute the autonomous analysis pipeline for a given task.
 
@@ -58,6 +59,7 @@ async def run_autonomous_analysis_pipeline(
             max_insights=max_insights,
             deep_dive_count=deep_dive_count,
             task_id=task_id,
+            policy=policy,
         )
 
         # Persist results
@@ -80,6 +82,9 @@ async def run_autonomous_analysis_pipeline(
                     i.id for i in analysis_result.insights
                 ]
                 task.discovery_summary = analysis_result.discovery_summary
+                if analysis_result.research_policy:
+                    import json as _json_policy
+                    task.research_policy = _json_policy.dumps(analysis_result.research_policy)
                 task.phases_completed = analysis_result.phases_completed
                 task.phase_summaries = analysis_result.phase_summaries
 

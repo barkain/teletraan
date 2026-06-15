@@ -971,6 +971,7 @@ def parse_synthesis_response_full(response: str) -> SynthesisParseResult:
             "primary_symbol": insight.get("primary_symbol"),
             "related_symbols": insight.get("related_symbols", []),
             "secondary_plays": insight.get("secondary_plays"),
+            "tier": insight.get("tier"),
             "supporting_evidence": insight.get("supporting_evidence", []),
             "confidence": float(insight.get("confidence", 0.5)),
             "time_horizon": insight.get("time_horizon", "medium_term"),

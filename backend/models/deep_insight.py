@@ -132,6 +132,12 @@ class DeepInsight(TimestampMixin, Base):
         String(50),
         nullable=True,
     )  # e.g., "$142 (-5%)"
+    # Research-policy tier this insight was bucketed into (e.g. "asymmetric",
+    # "thematic", "core"). Set by the synthesis lead under the active policy.
+    tier: Mapped[str | None] = mapped_column(
+        String(40),
+        nullable=True,
+    )
     timeframe: Mapped[str | None] = mapped_column(
         String(30),
         nullable=True,

@@ -171,6 +171,16 @@ VALID_INSIGHT_TYPES = {t.value for t in InsightType}
 VALID_ACTIONS = {a.value for a in InsightAction}
 
 
+def _clip(value: Any, max_len: int) -> str | None:
+    """Coerce to a trimmed string capped at max_len, or None when empty."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text[:max_len]
+
+
 @dataclass
 class AutonomousAnalysisResult:
     """Complete result from autonomous analysis pipeline."""
@@ -194,6 +204,7 @@ class AutonomousAnalysisResult:
     factor_scores: dict[str, Any] = field(default_factory=dict)
     correlation_highlights: dict[str, Any] = field(default_factory=dict)
     catalyst_data: list[dict[str, Any]] = field(default_factory=list)
+    research_policy: dict[str, Any] = field(default_factory=dict)
     thematic_analysis: dict[str, Any] = field(default_factory=dict)
     investor_intelligence: dict[str, Any] = field(default_factory=dict)
 
@@ -399,6 +410,11 @@ class AutonomousDeepEngine:
         # Per-run metrics accumulator (set at the start of each analysis run)
         self._run_metrics: RunMetrics | None = None
 
+        # Resolved research policy for the current run (objective function).
+        # Set per-run in run_autonomous_analysis; defaults to the balanced preset.
+        from analysis.research_policy import get_preset  # type: ignore[import-not-found]
+        self._policy = get_preset(None)
+
         # Activity log for live LLM tracking (scoped per task_id)
         self._activity_log: list[LLMActivityEntry] = []
         self._activity_seq: int = 0
@@ -427,6 +443,61 @@ class AutonomousDeepEngine:
         self._stock_descriptions: dict[str, str] = {}
         self._stock_clusters: list[dict[str, Any]] = []
         self._cluster_analyses: list[dict[str, Any]] = []
+
+    def _normalize_tier(self, raw: Any) -> str | None:
+        """Map a synthesis-provided tier onto the active policy's tier names.
+
+        Returns the canonical tier name when it matches a policy tier (case- and
+        separator-insensitive), otherwise the trimmed raw value (still useful for
+        display), or None. Never raises.
+        """
+        text = _clip(raw, 40)
+        if not text:
+            return None
+        try:
+            key = text.lower().replace(" ", "_").replace("-", "_")
+            for name in self._policy.tier_names():
+                if name.lower() == key:
+                    return name
+        except Exception:
+            pass
+        return text
+
+    async def _resolve_research_policy(self, override: "str | dict | None"):
+        """Resolve the effective research policy for this run.
+
+        Precedence: per-run ``override`` -> active policy stored in
+        ``user_settings['research_policy']`` -> env ``RESEARCH_POLICY_DEFAULT``
+        preset. Any failure falls back to the built-in default preset so a
+        misconfigured policy can never break the pipeline.
+        """
+        from analysis.research_policy import build_policy, get_preset  # type: ignore[import-not-found]
+
+        env_default = None
+        try:
+            from config import get_settings  # type: ignore[import-not-found]
+            env_default = getattr(get_settings(), "RESEARCH_POLICY_DEFAULT", None)
+        except Exception as cfg_err:
+            logger.debug("Could not read RESEARCH_POLICY_DEFAULT: %s", cfg_err)
+
+        active_setting = None
+        try:
+            from services.settings import get_settings_service  # type: ignore[import-not-found]
+            async with async_session_factory() as session:
+                svc = get_settings_service(session)
+                active_setting = await svc.get_setting("research_policy")
+        except Exception as set_err:
+            logger.debug("Could not read active research_policy setting: %s", set_err)
+
+        try:
+            return build_policy(
+                override=override,
+                active_setting=active_setting,
+                env_default=env_default,
+            )
+        except Exception as build_err:
+            logger.warning("Failed to build research policy (using default): %s", build_err)
+            return get_preset(env_default)
 
     async def _get_portfolio_holdings(self) -> dict[str, dict[str, float]]:
         """Fetch portfolio holdings from the database.
@@ -891,6 +962,7 @@ class AutonomousDeepEngine:
         deep_dive_count: int = 12,
         task_id: str | None = None,
         quant_context: str | None = None,
+        policy: "str | dict | None" = None,
     ) -> AutonomousAnalysisResult:
         """Run complete autonomous analysis pipeline.
 
@@ -919,6 +991,17 @@ class AutonomousDeepEngine:
 
         # Store quant context for injection into analyst and synthesis contexts
         self._quant_context = quant_context
+
+        # Resolve the research policy (objective function) for this run.
+        # Precedence: per-run override -> active policy in user_settings ->
+        # env default preset. Failure must never break the run.
+        self._policy = await self._resolve_research_policy(policy)
+        result.research_policy = self._policy.model_dump()
+        logger.info(
+            "Research policy: %s (objective=%s, conviction=%s, min_rr=%.1f)",
+            self._policy.name, self._policy.objective,
+            self._policy.conviction_model, self._policy.min_reward_risk,
+        )
 
         # Clear activity log for new run, scoped to this task_id
         self.clear_activity_log(task_id=task_id)
@@ -1619,10 +1702,19 @@ class AutonomousDeepEngine:
             macro_context_dict,
         )
 
+        # Inject the research-policy mandate so stock selection is steered by the
+        # active objective (e.g. hunt asymmetric upside vs. defensive quality).
+        from analysis.research_policy import render_policy_directives  # type: ignore[import-not-found]
+        selection_directive = render_policy_directives(self._policy, "selection")
+        user_prompt = (
+            "Analyze the heatmap data and select stocks for deep dive.\n\n"
+            f"{selection_directive}"
+        )
+
         # Query LLM — the formatted_context IS the full prompt (system+context merged)
         response = await self._query_llm(
             formatted_context,
-            "Analyze the heatmap data and select stocks for deep dive.",
+            user_prompt,
             "heatmap_analyzer",
             "heatmap_analysis",
         )
@@ -2544,7 +2636,11 @@ class AutonomousDeepEngine:
         Returns:
             Formatted autonomous context string.
         """
+        from analysis.research_policy import render_policy_directives  # type: ignore[import-not-found]
+
         lines = [
+            render_policy_directives(self._policy, "synthesis"),
+            "",
             "## AUTONOMOUS DISCOVERY CONTEXT (Heatmap-Driven)",
             "",
             f"### Market Regime: {macro_context.market_regime}",
@@ -2609,11 +2705,20 @@ class AutonomousDeepEngine:
                 if analysis.get("conviction"):
                     lines.append(f"  Conviction: {analysis['conviction']}")
 
+        symbols_count = len(analyst_reports)
+        insight_floor = min(max_insights, max(3, symbols_count // 2)) if symbols_count else max_insights
+
         lines.extend([
             "",
-            f"Symbols Analyzed: {', '.join(analyst_reports.keys())}",
+            f"Symbols Analyzed ({symbols_count}): {', '.join(analyst_reports.keys())}",
             "",
             f"### Target: Generate {max_insights} actionable insights",
+            f"Hard floor: produce AT LEAST {insight_floor} distinct insights. "
+            f"{symbols_count} symbols received full deep-dive coverage, so do NOT "
+            "collapse to a single pick. This engine runs technical/sector/risk "
+            "analysts by design — the absence of a macro or correlation report is "
+            "NOT a coverage gap and is NOT a reason to withhold insights or lower "
+            "conviction.",
             "Prioritize opportunities with:",
             "- Strong macro/heatmap alignment",
             "- Thematic connections between stocks",
@@ -2857,6 +2962,10 @@ class AutonomousDeepEngine:
                     historical_precedent=data.get("historical_precedent"),
                     analysts_involved=data.get("analysts_involved", []),
                     data_sources=data_sources,
+                    entry_zone=_clip(data.get("entry_zone"), 50),
+                    target_price=_clip(data.get("target_price") or data.get("target"), 50),
+                    stop_loss=_clip(data.get("stop_loss") or data.get("stop"), 50),
+                    tier=self._normalize_tier(data.get("tier")),
                     prediction_market_data=getattr(self, '_prediction_data', None) or None,
                     sentiment_data=getattr(self, '_sentiment_data', None) or None,
                     technical_analysis_data=self._extract_ta_for_symbol(primary_symbol, pre_context) if pre_context and primary_symbol else None,
@@ -3902,7 +4011,11 @@ class AutonomousDeepEngine:
         Returns:
             Formatted autonomous context string.
         """
+        from analysis.research_policy import render_policy_directives  # type: ignore[import-not-found]
+
         lines = [
+            render_policy_directives(self._policy, "synthesis"),
+            "",
             "## AUTONOMOUS DISCOVERY CONTEXT",
             "",
             f"### Market Regime: {macro_context.market_regime}",
@@ -3930,12 +4043,21 @@ class AutonomousDeepEngine:
         for sector in sector_context.top_sectors[:3]:
             lines.append(f"- {sector.sector_name}: {sector.rationale[:80]}...")
 
+        symbols_count = len(analyst_reports)
+        insight_floor = min(max_insights, max(3, symbols_count // 2)) if symbols_count else max_insights
+
         lines.extend([
             "",
             f"### Candidates Screened: {candidates.total_screened}",
-            f"Symbols Analyzed: {', '.join(analyst_reports.keys())}",
+            f"Symbols Analyzed ({symbols_count}): {', '.join(analyst_reports.keys())}",
             "",
             f"### Target: Generate {max_insights} actionable insights",
+            f"Hard floor: produce AT LEAST {insight_floor} distinct insights. "
+            f"{symbols_count} symbols received full deep-dive coverage, so do NOT "
+            "collapse to a single pick. This engine runs technical/sector/risk "
+            "analysts by design — the absence of a macro or correlation report is "
+            "NOT a coverage gap and is NOT a reason to withhold insights or lower "
+            "conviction.",
             "Prioritize opportunities with:",
             "- Strong macro/sector alignment",
             "- Multiple analyst agreement",
@@ -4044,7 +4166,23 @@ class AutonomousDeepEngine:
                         current + report["confidence"]
                     ) / 2
 
-        return aggregated
+        # Drop analyst buckets that never ran. The autonomous engine runs only
+        # technical/sector/risk per symbol (see ANALYSTS), so the pre-seeded
+        # macro and correlation buckets stay empty at 0.0 confidence. Surfacing
+        # them makes the synthesis LLM read "0% confidence / incomplete coverage"
+        # and turn overly conservative — in one run it collapsed to a single
+        # insight, citing the empty macro/correlation reports. Only return
+        # analysts that actually produced signal (confidence or data).
+        def _has_signal(report: dict[str, Any]) -> bool:
+            if report.get("confidence", 0.0) > 0.0:
+                return True
+            return any(isinstance(v, list) and v for v in report.values())
+
+        return {
+            name: report
+            for name, report in aggregated.items()
+            if _has_signal(report)
+        }
 
     async def _store_insights(
         self,
@@ -4113,6 +4251,10 @@ class AutonomousDeepEngine:
                     historical_precedent=data.get("historical_precedent"),
                     analysts_involved=data.get("analysts_involved", []),
                     data_sources=data_sources,
+                    entry_zone=_clip(data.get("entry_zone"), 50),
+                    target_price=_clip(data.get("target_price") or data.get("target"), 50),
+                    stop_loss=_clip(data.get("stop_loss") or data.get("stop"), 50),
+                    tier=self._normalize_tier(data.get("tier")),
                     prediction_market_data=getattr(self, '_prediction_data', None) or None,
                     sentiment_data=getattr(self, '_sentiment_data', None) or None,
                     technical_analysis_data=None,  # No pre_context in legacy pipeline

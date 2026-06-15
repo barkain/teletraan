@@ -98,6 +98,7 @@ class DeepInsightResponse(DeepInsightBase):
     entry_zone: Optional[str] = None
     target_price: Optional[str] = None
     stop_loss: Optional[str] = None
+    tier: Optional[str] = None  # research-policy tier (e.g. "asymmetric", "core")
     timeframe: Optional[str] = None
     discovery_context: Optional[dict] = None
 

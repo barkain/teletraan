@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     PREDICTION_MARKETS_ENABLED: bool = True
     REDDIT_SENTIMENT_ENABLED: bool = True
     NEWS_SENTIMENT_ENABLED: bool = True  # Financial-news sentiment augmentation for deep analysis
+    # Default research policy (objective function) for autonomous discovery.
+    # One of the preset names in analysis.research_policy.PRESETS. The active
+    # policy in user_settings['research_policy'] and a per-run override both
+    # take precedence over this default.
+    RESEARCH_POLICY_DEFAULT: str = "balanced"
     POLYMARKET_RATE_LIMIT: int = 30  # Max requests/minute to Polymarket APIs
     KALSHI_RATE_LIMIT: int = 20  # Max requests/minute to Kalshi API
 

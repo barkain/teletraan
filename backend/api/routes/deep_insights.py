@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -38,6 +39,12 @@ class AutonomousAnalysisRequest(BaseModel):
     max_insights: int = Field(default=10, ge=1, le=20, description="Number of final insights to produce")
     deep_dive_count: int = Field(default=12, ge=1, le=30, description="Number of opportunities to analyze in detail")
     include_quant_signals: bool = Field(default=True, description="Run IC-calibrated quant scorer and inject scores as additional context")
+    policy: str | dict[str, Any] | None = Field(
+        default=None,
+        description="Per-run research-policy override: a preset name (e.g. 'aggressive_asymmetric') "
+        "or a dict of field overrides (optionally with {'base': '<preset>'}). Falls back to the "
+        "active policy in settings, then the env default.",
+    )
 
 
 class AutonomousAnalysisResponse(BaseModel):
@@ -289,6 +296,7 @@ async def run_autonomous_analysis(
             max_insights=max_insights,
             deep_dive_count=deep_dive_count,
             quant_context=quant_context,
+            policy=request.policy if request else None,
         )
 
         # Extract top sectors from result
@@ -481,7 +489,12 @@ async def _auto_publish_report(task_id: str) -> None:
         logger.info(f"Auto-published report {task_id} to {published_url}")
 
 
-async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_count: int) -> None:
+async def _run_background_analysis(
+    task_id: str,
+    max_insights: int,
+    deep_dive_count: int,
+    policy: str | dict[str, Any] | None = None,
+) -> None:
     """Background task to run autonomous analysis with progress updates.
 
     Delegates to the shared runner in ``analysis.autonomous_runner`` so
@@ -499,6 +512,7 @@ async def _run_background_analysis(task_id: str, max_insights: int, deep_dive_co
         task_id=task_id,
         max_insights=max_insights,
         deep_dive_count=deep_dive_count,
+        policy=policy,
     )
 
 
@@ -521,6 +535,7 @@ async def start_autonomous_analysis(
     """
     max_insights = request.max_insights if request else 5
     deep_dive_count = request.deep_dive_count if request else 7
+    policy = request.policy if request else None
 
     # Create task record
     task_id = str(uuid4())
@@ -552,6 +567,7 @@ async def start_autonomous_analysis(
             task_id=task_id,
             max_insights=max_insights,
             deep_dive_count=deep_dive_count,
+            policy=policy,
         )
     )
     _detached_analysis_tasks.add(analysis_task)
