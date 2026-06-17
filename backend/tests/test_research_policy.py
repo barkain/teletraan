@@ -55,6 +55,35 @@ def test_aggressive_directives_carry_asymmetry_language():
     assert "entry_zone" in syn
 
 
+def test_best_bets_is_concentrated_short_horizon():
+    p = get_preset("best_bets")
+    assert p.max_total_insights == 3
+    assert p.time_horizon_bias == "short_term"
+    syn = render_policy_directives(p, "synthesis")
+    sel = render_policy_directives(p, "selection")
+    assert "AT MOST 3" in syn          # hard ceiling, not a floor
+    assert "1-2 week" in syn           # short holding window
+    assert "1-2 week" in sel
+
+
+def test_count_guidance_concentrated_vs_floor():
+    e = AutonomousDeepEngine()
+    e._policy = get_preset("best_bets")
+    target, count = e._synthesis_count_guidance(10, 3)
+    assert "TOP 3" in target
+    assert "Returning fewer is fine" in count and "AT LEAST" not in count
+    # default policy keeps the floor behavior
+    e._policy = get_preset("balanced")
+    _, count2 = e._synthesis_count_guidance(7, 10)
+    assert "AT LEAST" in count2
+
+
+def test_concentrated_clamp_logic():
+    p = get_preset("best_bets")
+    assert min(10, p.max_total_insights) == 3
+    assert min(2, p.max_total_insights) == 2  # caller asking for fewer wins
+
+
 def test_normalize_tier_maps_to_policy_names():
     e = AutonomousDeepEngine()
     e._policy = get_preset("aggressive_asymmetric")

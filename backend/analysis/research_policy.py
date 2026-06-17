@@ -41,10 +41,17 @@ class ResearchPolicy(BaseModel):
     description: str = ""
 
     # --- Objective: what we optimize for ---
-    objective: str = "balanced"  # asymmetric_upside | balanced | capital_preservation | income
+    objective: str = "balanced"  # asymmetric_upside | balanced | capital_preservation | income | best_bets
     risk_appetite: float = Field(0.5, ge=0.0, le=1.0)  # variance tolerance
     min_reward_risk: float = 2.0  # floor R:R to call something an "opportunity"
     target_upside_pct: float = 25.0  # min bull-case upside for the top tier
+    # Holding-window bias: "short_term" (~1-2 weeks), "medium_term" (~1-3 months),
+    # "long_term" (quarters+), or "any". Steers selection + synthesis emphasis.
+    time_horizon_bias: str = "any"
+    # Hard ceiling on the total number of insights produced. None = no cap (use
+    # the caller's max_insights). Set this for concentrated "best bets" modes
+    # that should return only the top N ranked names from a wider analyzed field.
+    max_total_insights: int | None = None
 
     # --- Universe: where we hunt ---
     include_small_mid_cap: bool = False
@@ -150,8 +157,36 @@ _DEFENSIVE = ResearchPolicy(
     ],
 )
 
+_BEST_BETS = ResearchPolicy(
+    name="best_bets",
+    description=(
+        "Concentrated conviction mode: rank a wide analyzed field and return only "
+        "the top 1-3 names with the best expected upside over a ~1-2 week window."
+    ),
+    objective="best_bets",
+    risk_appetite=0.85,
+    # Over ~2 weeks you cannot demand 3:1; ask for a favorable but realistic skew.
+    min_reward_risk=2.0,
+    target_upside_pct=8.0,  # a strong 1-2 week move, not a multi-month re-rating
+    time_horizon_bias="short_term",
+    max_total_insights=3,  # the whole point: at most 3, ranked best-first
+    include_small_mid_cap=True,
+    asset_classes=["equity", "adr", "commodity"],
+    candidate_sources=["heatmap", "movers", "unusual_volume", "catalyst_calendar"],
+    conviction_model="payoff_weighted",
+    allow_contested_ideas=True,
+    require_quantified_levels=True,
+    tail_risk_override_pct=20.0,
+    max_position_pct=6.0,
+    tiers=[
+        PolicyTier(name="top_pick", label="Top Pick", min_reward_risk=2.0,
+                   max_count=3, position_size_pct="3-6%",
+                   note="Highest expected near-term upside; ranked best-first."),
+    ],
+)
+
 PRESETS: dict[str, ResearchPolicy] = {
-    p.name: p for p in (_BALANCED, _AGGRESSIVE, _DEFENSIVE)
+    p.name: p for p in (_BALANCED, _AGGRESSIVE, _DEFENSIVE, _BEST_BETS)
 }
 
 DEFAULT_POLICY_NAME = "balanced"
@@ -211,6 +246,22 @@ def render_policy_directives(policy: ResearchPolicy, phase: str) -> str:
     return _render_synthesis(policy)
 
 
+_HORIZON_PHRASES = {
+    "short_term": (
+        "Optimize for a SHORT ~1-2 week holding window. Weight imminent catalysts "
+        "(earnings/events within ~10 trading days), short-term momentum, and clean "
+        "technical setups near actionable levels. De-emphasize slow multi-quarter "
+        "fundamental theses that need months to play out."
+    ),
+    "medium_term": "Optimize for a ~1-3 month holding window.",
+    "long_term": "Optimize for a multi-quarter holding window; tolerate slow theses.",
+}
+
+
+def _horizon_phrase(policy: ResearchPolicy) -> str | None:
+    return _HORIZON_PHRASES.get(policy.time_horizon_bias)
+
+
 def _render_selection(policy: ResearchPolicy) -> str:
     lines = [
         f"## Research Mandate: {policy.name} ({policy.objective})",
@@ -243,6 +294,9 @@ def _render_selection(policy: ResearchPolicy) -> str:
         lines.append(f"- Exclude sectors: {', '.join(policy.exclude_sectors)}.")
     if "catalyst_calendar" in policy.candidate_sources:
         lines.append("- Prioritize names with a known catalyst (earnings, regulatory, product) on the horizon.")
+    horizon = _horizon_phrase(policy)
+    if horizon:
+        lines.append(f"- {horizon}")
     return "\n".join(lines)
 
 
@@ -286,6 +340,18 @@ def _render_synthesis(policy: ResearchPolicy) -> str:
         f"**Risk veto:** only let a risk warning override a bullish thesis when tail-risk "
         f"probability exceeds {policy.tail_risk_override_pct:.0f}%."
     )
+    horizon = _horizon_phrase(policy)
+    if horizon:
+        lines.append(f"**Holding window:** {horizon}")
+    if policy.max_total_insights:
+        n = policy.max_total_insights
+        lines.append(
+            f"**CONCENTRATED OUTPUT — return AT MOST {n} insight(s).** You analyzed a wide "
+            f"field so you could RANK it: surface ONLY the {n} names with the highest "
+            f"expected payoff over the holding window, best-first. Quality and ranking "
+            f"beat coverage — if only 1-2 names truly stand out, return just those; never "
+            f"pad to {n}. Order the `insights` array best-first."
+        )
 
     if policy.tiers:
         lines.append("")

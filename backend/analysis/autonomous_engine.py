@@ -444,6 +444,43 @@ class AutonomousDeepEngine:
         self._stock_clusters: list[dict[str, Any]] = []
         self._cluster_analyses: list[dict[str, Any]] = []
 
+    def _synthesis_count_guidance(
+        self, symbols_count: int, max_insights: int
+    ) -> tuple[str, str]:
+        """Build the (target_line, count_line) for the synthesis context.
+
+        Two regimes, selected by the active policy:
+        - Concentrated (``max_total_insights`` set, e.g. best_bets): a hard
+          ceiling — rank the analyzed field and return only the top N, fewer
+          allowed, never pad.
+        - Default: a floor — don't collapse to one pick despite the
+          technical/sector/risk-only analyst panel.
+        """
+        if self._policy.max_total_insights:
+            target = f"### Target: Select the TOP {max_insights} name(s) from the {symbols_count} analyzed"
+            count = (
+                f"CONCENTRATED OUTPUT: rank all {symbols_count} deep-dived names by expected "
+                f"payoff over the holding window and return ONLY the best {max_insights}, "
+                "ordered best-first in the insights array. Returning fewer is fine if only "
+                "fewer truly stand out — never pad to hit the number. Ranking and quality "
+                "beat coverage."
+            )
+            return target, count
+
+        insight_floor = (
+            min(max_insights, max(3, symbols_count // 2)) if symbols_count else max_insights
+        )
+        target = f"### Target: Generate {max_insights} actionable insights"
+        count = (
+            f"Hard floor: produce AT LEAST {insight_floor} distinct insights. "
+            f"{symbols_count} symbols received full deep-dive coverage, so do NOT "
+            "collapse to a single pick. This engine runs technical/sector/risk "
+            "analysts by design — the absence of a macro or correlation report is "
+            "NOT a coverage gap and is NOT a reason to withhold insights or lower "
+            "conviction."
+        )
+        return target, count
+
     def _normalize_tier(self, raw: Any) -> str | None:
         """Map a synthesis-provided tier onto the active policy's tier names.
 
@@ -997,10 +1034,16 @@ class AutonomousDeepEngine:
         # env default preset. Failure must never break the run.
         self._policy = await self._resolve_research_policy(policy)
         result.research_policy = self._policy.model_dump()
+        # A concentrated policy (e.g. best_bets) caps the final insight count while
+        # still deep-diving a wide field, so synthesis can rank and return only the
+        # top N. Clamp here; deep_dive_count is intentionally left untouched.
+        if self._policy.max_total_insights:
+            max_insights = min(max_insights, self._policy.max_total_insights)
         logger.info(
-            "Research policy: %s (objective=%s, conviction=%s, min_rr=%.1f)",
+            "Research policy: %s (objective=%s, conviction=%s, min_rr=%.1f, cap=%s) -> max_insights=%d",
             self._policy.name, self._policy.objective,
             self._policy.conviction_model, self._policy.min_reward_risk,
+            self._policy.max_total_insights, max_insights,
         )
 
         # Clear activity log for new run, scoped to this task_id
@@ -2706,19 +2749,14 @@ class AutonomousDeepEngine:
                     lines.append(f"  Conviction: {analysis['conviction']}")
 
         symbols_count = len(analyst_reports)
-        insight_floor = min(max_insights, max(3, symbols_count // 2)) if symbols_count else max_insights
+        target_line, count_line = self._synthesis_count_guidance(symbols_count, max_insights)
 
         lines.extend([
             "",
             f"Symbols Analyzed ({symbols_count}): {', '.join(analyst_reports.keys())}",
             "",
-            f"### Target: Generate {max_insights} actionable insights",
-            f"Hard floor: produce AT LEAST {insight_floor} distinct insights. "
-            f"{symbols_count} symbols received full deep-dive coverage, so do NOT "
-            "collapse to a single pick. This engine runs technical/sector/risk "
-            "analysts by design — the absence of a macro or correlation report is "
-            "NOT a coverage gap and is NOT a reason to withhold insights or lower "
-            "conviction.",
+            target_line,
+            count_line,
             "Prioritize opportunities with:",
             "- Strong macro/heatmap alignment",
             "- Thematic connections between stocks",
@@ -4044,20 +4082,15 @@ class AutonomousDeepEngine:
             lines.append(f"- {sector.sector_name}: {sector.rationale[:80]}...")
 
         symbols_count = len(analyst_reports)
-        insight_floor = min(max_insights, max(3, symbols_count // 2)) if symbols_count else max_insights
+        target_line, count_line = self._synthesis_count_guidance(symbols_count, max_insights)
 
         lines.extend([
             "",
             f"### Candidates Screened: {candidates.total_screened}",
             f"Symbols Analyzed ({symbols_count}): {', '.join(analyst_reports.keys())}",
             "",
-            f"### Target: Generate {max_insights} actionable insights",
-            f"Hard floor: produce AT LEAST {insight_floor} distinct insights. "
-            f"{symbols_count} symbols received full deep-dive coverage, so do NOT "
-            "collapse to a single pick. This engine runs technical/sector/risk "
-            "analysts by design — the absence of a macro or correlation report is "
-            "NOT a coverage gap and is NOT a reason to withhold insights or lower "
-            "conviction.",
+            target_line,
+            count_line,
             "Prioritize opportunities with:",
             "- Strong macro/sector alignment",
             "- Multiple analyst agreement",
