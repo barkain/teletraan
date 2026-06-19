@@ -211,6 +211,13 @@ class AnalysisTask(TimestampMixin, Base):
         nullable=True,
     )  # JSON: {"factor_scores": {...}, "correlation_highlights": {...}, "catalyst_data": [...]}
 
+    # Resolved research policy (objective function) this run executed under,
+    # stored as a JSON blob so runs can be compared like-for-like by mandate.
+    research_policy: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     __table_args__ = (
         Index("ix_analysis_tasks_status_created", "status", "created_at"),
         Index("ix_analysis_tasks_started_at", "started_at"),

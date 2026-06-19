@@ -171,6 +171,36 @@ VALID_INSIGHT_TYPES = {t.value for t in InsightType}
 VALID_ACTIONS = {a.value for a in InsightAction}
 
 
+def _clip(value: Any, max_len: int) -> str | None:
+    """Coerce to a trimmed string capped at max_len, or None when empty."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text[:max_len]
+
+
+def _parse_price_level(value: Any) -> float | None:
+    """Extract the first dollar figure from a free-text price field.
+
+    Synthesis emits levels like ``"$270 (28% upside)"`` or ``"$140 (below
+    support)"`` or a range ``"$880-900"``. Return the first numeric price, or
+    None when there is no parseable figure (e.g. ``"N/A - bearish"``).
+    """
+    if value is None:
+        return None
+    import re
+
+    m = re.search(r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)", str(value))
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
 @dataclass
 class AutonomousAnalysisResult:
     """Complete result from autonomous analysis pipeline."""
@@ -194,6 +224,7 @@ class AutonomousAnalysisResult:
     factor_scores: dict[str, Any] = field(default_factory=dict)
     correlation_highlights: dict[str, Any] = field(default_factory=dict)
     catalyst_data: list[dict[str, Any]] = field(default_factory=list)
+    research_policy: dict[str, Any] = field(default_factory=dict)
     thematic_analysis: dict[str, Any] = field(default_factory=dict)
     investor_intelligence: dict[str, Any] = field(default_factory=dict)
 
@@ -399,6 +430,11 @@ class AutonomousDeepEngine:
         # Per-run metrics accumulator (set at the start of each analysis run)
         self._run_metrics: RunMetrics | None = None
 
+        # Resolved research policy for the current run (objective function).
+        # Set per-run in run_autonomous_analysis; defaults to the balanced preset.
+        from analysis.research_policy import get_preset  # type: ignore[import-not-found]
+        self._policy = get_preset(None)
+
         # Activity log for live LLM tracking (scoped per task_id)
         self._activity_log: list[LLMActivityEntry] = []
         self._activity_seq: int = 0
@@ -422,11 +458,207 @@ class AutonomousDeepEngine:
         self._sentiment_data: dict | None = None  # Reddit social sentiment
         self._news_data: dict | None = None  # Financial-news sentiment intelligence
         self._macro_news_data: dict | None = None  # Macro-economic news for the regime scan
+        self._live_prices: dict[str, float] = {}  # Live quotes for analyzed symbols (synthesis-time)
 
         # Stock thematic descriptions (populated during Phase 3.5)
         self._stock_descriptions: dict[str, str] = {}
         self._stock_clusters: list[dict[str, Any]] = []
         self._cluster_analyses: list[dict[str, Any]] = []
+
+    def _synthesis_count_guidance(
+        self, symbols_count: int, max_insights: int
+    ) -> tuple[str, str]:
+        """Build the (target_line, count_line) for the synthesis context.
+
+        Two regimes, selected by the active policy:
+        - Concentrated (``max_total_insights`` set, e.g. best_bets): a hard
+          ceiling — rank the analyzed field and return only the top N, fewer
+          allowed, never pad.
+        - Default: a floor — don't collapse to one pick despite the
+          technical/sector/risk-only analyst panel.
+        """
+        if self._policy.max_total_insights:
+            target = f"### Target: Select the TOP {max_insights} name(s) from the {symbols_count} analyzed"
+            count = (
+                f"CONCENTRATED OUTPUT: rank all {symbols_count} deep-dived names by expected "
+                f"payoff over the holding window and return ONLY the best {max_insights}, "
+                "ordered best-first in the insights array. Returning fewer is fine if only "
+                "fewer truly stand out — never pad to hit the number. Ranking and quality "
+                "beat coverage."
+            )
+            return target, count
+
+        insight_floor = (
+            min(max_insights, max(3, symbols_count // 2)) if symbols_count else max_insights
+        )
+        target = f"### Target: Generate {max_insights} actionable insights"
+        count = (
+            f"Hard floor: produce AT LEAST {insight_floor} distinct insights. "
+            f"{symbols_count} symbols received full deep-dive coverage, so do NOT "
+            "collapse to a single pick. This engine runs technical/sector/risk "
+            "analysts by design — the absence of a macro or correlation report is "
+            "NOT a coverage gap and is NOT a reason to withhold insights or lower "
+            "conviction."
+        )
+        return target, count
+
+    def _normalize_tier(self, raw: Any) -> str | None:
+        """Map a synthesis-provided tier onto the active policy's tier names.
+
+        Returns the canonical tier name when it matches a policy tier (case- and
+        separator-insensitive), otherwise the trimmed raw value (still useful for
+        display), or None. Never raises.
+        """
+        text = _clip(raw, 40)
+        if not text:
+            return None
+        try:
+            key = text.lower().replace(" ", "_").replace("-", "_")
+            for name in self._policy.tier_names():
+                if name.lower() == key:
+                    return name
+        except Exception:
+            pass
+        return text
+
+    async def _fetch_live_prices(self, symbols: list[str]) -> dict[str, float]:
+        """Fetch fresh live prices for the given symbols (best-effort).
+
+        The deep-dive context reads price_history from the DB, which can be
+        stale (the ETL ingestion may be days/weeks behind). Synthesis targets
+        and the upside % are only trustworthy when anchored on the real current
+        price, so we pull live quotes here. Returns {SYMBOL: price}; missing or
+        failed symbols are simply absent. Never raises.
+        """
+        uniq = list(dict.fromkeys(s.upper().strip() for s in (symbols or []) if s and s.strip()))
+        if not uniq:
+            return {}
+        try:
+            from data.adapters.yahoo import YahooFinanceAdapter  # type: ignore[import-not-found]
+
+            adapter = YahooFinanceAdapter()
+            quotes = await adapter.get_multiple_prices(uniq)
+            prices: dict[str, float] = {}
+            for sym, data in (quotes or {}).items():
+                if isinstance(data, dict) and not data.get("error"):
+                    px = data.get("price")
+                    if isinstance(px, (int, float)) and px > 0:
+                        prices[sym.upper()] = float(px)
+            logger.info("[AUTO] Live prices fetched for %d/%d symbols", len(prices), len(uniq))
+            return prices
+        except Exception as e:
+            logger.warning("[AUTO] Live price fetch failed (non-fatal): %s", e)
+            return {}
+
+    def _format_live_prices_context(self, prices: dict[str, float]) -> str:
+        """Render a live-price block so synthesis anchors targets on real prices."""
+        if not prices:
+            return ""
+        lines = [
+            "## Live Current Prices (fetched now — AUTHORITATIVE)",
+            "Anchor every entry/target/stop and the upside % to THESE prices, not to "
+            "any price in the analyst reports (which may be stale). Compute upside as "
+            "(target - current) / current.",
+        ]
+        for sym, px in sorted(prices.items()):
+            lines.append(f"- {sym}: ${px:g}")
+        return "\n".join(lines)
+
+    def _verify_insight_economics(
+        self, insights: list[dict[str, Any]], prices: dict[str, float]
+    ) -> list[dict[str, Any]]:
+        """Recompute upside / R:R from live prices; relabel, gate, and rank.
+
+        Synthesis states an upside % in free text, which can be wrong or anchored
+        to a hallucinated price (e.g. a $215 target on SE labeled "+35%" when SE
+        trades ~$91). We recompute the real upside from the live price + the parsed
+        target, rewrite the displayed levels honestly, and — for concentrated
+        policies (best_bets) — drop picks whose verified upside is below the policy
+        floor or implausibly large (a sign of a bad target), then rank best-first.
+        """
+        if not insights:
+            return insights
+        floor = float(self._policy.target_upside_pct or 0)
+        concentrated = bool(self._policy.max_total_insights)
+        # A "best bet" upside far above what the holding window can plausibly
+        # deliver signals a mis-anchored target (e.g. a $215 SE target while SE
+        # trades ~$91). Cap tighter for short-horizon modes.
+        implausible_cap = 80.0 if self._policy.time_horizon_bias == "short_term" else 150.0
+        kept: list[dict[str, Any]] = []
+        for ins in insights:
+            sym = (ins.get("primary_symbol") or "").upper().strip()
+            price = prices.get(sym)
+            target = _parse_price_level(ins.get("target_price") or ins.get("target"))
+            stop = _parse_price_level(ins.get("stop_loss") or ins.get("stop"))
+            upside = None
+            if price and target and price > 0:
+                upside = (target - price) / price * 100.0
+                ins["_verified_upside_pct"] = round(upside, 1)
+                ins["_live_price"] = price
+                disp = f"${target:g} (live ${price:g} → {upside:+.0f}%)"
+                rr = None
+                if stop and stop > 0 and price > stop:
+                    downside = (price - stop) / price * 100.0
+                    if downside > 0:
+                        rr = upside / downside
+                        ins["_verified_rr"] = round(rr, 2)
+                ins["target_price"] = disp[:50]
+                # Gate only when we have a verified number and a concentrated mandate.
+                if concentrated:
+                    if upside < max(0.0, floor * 0.6):
+                        logger.info(
+                            "[AUTO] Dropping %s: verified upside %.0f%% below floor (%.0f%%)",
+                            sym, upside, floor,
+                        )
+                        continue
+                    if upside > implausible_cap:
+                        logger.info(
+                            "[AUTO] Dropping %s: verified upside %.0f%% implausible "
+                            "for %s window (target likely mis-anchored)",
+                            sym, upside, self._policy.time_horizon_bias,
+                        )
+                        continue
+            kept.append(ins)
+        # Rank best-first by verified upside when the policy ranks on payoff.
+        if self._policy.conviction_model in ("payoff_weighted", "barbell") or concentrated:
+            kept.sort(key=lambda i: i.get("_verified_upside_pct", -1e9), reverse=True)
+        return kept
+
+    async def _resolve_research_policy(self, override: "str | dict | None"):
+        """Resolve the effective research policy for this run.
+
+        Precedence: per-run ``override`` -> active policy stored in
+        ``user_settings['research_policy']`` -> env ``RESEARCH_POLICY_DEFAULT``
+        preset. Any failure falls back to the built-in default preset so a
+        misconfigured policy can never break the pipeline.
+        """
+        from analysis.research_policy import build_policy, get_preset  # type: ignore[import-not-found]
+
+        env_default = None
+        try:
+            from config import get_settings  # type: ignore[import-not-found]
+            env_default = getattr(get_settings(), "RESEARCH_POLICY_DEFAULT", None)
+        except Exception as cfg_err:
+            logger.debug("Could not read RESEARCH_POLICY_DEFAULT: %s", cfg_err)
+
+        active_setting = None
+        try:
+            from services.settings import get_settings_service  # type: ignore[import-not-found]
+            async with async_session_factory() as session:
+                svc = get_settings_service(session)
+                active_setting = await svc.get_setting("research_policy")
+        except Exception as set_err:
+            logger.debug("Could not read active research_policy setting: %s", set_err)
+
+        try:
+            return build_policy(
+                override=override,
+                active_setting=active_setting,
+                env_default=env_default,
+            )
+        except Exception as build_err:
+            logger.warning("Failed to build research policy (using default): %s", build_err)
+            return get_preset(env_default)
 
     async def _get_portfolio_holdings(self) -> dict[str, dict[str, float]]:
         """Fetch portfolio holdings from the database.
@@ -891,6 +1123,7 @@ class AutonomousDeepEngine:
         deep_dive_count: int = 12,
         task_id: str | None = None,
         quant_context: str | None = None,
+        policy: "str | dict | None" = None,
     ) -> AutonomousAnalysisResult:
         """Run complete autonomous analysis pipeline.
 
@@ -919,6 +1152,23 @@ class AutonomousDeepEngine:
 
         # Store quant context for injection into analyst and synthesis contexts
         self._quant_context = quant_context
+
+        # Resolve the research policy (objective function) for this run.
+        # Precedence: per-run override -> active policy in user_settings ->
+        # env default preset. Failure must never break the run.
+        self._policy = await self._resolve_research_policy(policy)
+        result.research_policy = self._policy.model_dump()
+        # A concentrated policy (e.g. best_bets) caps the final insight count while
+        # still deep-diving a wide field, so synthesis can rank and return only the
+        # top N. Clamp here; deep_dive_count is intentionally left untouched.
+        if self._policy.max_total_insights:
+            max_insights = min(max_insights, self._policy.max_total_insights)
+        logger.info(
+            "Research policy: %s (objective=%s, conviction=%s, min_rr=%.1f, cap=%s) -> max_insights=%d",
+            self._policy.name, self._policy.objective,
+            self._policy.conviction_model, self._policy.min_reward_risk,
+            self._policy.max_total_insights, max_insights,
+        )
 
         # Clear activity log for new run, scoped to this task_id
         self.clear_activity_log(task_id=task_id)
@@ -1619,10 +1869,19 @@ class AutonomousDeepEngine:
             macro_context_dict,
         )
 
+        # Inject the research-policy mandate so stock selection is steered by the
+        # active objective (e.g. hunt asymmetric upside vs. defensive quality).
+        from analysis.research_policy import render_policy_directives  # type: ignore[import-not-found]
+        selection_directive = render_policy_directives(self._policy, "selection")
+        user_prompt = (
+            "Analyze the heatmap data and select stocks for deep dive.\n\n"
+            f"{selection_directive}"
+        )
+
         # Query LLM — the formatted_context IS the full prompt (system+context merged)
         response = await self._query_llm(
             formatted_context,
-            "Analyze the heatmap data and select stocks for deep dive.",
+            user_prompt,
             "heatmap_analyzer",
             "heatmap_analysis",
         )
@@ -2474,9 +2733,16 @@ class AutonomousDeepEngine:
         # deep-dive candidates + the Phase-1 Reddit sentiment capture).
         news_sentiment_context = await self._build_news_and_sentiment_context(symbols)
 
+        # Live prices for ALL analyzed symbols so synthesis anchors targets and
+        # the upside % on today's price rather than the (possibly stale) DB history.
+        self._live_prices = await self._fetch_live_prices(list(analyst_reports.keys()))
+        live_price_block = self._format_live_prices_context(self._live_prices)
+        live_price_section = f"\n\n{live_price_block}" if live_price_block else ""
+
         full_context = (
             f"{autonomous_context}{portfolio_context}{thematic_context}"
             f"{investor_context}{quant_context_block}{news_sentiment_context}"
+            f"{live_price_section}"
             f"\n\n{synthesis_context}"
         )
 
@@ -2498,6 +2764,9 @@ class AutonomousDeepEngine:
 
         insights = self._dedupe_insights(insights)
         insights = self._enforce_portfolio_action_rules(insights, portfolio_holdings)
+        # Recompute upside/R:R from live prices: relabel honestly, gate out
+        # sub-floor / mis-anchored picks (concentrated policies), rank best-first.
+        insights = self._verify_insight_economics(insights, getattr(self, "_live_prices", {}) or {})
 
         # Adjust confidence based on historical track record
         try:
@@ -2544,7 +2813,11 @@ class AutonomousDeepEngine:
         Returns:
             Formatted autonomous context string.
         """
+        from analysis.research_policy import render_policy_directives  # type: ignore[import-not-found]
+
         lines = [
+            render_policy_directives(self._policy, "synthesis"),
+            "",
             "## AUTONOMOUS DISCOVERY CONTEXT (Heatmap-Driven)",
             "",
             f"### Market Regime: {macro_context.market_regime}",
@@ -2609,11 +2882,15 @@ class AutonomousDeepEngine:
                 if analysis.get("conviction"):
                     lines.append(f"  Conviction: {analysis['conviction']}")
 
+        symbols_count = len(analyst_reports)
+        target_line, count_line = self._synthesis_count_guidance(symbols_count, max_insights)
+
         lines.extend([
             "",
-            f"Symbols Analyzed: {', '.join(analyst_reports.keys())}",
+            f"Symbols Analyzed ({symbols_count}): {', '.join(analyst_reports.keys())}",
             "",
-            f"### Target: Generate {max_insights} actionable insights",
+            target_line,
+            count_line,
             "Prioritize opportunities with:",
             "- Strong macro/heatmap alignment",
             "- Thematic connections between stocks",
@@ -2857,6 +3134,10 @@ class AutonomousDeepEngine:
                     historical_precedent=data.get("historical_precedent"),
                     analysts_involved=data.get("analysts_involved", []),
                     data_sources=data_sources,
+                    entry_zone=_clip(data.get("entry_zone"), 50),
+                    target_price=_clip(data.get("target_price") or data.get("target"), 50),
+                    stop_loss=_clip(data.get("stop_loss") or data.get("stop"), 50),
+                    tier=self._normalize_tier(data.get("tier")),
                     prediction_market_data=getattr(self, '_prediction_data', None) or None,
                     sentiment_data=getattr(self, '_sentiment_data', None) or None,
                     technical_analysis_data=self._extract_ta_for_symbol(primary_symbol, pre_context) if pre_context and primary_symbol else None,
@@ -3831,9 +4112,14 @@ class AutonomousDeepEngine:
             legacy_candidate_symbols
         )
 
+        # Live prices so synthesis anchors targets on today's price, not stale history.
+        self._live_prices = await self._fetch_live_prices(list(analyst_reports.keys()))
+        live_price_block = self._format_live_prices_context(self._live_prices)
+        live_price_section = f"\n\n{live_price_block}" if live_price_block else ""
+
         full_context = (
             f"{autonomous_context}{portfolio_context}"
-            f"{news_sentiment_context}\n\n{synthesis_context}"
+            f"{news_sentiment_context}{live_price_section}\n\n{synthesis_context}"
         )
 
         # Query LLM
@@ -3854,6 +4140,9 @@ class AutonomousDeepEngine:
 
         insights = self._dedupe_insights(insights)
         insights = self._enforce_portfolio_action_rules(insights, portfolio_holdings)
+        # Recompute upside/R:R from live prices: relabel honestly, gate out
+        # sub-floor / mis-anchored picks (concentrated policies), rank best-first.
+        insights = self._verify_insight_economics(insights, getattr(self, "_live_prices", {}) or {})
 
         # Adjust confidence based on historical track record
         try:
@@ -3902,7 +4191,11 @@ class AutonomousDeepEngine:
         Returns:
             Formatted autonomous context string.
         """
+        from analysis.research_policy import render_policy_directives  # type: ignore[import-not-found]
+
         lines = [
+            render_policy_directives(self._policy, "synthesis"),
+            "",
             "## AUTONOMOUS DISCOVERY CONTEXT",
             "",
             f"### Market Regime: {macro_context.market_regime}",
@@ -3930,12 +4223,16 @@ class AutonomousDeepEngine:
         for sector in sector_context.top_sectors[:3]:
             lines.append(f"- {sector.sector_name}: {sector.rationale[:80]}...")
 
+        symbols_count = len(analyst_reports)
+        target_line, count_line = self._synthesis_count_guidance(symbols_count, max_insights)
+
         lines.extend([
             "",
             f"### Candidates Screened: {candidates.total_screened}",
-            f"Symbols Analyzed: {', '.join(analyst_reports.keys())}",
+            f"Symbols Analyzed ({symbols_count}): {', '.join(analyst_reports.keys())}",
             "",
-            f"### Target: Generate {max_insights} actionable insights",
+            target_line,
+            count_line,
             "Prioritize opportunities with:",
             "- Strong macro/sector alignment",
             "- Multiple analyst agreement",
@@ -4044,7 +4341,23 @@ class AutonomousDeepEngine:
                         current + report["confidence"]
                     ) / 2
 
-        return aggregated
+        # Drop analyst buckets that never ran. The autonomous engine runs only
+        # technical/sector/risk per symbol (see ANALYSTS), so the pre-seeded
+        # macro and correlation buckets stay empty at 0.0 confidence. Surfacing
+        # them makes the synthesis LLM read "0% confidence / incomplete coverage"
+        # and turn overly conservative — in one run it collapsed to a single
+        # insight, citing the empty macro/correlation reports. Only return
+        # analysts that actually produced signal (confidence or data).
+        def _has_signal(report: dict[str, Any]) -> bool:
+            if report.get("confidence", 0.0) > 0.0:
+                return True
+            return any(isinstance(v, list) and v for v in report.values())
+
+        return {
+            name: report
+            for name, report in aggregated.items()
+            if _has_signal(report)
+        }
 
     async def _store_insights(
         self,
@@ -4113,6 +4426,10 @@ class AutonomousDeepEngine:
                     historical_precedent=data.get("historical_precedent"),
                     analysts_involved=data.get("analysts_involved", []),
                     data_sources=data_sources,
+                    entry_zone=_clip(data.get("entry_zone"), 50),
+                    target_price=_clip(data.get("target_price") or data.get("target"), 50),
+                    stop_loss=_clip(data.get("stop_loss") or data.get("stop"), 50),
+                    tier=self._normalize_tier(data.get("tier")),
                     prediction_market_data=getattr(self, '_prediction_data', None) or None,
                     sentiment_data=getattr(self, '_sentiment_data', None) or None,
                     technical_analysis_data=None,  # No pre_context in legacy pipeline
