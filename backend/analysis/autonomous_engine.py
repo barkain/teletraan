@@ -181,6 +181,26 @@ def _clip(value: Any, max_len: int) -> str | None:
     return text[:max_len]
 
 
+def _parse_price_level(value: Any) -> float | None:
+    """Extract the first dollar figure from a free-text price field.
+
+    Synthesis emits levels like ``"$270 (28% upside)"`` or ``"$140 (below
+    support)"`` or a range ``"$880-900"``. Return the first numeric price, or
+    None when there is no parseable figure (e.g. ``"N/A - bearish"``).
+    """
+    if value is None:
+        return None
+    import re
+
+    m = re.search(r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)", str(value))
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
 @dataclass
 class AutonomousAnalysisResult:
     """Complete result from autonomous analysis pipeline."""
@@ -438,6 +458,7 @@ class AutonomousDeepEngine:
         self._sentiment_data: dict | None = None  # Reddit social sentiment
         self._news_data: dict | None = None  # Financial-news sentiment intelligence
         self._macro_news_data: dict | None = None  # Macro-economic news for the regime scan
+        self._live_prices: dict[str, float] = {}  # Live quotes for analyzed symbols (synthesis-time)
 
         # Stock thematic descriptions (populated during Phase 3.5)
         self._stock_descriptions: dict[str, str] = {}
@@ -499,6 +520,109 @@ class AutonomousDeepEngine:
         except Exception:
             pass
         return text
+
+    async def _fetch_live_prices(self, symbols: list[str]) -> dict[str, float]:
+        """Fetch fresh live prices for the given symbols (best-effort).
+
+        The deep-dive context reads price_history from the DB, which can be
+        stale (the ETL ingestion may be days/weeks behind). Synthesis targets
+        and the upside % are only trustworthy when anchored on the real current
+        price, so we pull live quotes here. Returns {SYMBOL: price}; missing or
+        failed symbols are simply absent. Never raises.
+        """
+        uniq = list(dict.fromkeys(s.upper().strip() for s in (symbols or []) if s and s.strip()))
+        if not uniq:
+            return {}
+        try:
+            from data.adapters.yahoo import YahooFinanceAdapter  # type: ignore[import-not-found]
+
+            adapter = YahooFinanceAdapter()
+            quotes = await adapter.get_multiple_prices(uniq)
+            prices: dict[str, float] = {}
+            for sym, data in (quotes or {}).items():
+                if isinstance(data, dict) and not data.get("error"):
+                    px = data.get("price")
+                    if isinstance(px, (int, float)) and px > 0:
+                        prices[sym.upper()] = float(px)
+            logger.info("[AUTO] Live prices fetched for %d/%d symbols", len(prices), len(uniq))
+            return prices
+        except Exception as e:
+            logger.warning("[AUTO] Live price fetch failed (non-fatal): %s", e)
+            return {}
+
+    def _format_live_prices_context(self, prices: dict[str, float]) -> str:
+        """Render a live-price block so synthesis anchors targets on real prices."""
+        if not prices:
+            return ""
+        lines = [
+            "## Live Current Prices (fetched now — AUTHORITATIVE)",
+            "Anchor every entry/target/stop and the upside % to THESE prices, not to "
+            "any price in the analyst reports (which may be stale). Compute upside as "
+            "(target - current) / current.",
+        ]
+        for sym, px in sorted(prices.items()):
+            lines.append(f"- {sym}: ${px:g}")
+        return "\n".join(lines)
+
+    def _verify_insight_economics(
+        self, insights: list[dict[str, Any]], prices: dict[str, float]
+    ) -> list[dict[str, Any]]:
+        """Recompute upside / R:R from live prices; relabel, gate, and rank.
+
+        Synthesis states an upside % in free text, which can be wrong or anchored
+        to a hallucinated price (e.g. a $215 target on SE labeled "+35%" when SE
+        trades ~$91). We recompute the real upside from the live price + the parsed
+        target, rewrite the displayed levels honestly, and — for concentrated
+        policies (best_bets) — drop picks whose verified upside is below the policy
+        floor or implausibly large (a sign of a bad target), then rank best-first.
+        """
+        if not insights:
+            return insights
+        floor = float(self._policy.target_upside_pct or 0)
+        concentrated = bool(self._policy.max_total_insights)
+        # A "best bet" upside far above what the holding window can plausibly
+        # deliver signals a mis-anchored target (e.g. a $215 SE target while SE
+        # trades ~$91). Cap tighter for short-horizon modes.
+        implausible_cap = 80.0 if self._policy.time_horizon_bias == "short_term" else 150.0
+        kept: list[dict[str, Any]] = []
+        for ins in insights:
+            sym = (ins.get("primary_symbol") or "").upper().strip()
+            price = prices.get(sym)
+            target = _parse_price_level(ins.get("target_price") or ins.get("target"))
+            stop = _parse_price_level(ins.get("stop_loss") or ins.get("stop"))
+            upside = None
+            if price and target and price > 0:
+                upside = (target - price) / price * 100.0
+                ins["_verified_upside_pct"] = round(upside, 1)
+                ins["_live_price"] = price
+                disp = f"${target:g} (live ${price:g} → {upside:+.0f}%)"
+                rr = None
+                if stop and stop > 0 and price > stop:
+                    downside = (price - stop) / price * 100.0
+                    if downside > 0:
+                        rr = upside / downside
+                        ins["_verified_rr"] = round(rr, 2)
+                ins["target_price"] = disp[:50]
+                # Gate only when we have a verified number and a concentrated mandate.
+                if concentrated:
+                    if upside < max(0.0, floor * 0.6):
+                        logger.info(
+                            "[AUTO] Dropping %s: verified upside %.0f%% below floor (%.0f%%)",
+                            sym, upside, floor,
+                        )
+                        continue
+                    if upside > implausible_cap:
+                        logger.info(
+                            "[AUTO] Dropping %s: verified upside %.0f%% implausible "
+                            "for %s window (target likely mis-anchored)",
+                            sym, upside, self._policy.time_horizon_bias,
+                        )
+                        continue
+            kept.append(ins)
+        # Rank best-first by verified upside when the policy ranks on payoff.
+        if self._policy.conviction_model in ("payoff_weighted", "barbell") or concentrated:
+            kept.sort(key=lambda i: i.get("_verified_upside_pct", -1e9), reverse=True)
+        return kept
 
     async def _resolve_research_policy(self, override: "str | dict | None"):
         """Resolve the effective research policy for this run.
@@ -2609,9 +2733,16 @@ class AutonomousDeepEngine:
         # deep-dive candidates + the Phase-1 Reddit sentiment capture).
         news_sentiment_context = await self._build_news_and_sentiment_context(symbols)
 
+        # Live prices for ALL analyzed symbols so synthesis anchors targets and
+        # the upside % on today's price rather than the (possibly stale) DB history.
+        self._live_prices = await self._fetch_live_prices(list(analyst_reports.keys()))
+        live_price_block = self._format_live_prices_context(self._live_prices)
+        live_price_section = f"\n\n{live_price_block}" if live_price_block else ""
+
         full_context = (
             f"{autonomous_context}{portfolio_context}{thematic_context}"
             f"{investor_context}{quant_context_block}{news_sentiment_context}"
+            f"{live_price_section}"
             f"\n\n{synthesis_context}"
         )
 
@@ -2633,6 +2764,9 @@ class AutonomousDeepEngine:
 
         insights = self._dedupe_insights(insights)
         insights = self._enforce_portfolio_action_rules(insights, portfolio_holdings)
+        # Recompute upside/R:R from live prices: relabel honestly, gate out
+        # sub-floor / mis-anchored picks (concentrated policies), rank best-first.
+        insights = self._verify_insight_economics(insights, getattr(self, "_live_prices", {}) or {})
 
         # Adjust confidence based on historical track record
         try:
@@ -3978,9 +4112,14 @@ class AutonomousDeepEngine:
             legacy_candidate_symbols
         )
 
+        # Live prices so synthesis anchors targets on today's price, not stale history.
+        self._live_prices = await self._fetch_live_prices(list(analyst_reports.keys()))
+        live_price_block = self._format_live_prices_context(self._live_prices)
+        live_price_section = f"\n\n{live_price_block}" if live_price_block else ""
+
         full_context = (
             f"{autonomous_context}{portfolio_context}"
-            f"{news_sentiment_context}\n\n{synthesis_context}"
+            f"{news_sentiment_context}{live_price_section}\n\n{synthesis_context}"
         )
 
         # Query LLM
@@ -4001,6 +4140,9 @@ class AutonomousDeepEngine:
 
         insights = self._dedupe_insights(insights)
         insights = self._enforce_portfolio_action_rules(insights, portfolio_holdings)
+        # Recompute upside/R:R from live prices: relabel honestly, gate out
+        # sub-floor / mis-anchored picks (concentrated policies), rank best-first.
+        insights = self._verify_insight_economics(insights, getattr(self, "_live_prices", {}) or {})
 
         # Adjust confidence based on historical track record
         try:
