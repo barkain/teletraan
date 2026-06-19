@@ -64,6 +64,12 @@ class ResearchPolicy(BaseModel):
     conviction_model: str = "consensus"  # consensus | payoff_weighted | barbell
     allow_contested_ideas: bool = False  # let high-upside/low-agreement ideas survive
     require_quantified_levels: bool = True  # force entry/target/stop on every insight
+    # Favor names with strong recent momentum / relative strength (recent winners)
+    # over laggards hoping to mean-revert. Steers selection + synthesis.
+    favor_momentum: bool = False
+    # Steer away from slow mega-cap financials/staples/utilities/mega-banks that
+    # rarely deliver the upside an aggressive mandate targets (unless a sharp catalyst).
+    avoid_slow_megacaps: bool = False
     tiers: list[PolicyTier] = Field(default_factory=list)
 
     # --- Guardrails ---
@@ -118,6 +124,8 @@ _AGGRESSIVE = ResearchPolicy(
     conviction_model="barbell",
     allow_contested_ideas=True,
     require_quantified_levels=True,
+    favor_momentum=True,
+    avoid_slow_megacaps=True,
     tail_risk_override_pct=30.0,  # tolerate more tail risk for convexity
     max_position_pct=5.0,
     tiers=[
@@ -164,10 +172,13 @@ _BEST_BETS = ResearchPolicy(
         "the top 1-3 names with the best expected upside over a ~1-2 week window."
     ),
     objective="best_bets",
-    risk_appetite=0.85,
-    # Over ~2 weeks you cannot demand 3:1; ask for a favorable but realistic skew.
+    risk_appetite=0.95,
     min_reward_risk=2.0,
-    target_upside_pct=8.0,  # a strong 1-2 week move, not a multi-month re-rating
+    # Demand REAL upside, not a safe single-digit gain. A high bar forces the
+    # ranker toward high-beta / catalyst / momentum names rather than sleepy
+    # mega-caps that can only plausibly creep ~8%. Horizon may extend past two
+    # weeks when a materially larger move warrants it.
+    target_upside_pct=25.0,
     time_horizon_bias="short_term",
     max_total_insights=3,  # the whole point: at most 3, ranked best-first
     include_small_mid_cap=True,
@@ -176,12 +187,14 @@ _BEST_BETS = ResearchPolicy(
     conviction_model="payoff_weighted",
     allow_contested_ideas=True,
     require_quantified_levels=True,
-    tail_risk_override_pct=20.0,
+    favor_momentum=True,
+    avoid_slow_megacaps=True,
+    tail_risk_override_pct=25.0,
     max_position_pct=6.0,
     tiers=[
         PolicyTier(name="top_pick", label="Top Pick", min_reward_risk=2.0,
                    max_count=3, position_size_pct="3-6%",
-                   note="Highest expected near-term upside; ranked best-first."),
+                   note="Highest expected upside magnitude; ranked best-first."),
     ],
 )
 
@@ -294,6 +307,18 @@ def _render_selection(policy: ResearchPolicy) -> str:
         lines.append(f"- Exclude sectors: {', '.join(policy.exclude_sectors)}.")
     if "catalyst_calendar" in policy.candidate_sources:
         lines.append("- Prioritize names with a known catalyst (earnings, regulatory, product) on the horizon.")
+    if policy.favor_momentum:
+        lines.append(
+            "- Favor names already showing STRONG recent momentum / relative strength "
+            "(recent winners, breakouts, accelerating volume) — not beaten-down laggards "
+            "hoping to mean-revert."
+        )
+    if policy.avoid_slow_megacaps:
+        lines.append(
+            "- AVOID slow mega-cap financials, banks, staples, and utilities (e.g. big-bank "
+            "names like MS/GS/JPM, telecoms, utilities) unless a sharp near-term catalyst is "
+            "present — they rarely deliver the upside this mandate targets."
+        )
     horizon = _horizon_phrase(policy)
     if horizon:
         lines.append(f"- {horizon}")
@@ -307,8 +332,10 @@ def _render_synthesis(policy: ResearchPolicy) -> str:
             "bets alongside a thin defensive core. Do NOT blend them into one mushy middle."
         ),
         "payoff_weighted": (
-            "Rank ideas by asymmetric payoff (upside-to-target ÷ downside-to-stop), "
-            "not by how many analysts agree."
+            "Rank ideas by EXPECTED UPSIDE MAGNITUDE first (probability-weighted % to "
+            "target), using downside-to-stop as the tiebreaker. Do NOT optimize for the "
+            "'safest' or most-consensus setup — a modest, low-variance gain is NOT a best "
+            "bet. Reward names with the largest credible move."
         ),
         "consensus": (
             "Favor ideas with strong multi-analyst agreement and clear risk/reward."
@@ -340,6 +367,18 @@ def _render_synthesis(policy: ResearchPolicy) -> str:
         f"**Risk veto:** only let a risk warning override a bullish thesis when tail-risk "
         f"probability exceeds {policy.tail_risk_override_pct:.0f}%."
     )
+    if policy.favor_momentum:
+        lines.append(
+            "**Momentum:** prefer names with strong recent relative strength (recent "
+            "winners/breakouts). A name with weak recent performance is rarely a best bet "
+            "unless a fresh catalyst clearly re-rates it."
+        )
+    if policy.avoid_slow_megacaps:
+        lines.append(
+            "**Avoid slow mega-caps:** do not surface sleepy mega-cap banks/financials, "
+            "staples, or utilities (MS, GS, JPM, telecoms, utilities) as a top pick unless a "
+            "sharp near-term catalyst is driving an outsized move — they cap the upside."
+        )
     horizon = _horizon_phrase(policy)
     if horizon:
         lines.append(f"**Holding window:** {horizon}")

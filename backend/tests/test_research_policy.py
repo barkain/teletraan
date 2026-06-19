@@ -66,6 +66,21 @@ def test_best_bets_is_concentrated_short_horizon():
     assert "1-2 week" in sel
 
 
+def test_best_bets_chases_upside_not_safety():
+    # Regression: best_bets surfaced a sleepy mega-cap bank (MS, +16%) because the
+    # upside bar was too low and the objective was "risk-adjusted/safe". It must
+    # now demand real upside, chase momentum, and avoid slow mega-caps.
+    p = get_preset("best_bets")
+    assert p.target_upside_pct >= 20.0          # not the old 8%
+    assert p.favor_momentum is True
+    assert p.avoid_slow_megacaps is True
+    syn = render_policy_directives(p, "synthesis")
+    sel = render_policy_directives(p, "selection")
+    assert "EXPECTED UPSIDE MAGNITUDE" in syn    # magnitude-first ranking
+    assert "Avoid slow mega-caps" in syn and "AVOID slow mega-cap" in sel
+    assert "momentum" in syn.lower() and "momentum" in sel.lower()
+
+
 def test_count_guidance_concentrated_vs_floor():
     e = AutonomousDeepEngine()
     e._policy = get_preset("best_bets")
