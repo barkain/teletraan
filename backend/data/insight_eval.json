@@ -1,8 +1,8 @@
 {
-  "as_of": "2026-08-16T11:08:14.044948+00:00",
+  "as_of": "2026-08-16T11:13:21.951600+00:00",
   "harness_version": "1.0.0",
   "pipeline_version": "v5-evidence-layer",
-  "git_sha": "2dd5322",
+  "git_sha": "056fc83",
   "params": {
     "benchmark": "SPY",
     "entry_lag_trading_days": 1,
@@ -30,7 +30,7 @@
       "window_basis": "trading_bars_from_created_at",
       "entry_basis": "close of bar +1 strictly after created_at",
       "models_stop_target": false,
-      "in_band_handling": "n/a (no band -- ties at exactly 0.0 count as misses)"
+      "in_band_treatment": "n/a (no band -- ties at exactly 0.0 count as misses)"
     },
     "not_comparable_to": "any rate computed under a different decision_rule. The outcome grader uses alpha_threshold_pct=2.0 and models stop/target, which scores ~10 and ~3 points lower respectively on identical data.",
     "allow_network": true,

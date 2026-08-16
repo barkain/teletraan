@@ -758,6 +758,10 @@ async def test_every_cohort_carries_the_decision_rule_that_produced_it(
     assert rule["models_stop_target"] is False
     assert rule["benchmark_symbol"] == "SPY"
     assert "created_at" in rule["entry_basis"]
+    # Key name is shared with the outcome grader by agreement, so the two
+    # metadata blocks diff cleanly.  Renaming it breaks that contract.
+    assert "in_band_treatment" in rule
+    assert "in_band_handling" not in rule
     assert "decision_rule" in snapshot["params"]["not_comparable_to"]
 
     expected = snapshot["overall"]["basis"]

@@ -131,7 +131,10 @@ def decision_rule(benchmark: str, entry_lag: int) -> dict[str, Any]:
         "window_basis": "trading_bars_from_created_at",
         "entry_basis": f"close of bar +{entry_lag} strictly after created_at",
         "models_stop_target": False,
-        "in_band_handling": "n/a (no band -- ties at exactly 0.0 count as misses)",
+        # Key name matches the outcome grader's field so the two metadata
+        # blocks diff cleanly.  This rule has no band, and recording that
+        # absence is more informative than omitting the field.
+        "in_band_treatment": "n/a (no band -- ties at exactly 0.0 count as misses)",
     }
 
 
