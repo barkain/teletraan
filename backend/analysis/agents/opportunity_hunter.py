@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from analysis.factor_model import format_factor_value  # type: ignore[import-not-found]
+
 logger = logging.getLogger(__name__)
 
 
@@ -613,13 +615,19 @@ def format_opportunity_context(
         if has_factors and factor_scores is not None:
             fs = factor_scores.get(symbol)
             if fs is not None and hasattr(fs, "composite_score"):
+                # Every per-factor score is optional (FactorScore keeps
+                # unmeasured factors as None), so each cell renders through
+                # format_factor_value -- "n/a" beats a TypeError, and beats a
+                # fabricated 50 even more.
                 context_parts.append(
                     f"| {symbol} | {sector} | ${price:.2f} | {ret_5d:+.1f}% | "
                     f"{ret_20d:+.1f}% | {vol_ratio:.2f}x "
-                    f"| {fs.composite_score:.1f} "
-                    f"| {fs.momentum_score:.0f} | {fs.value_score:.0f} "
-                    f"| {fs.quality_score:.0f} | {fs.volatility_score:.0f} "
-                    f"| {fs.technical_score:.0f} |"
+                    f"| {format_factor_value(getattr(fs, 'composite_score', None), '.1f')} "
+                    f"| {format_factor_value(getattr(fs, 'momentum_score', None))} "
+                    f"| {format_factor_value(getattr(fs, 'value_score', None))} "
+                    f"| {format_factor_value(getattr(fs, 'quality_score', None))} "
+                    f"| {format_factor_value(getattr(fs, 'volatility_score', None))} "
+                    f"| {format_factor_value(getattr(fs, 'technical_score', None))} |"
                 )
                 continue
 

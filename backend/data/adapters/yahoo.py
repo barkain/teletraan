@@ -13,7 +13,86 @@ from typing import Any
 
 import yfinance as yf  # type: ignore[import-untyped]
 
+from data.adapters.evidence import (
+    STATUS_OK,
+    STATUS_PARTIAL,
+    STATUS_UNAVAILABLE,
+    utc_now_iso,
+)
+
 logger = logging.getLogger(__name__)
+
+#: The `get_fundamental_data` fields that can actually move a score. `sector`,
+#: `industry` and the like are context, not evidence: yfinance returns them for
+#: practically every ticker, so counting them would make coverage always
+#: positive and defeat the gate.
+FUNDAMENTAL_SCORING_FIELDS = (
+    "trailing_pe",
+    "forward_pe",
+    "peg_ratio",
+    "price_to_book",
+    "price_to_sales",
+    "profit_margins",
+    "operating_margins",
+    "gross_margins",
+    "revenue_growth",
+    "earnings_growth",
+    "earnings_quarterly_growth",
+    "trailing_eps",
+    "forward_eps",
+    "target_mean_price",
+    "target_high_price",
+    "target_low_price",
+    "recommendation_mean",
+    "recommendation_key",
+    "total_debt",
+    "total_cash",
+    "debt_to_equity",
+    "current_ratio",
+    "free_cashflow",
+    "market_cap",
+    "enterprise_value",
+)
+
+
+def _fundamental_evidence(metrics: dict[str, Any]) -> dict[str, Any]:
+    """Attach the shared evidence contract to a fundamentals payload.
+
+    yfinance answers "did the fetch return an object" and "is there anything in
+    it worth scoring" with the same non-empty dict: `ticker.info` for a thin or
+    non-equity ticker yields every scoring key set to ``None``. Consumers that
+    tested ``bool(fundamental_data)`` therefore enabled the fundamental,
+    valuation, catalyst and liquidity factors on placeholder scores (50/50/45/50)
+    -- the "unavailable becomes neutral evidence" defect the options-flow,
+    short-interest and analyst-revision adapters already fixed.
+
+    So the payload now carries the same `status`/`coverage` keys those adapters
+    emit, and `evidence_is_usable()` gates all four of them in one place.
+    """
+    populated = sum(
+        1 for key in FUNDAMENTAL_SCORING_FIELDS if metrics.get(key) is not None
+    )
+    coverage = populated / len(FUNDAMENTAL_SCORING_FIELDS)
+
+    if populated == 0:
+        status = STATUS_UNAVAILABLE
+        notes = ["yfinance info returned no populated scoring fields"]
+    elif populated < len(FUNDAMENTAL_SCORING_FIELDS):
+        status = STATUS_PARTIAL
+        notes = [f"{populated}/{len(FUNDAMENTAL_SCORING_FIELDS)} scoring fields populated"]
+    else:
+        status = STATUS_OK
+        notes = []
+
+    return {
+        **metrics,
+        "source": "yfinance_info",
+        "status": status,
+        "coverage": round(coverage, 4),
+        "available": populated > 0,
+        "fetched_at": utc_now_iso(),
+        "notes": notes,
+    }
 
 
 class YahooFinanceError(Exception):
@@ -401,7 +480,7 @@ class YahooFinanceAdapter:
                 if not info:
                     return None
 
-                return symbol.upper(), {
+                return symbol.upper(), _fundamental_evidence({
                     # Valuation
                     "trailing_pe": info.get("trailingPE"),
                     "forward_pe": info.get("forwardPE"),
@@ -436,7 +515,7 @@ class YahooFinanceAdapter:
                     "enterprise_value": info.get("enterpriseValue"),
                     "sector": info.get("sector"),
                     "industry": info.get("industry"),
-                }
+                })
             except Exception as e:
                 logger.warning(f"Failed to fetch fundamentals for {symbol}: {e}")
                 return None

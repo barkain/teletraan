@@ -115,6 +115,7 @@ from analysis.memory_service import InstitutionalMemoryService  # type: ignore[i
 from analysis.pattern_extractor import PatternExtractor  # type: ignore[import-not-found]
 from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
 from analysis.confidence_adjuster import ConfidenceAdjuster  # type: ignore[import-not-found]
+from analysis.factor_model import format_factor_value  # type: ignore[import-not-found]
 from llm.client_pool import pool_query_llm, LLMQueryResult  # type: ignore[import-not-found]
 
 # Optional alternative data sources (availability flags)
@@ -190,12 +191,63 @@ MAX_ENTRY_DEVIATION_PCT = 15.0
 FACTOR_FUNDAMENTALS_TIMEOUT_S = 120.0
 
 
-def _level_text(value: Any, max_len: int) -> str | None:
-    """Normalize a trading-level field to a bounded string, or None if absent."""
+# Storage widths for the DeepInsight trade-level columns. They exist to stop a
+# runaway LLM response, not to trim ordinary output: synthesis is asked for a
+# level plus its condition ("$370-385 (only on confirmation of SMA_50 support
+# holding)") and every such value fits. Keep in step with models/deep_insight.py.
+LEVEL_TEXT_MAX_LEN = 255
+TIMEFRAME_TEXT_MAX_LEN = 100
+
+
+def _level_text(value: Any, max_len: int = LEVEL_TEXT_MAX_LEN, field: str = "level") -> str | None:
+    """Normalize a trading-level field to a bounded string, or None if absent.
+
+    Truncation is a last resort and never silent. The old version sliced to the
+    ORM column width on every save, which is how stored levels ended up as
+    ``"$28-30 (wait for regulatory clarity and sector sta"`` -- a value that
+    reads as a real trade instruction but has lost its condition mid-word.
+    Levels that still exceed the (now much larger) limit are cut at a word
+    boundary, marked with an ellipsis so the loss is visible, and logged.
+    """
     if value is None:
         return None
     text = str(value).strip()
-    return text[:max_len] if text else None
+    if not text:
+        return None
+    if len(text) <= max_len:
+        return text
+
+    head = text[: max_len - 1]
+    cut = head.rsplit(" ", 1)[0] if " " in head else head
+    logger.warning(
+        "Trade level %r exceeded %d chars and was truncated at a word boundary: %r",
+        field, max_len, text,
+    )
+    return f"{cut}…"
+
+
+def _log_statistical_coverage(calculator: Any, symbols: list[str], path: str) -> None:
+    """Report what the statistical pass actually produced, not that it returned.
+
+    ``compute_all_features()`` catches per-family errors so one broken family
+    cannot cost the others, which means a plain "computed for N symbols" line
+    can be true while a whole feature family was empty for every symbol -- the
+    exact shape of the seasonality outage. Read the failure ledger instead.
+    """
+    failures = getattr(calculator, "last_run_failures", []) or []
+    if not failures:
+        logger.info(
+            "[AUTO] Statistical features computed for %d %s symbols (all families)",
+            len(symbols), path,
+        )
+        return
+
+    broken = sorted({family for _sym, family, _err in failures})
+    logger.error(
+        "[AUTO] Statistical features INCOMPLETE for %d %s symbols: %d failures "
+        "across families %s -- do not read these as full coverage",
+        len(symbols), path, len(failures), ", ".join(broken),
+    )
 
 
 @dataclass
@@ -1120,8 +1172,27 @@ class AutonomousDeepEngine:
                         result, macro_result, heatmap_data, deep_dive_count, max_insights, task_id
                     )
                 except Exception as heatmap_err:
-                    logger.warning(f"Heatmap pipeline failed, falling back to legacy: {heatmap_err}")
-                    result.errors.append(f"Heatmap pipeline failed (using legacy fallback): {str(heatmap_err)}")
+                    # The legacy path does NOT apply partition_by_freshness(),
+                    # so this fallback trades the run's principal staleness
+                    # control for completion. That is a degradation, not a
+                    # retry: log it at ERROR with a traceback, and say so in
+                    # both result.errors and the phase summary so a reader can
+                    # tell these insights apart from freshness-gated ones.
+                    logger.error(
+                        "Heatmap pipeline failed; falling back to the LEGACY path, "
+                        "which does not apply the price-freshness partition: %s",
+                        heatmap_err,
+                        exc_info=True,
+                    )
+                    result.errors.append(
+                        f"DEGRADED: heatmap pipeline failed ({heatmap_err}); ran the "
+                        "legacy fallback, which does not apply the price-freshness "
+                        "partition -- insights below may be based on stale prices."
+                    )
+                    result.phase_summaries["heatmap_pipeline"] = (
+                        "FAILED -- fell back to the legacy pipeline. The freshness "
+                        f"partition was not applied. Cause: {heatmap_err}"
+                    )
                     result = await self._run_legacy_pipeline(
                         result, macro_result, deep_dive_count, max_insights, task_id
                     )
@@ -2399,10 +2470,14 @@ class AutonomousDeepEngine:
                 reverse=True,
             )
             for fs in sorted_scores[:10]:
+                # Per-factor scores are None when unmeasured, never a neutral
+                # 50 -- format them as absences instead of raising.
                 lines.append(
-                    f"- {fs.symbol}: Composite={fs.composite_score:.1f} "
-                    f"(Mom={fs.momentum_score:.0f} Vol={fs.volatility_score:.0f} "
-                    f"Tech={fs.technical_score:.0f})"
+                    f"- {fs.symbol}: "
+                    f"Composite={format_factor_value(fs.composite_score, '.1f')} "
+                    f"(Mom={format_factor_value(fs.momentum_score)} "
+                    f"Vol={format_factor_value(fs.volatility_score)} "
+                    f"Tech={format_factor_value(fs.technical_score)})"
                 )
 
         if thematic_result:
@@ -3059,10 +3134,12 @@ class AutonomousDeepEngine:
                 # Trading levels emitted by the synthesis lead. Without these
                 # the insight is untradable and outcome tracking can never fire
                 # entry_triggered.
-                entry_zone = _level_text(data.get("entry_zone"), 50)
-                target_price = _level_text(data.get("target_price"), 50)
-                stop_loss = _level_text(data.get("stop_loss"), 50)
-                timeframe = _level_text(data.get("timeframe"), 30)
+                entry_zone = _level_text(data.get("entry_zone"), field="entry_zone")
+                target_price = _level_text(data.get("target_price"), field="target_price")
+                stop_loss = _level_text(data.get("stop_loss"), field="stop_loss")
+                timeframe = _level_text(
+                    data.get("timeframe"), TIMEFRAME_TEXT_MAX_LEN, field="timeframe"
+                )
 
                 if not await self._passes_entry_sanity_gate(
                     primary_symbol, entry_zone, pre_context
@@ -3231,7 +3308,7 @@ class AutonomousDeepEngine:
                     calculator = StatisticalFeatureCalculator(session)
                     await calculator.compute_all_features(symbols)
                     await session.commit()
-                    logger.info(f"[AUTO] Statistical features computed for {len(symbols)} heatmap symbols")
+                    _log_statistical_coverage(calculator, symbols, "heatmap")
             except Exception as e:
                 logger.warning(f"[AUTO] Statistical feature computation failed: {e}")
 
@@ -4398,10 +4475,12 @@ class AutonomousDeepEngine:
                 # Trading levels emitted by the synthesis lead. The gate prices
                 # against the deep dive's own freshness snapshot when the caller
                 # supplied one, and only falls back to a live quote otherwise.
-                entry_zone = _level_text(data.get("entry_zone"), 50)
-                target_price = _level_text(data.get("target_price"), 50)
-                stop_loss = _level_text(data.get("stop_loss"), 50)
-                timeframe = _level_text(data.get("timeframe"), 30)
+                entry_zone = _level_text(data.get("entry_zone"), field="entry_zone")
+                target_price = _level_text(data.get("target_price"), field="target_price")
+                stop_loss = _level_text(data.get("stop_loss"), field="stop_loss")
+                timeframe = _level_text(
+                    data.get("timeframe"), TIMEFRAME_TEXT_MAX_LEN, field="timeframe"
+                )
 
                 if not await self._passes_entry_sanity_gate(
                     data.get("primary_symbol"), entry_zone, pre_context
@@ -4567,7 +4646,7 @@ class AutonomousDeepEngine:
                     calculator = StatisticalFeatureCalculator(session)
                     await calculator.compute_all_features(symbols)
                     await session.commit()
-                    logger.info(f"[AUTO] Statistical features computed for {len(symbols)} legacy symbols")
+                    _log_statistical_coverage(calculator, symbols, "legacy")
             except Exception as e:
                 logger.warning(f"[AUTO] Statistical feature computation failed: {e}")
 

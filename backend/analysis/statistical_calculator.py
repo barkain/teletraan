@@ -117,6 +117,10 @@ class StatisticalFeatureCalculator:
             db_session: Async SQLAlchemy session for database operations.
         """
         self.db = db_session
+        #: ``(symbol, family, error)`` for every feature family that failed in
+        #: the most recent :meth:`compute_all_features` call. Empty means full
+        #: coverage; callers must check it before reporting success.
+        self.last_run_failures: list[tuple[str, str, str]] = []
 
     async def compute_all_features(
         self,
@@ -149,35 +153,32 @@ class StatisticalFeatureCalculator:
             except Exception as e:
                 logger.warning(f"Failed to fetch price data for {symbol}: {e}")
 
-        # Compute features for each symbol
+        # One try per family, not one per symbol. A single broad handler around
+        # all four meant a bug in the last family (seasonality raised on every
+        # normal DataFrame) took out that family for every symbol while callers
+        # still logged "features computed" -- the failure was invisible because
+        # the three earlier families had already been appended.
+        families = (
+            ("momentum", self._compute_momentum_features),
+            ("mean_reversion", self._compute_mean_reversion_features),
+            ("volatility_regime", self._compute_volatility_regime),
+            ("seasonality", self._compute_seasonality_features),
+        )
+
+        self.last_run_failures = []
+
         for symbol, prices_df in prices_dict.items():
-            try:
-                # Momentum features
-                momentum_features = await self._compute_momentum_features(
-                    symbol, prices_df, calculation_date
-                )
-                all_features.extend(momentum_features)
-
-                # Mean reversion features
-                mean_reversion_features = await self._compute_mean_reversion_features(
-                    symbol, prices_df, calculation_date
-                )
-                all_features.extend(mean_reversion_features)
-
-                # Volatility regime features
-                volatility_features = await self._compute_volatility_regime(
-                    symbol, prices_df, calculation_date
-                )
-                all_features.extend(volatility_features)
-
-                # Seasonality features
-                seasonality_features = await self._compute_seasonality_features(
-                    symbol, prices_df, calculation_date
-                )
-                all_features.extend(seasonality_features)
-
-            except Exception as e:
-                logger.error(f"Error computing features for {symbol}: {e}")
+            for family_name, compute in families:
+                try:
+                    all_features.extend(
+                        await compute(symbol, prices_df, calculation_date)
+                    )
+                except Exception as e:
+                    self.last_run_failures.append((symbol, family_name, str(e)))
+                    logger.error(
+                        "Statistical feature family %r failed for %s: %s",
+                        family_name, symbol, e, exc_info=True,
+                    )
 
         # Cross-sectional features (require all symbols)
         try:
@@ -186,10 +187,22 @@ class StatisticalFeatureCalculator:
             )
             all_features.extend(cross_sectional_features)
         except Exception as e:
-            logger.error(f"Error computing cross-sectional features: {e}")
+            self.last_run_failures.append(("*", "cross_sectional", str(e)))
+            logger.error(
+                "Cross-sectional statistical features failed: %s", e, exc_info=True
+            )
 
         # Save features to database
         await self._save_features(all_features)
+
+        if self.last_run_failures:
+            broken = sorted({family for _sym, family, _err in self.last_run_failures})
+            logger.error(
+                "Statistical features INCOMPLETE: %d family/symbol computations "
+                "failed across %s. %d features were still saved and must not be "
+                "read as full coverage.",
+                len(self.last_run_failures), ", ".join(broken), len(all_features),
+            )
 
         return all_features
 
@@ -507,23 +520,25 @@ class StatisticalFeatureCalculator:
         if len(prices) < 50:
             return features
 
-        closes = prices["close"].values
-        dates = prices["date"].values
+        # Keep each return glued to the date it belongs to instead of relying on
+        # two lists lining up. The previous version sliced `dates[1:]` against a
+        # separately dropna'd return series, which both misaligns whenever a
+        # close is NaN and produced a `DatetimeIndex`, whose `.dayofweek ==` is a
+        # plain numpy array -- the `AttributeError: 'numpy.ndarray' object has no
+        # attribute 'values'` that silently voided this whole feature family.
+        frame = pd.DataFrame(
+            {
+                "date": pd.to_datetime(prices["date"], errors="coerce"),
+                "ret": pd.Series(prices["close"].to_numpy(), dtype="float64").pct_change() * 100,
+            }
+        ).dropna(subset=["date", "ret"])
 
-        # Calculate daily returns
-        returns = pd.Series(closes).pct_change() * 100
-        returns = returns.dropna()
-
-        if len(returns) == 0:
+        if frame.empty:
             return features
-
-        # Convert dates to pandas datetime for day/month extraction
-        date_series = pd.to_datetime(dates[1:])  # Skip first due to pct_change
 
         # Day of week effect
         current_dow = calculation_date.weekday()
-        dow_mask = date_series.dayofweek == current_dow
-        dow_returns = returns.iloc[dow_mask.values] if dow_mask.any() else pd.Series()
+        dow_returns = frame.loc[frame["date"].dt.dayofweek == current_dow, "ret"]
 
         if len(dow_returns) > 5:
             avg_dow_return = dow_returns.mean()
@@ -548,8 +563,7 @@ class StatisticalFeatureCalculator:
 
         # Month effect
         current_month = calculation_date.month
-        month_mask = date_series.month == current_month
-        month_returns = returns.iloc[month_mask.values] if month_mask.any() else pd.Series()
+        month_returns = frame.loc[frame["date"].dt.month == current_month, "ret"]
 
         if len(month_returns) > 5:
             avg_month_return = month_returns.mean()
@@ -788,20 +802,24 @@ class StatisticalFeatureCalculator:
         if not stock:
             return None
 
-        # Get price history
+        # Take the *newest* `lookback_days` bars, then flip to chronological
+        # order for the calculators. Ordering ascending before LIMIT selects the
+        # OLDEST rows instead: for any symbol with more than `lookback_days` of
+        # history, every feature below would then be computed from year-old bars
+        # and stamped with today's calculation_date.
         price_query = (
             select(PriceHistory)
             .where(PriceHistory.stock_id == stock.id)
-            .order_by(PriceHistory.date.asc())
+            .order_by(PriceHistory.date.desc())
             .limit(lookback_days)
         )
         price_result = await self.db.execute(price_query)
-        prices = price_result.scalars().all()
+        prices = list(reversed(price_result.scalars().all()))
 
         if not prices:
             return None
 
-        # Convert to DataFrame
+        # Convert to DataFrame (oldest first -- pct_change/rolling depend on it)
         data = {
             "date": [p.date for p in prices],
             "open": [p.open for p in prices],

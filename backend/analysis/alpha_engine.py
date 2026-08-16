@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from analysis.agents.universe_builder import get_screening_universe
 from analysis.context_builder import MarketContextBuilder as ContextBuilder
 from analysis.alpha_synthesis import synthesize_alpha_run
+from analysis.price_freshness import coerce_date
 from analysis.sectors import SECTOR_ETFS
 from data.adapters.evidence import evidence_is_usable
 from data.adapters.yahoo import yahoo_adapter
@@ -246,6 +247,9 @@ async def _fetch_price_history(symbol: str, period: str = "3mo") -> list[dict[st
 
 
 def _returns_from_history(history: list[dict[str, Any]]) -> dict[str, float | None]:
+    # yfinance is already ascending, but say so rather than rely on it: the
+    # regime scan and the factor scan must not disagree about which end is now.
+    history = as_oldest_first(history)
     closes = [float(row["close"]) for row in history if row.get("close") is not None]
     if len(closes) < 2:
         return {"1d": None, "5d": None, "20d": None, "60d": None, "latest": None}
@@ -393,7 +397,82 @@ def _safe_std(values: list[float]) -> float | None:
     return statistics.pstdev(values)
 
 
+class BarOrderError(ValueError):
+    """Raised when a bar series is not in this module's canonical order."""
+
+
+def _bar_dates(history: list[dict[str, Any]]) -> list[date | None]:
+    return [coerce_date(row.get("date")) for row in history]
+
+
+def as_oldest_first(history: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Return *history* in this module's canonical OLDEST-FIRST order.
+
+    Two producers feed this module and they disagree:
+
+    - ``yahoo_adapter.get_price_history()`` wraps ``yf.Ticker.history()``, which
+      is ascending -- oldest bar first, newest last.
+    - ``MarketContextBuilder`` queries ``PriceHistory`` with ``date.desc()`` and
+      then *prepends* any live refresh quote, so ``context["price_history"]`` is
+      newest first.
+
+    Every helper below (`_pct_return`, `_latest_close`, `_volume_ratio`, the
+    trailing-average slices in `_score_basic_technical`) reads the *tail* as
+    "now".  Feeding it the builder's order inverts momentum -- a +9.09% one-bar
+    return reads as -9.09% -- and hides a freshly refreshed quote at index 0
+    behind 89 older bars.  So the order is normalized once, here, at the
+    boundary; helpers then assert it rather than each re-deriving which end is
+    current.
+
+    Bars with unparseable/absent dates are passed through untouched: unit tests
+    build close-only rows and there is nothing to order them by.
+    """
+    if not history:
+        return []
+
+    dates = [d for d in _bar_dates(history) if d is not None]
+    if len(dates) < 2:
+        return list(history)
+    if dates[0] > dates[-1]:
+        return list(reversed(history))
+    return list(history)
+
+
+def _oldest_first_history_map(
+    price_history: dict[str, list[dict[str, Any]]] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Normalize a whole ``context["price_history"]`` map in one place.
+
+    The lists are rebuilt rather than reversed in place: ``build_context()``
+    hands back a TTL-cached dict that `symbol_slice` shares across concurrent
+    analysts, and mutating it would reorder bars underneath them.
+    """
+    if not price_history:
+        return {}
+    return {
+        symbol: as_oldest_first(bars)
+        for symbol, bars in price_history.items()
+        if isinstance(bars, list)
+    }
+
+
+def _assert_oldest_first(history: list[dict[str, Any]]) -> None:
+    """Fail loudly when a caller skipped :func:`as_oldest_first`.
+
+    Silent inversion is the failure this module already shipped once; a wrong
+    momentum sign is far more expensive than a raised exception.
+    """
+    dates = [d for d in _bar_dates(history) if d is not None]
+    if len(dates) >= 2 and dates[0] > dates[-1]:
+        raise BarOrderError(
+            "price history is newest-first; call as_oldest_first() at the "
+            f"boundary (first={dates[0].isoformat()}, last={dates[-1].isoformat()})"
+        )
+
+
 def _price_series(history: list[dict[str, Any]]) -> tuple[list[float], list[float]]:
+    """Closes and volumes, oldest first -- index ``-1`` is the most recent bar."""
+    _assert_oldest_first(history)
     closes = [float(row["close"]) for row in history if row.get("close") is not None]
     volumes = [float(row.get("volume") or 0.0) for row in history if row.get("close") is not None]
     return closes, volumes
@@ -507,8 +586,13 @@ def _score_fundamentals(
     fundamentals: dict[str, Any] | None,
     latest_price: float | None,
 ) -> tuple[float, float, float, float, list[str]]:
-    """Return fundamental, valuation, catalyst, liquidity scores and evidence."""
-    if not fundamentals:
+    """Return fundamental, valuation, catalyst, liquidity scores and evidence.
+
+    The neutral tuple below is a *placeholder*, not a measurement. It is only
+    safe because `_score_with_evidence` drops the four factors it feeds when the
+    same evidence gate says the payload is unusable -- keep those two in step.
+    """
+    if not fundamentals or not evidence_is_usable(fundamentals):
         return 50.0, 50.0, 45.0, 50.0, ["fundamentals unavailable"]
 
     f = fundamentals
@@ -966,7 +1050,11 @@ def _score_with_evidence(
     Consequence worth stating: for a given source, an *unavailable* record and
     an *absent* record produce exactly the same output.
     """
-    fundamentals_usable = bool(fundamental_data)
+    # `bool(fundamental_data)` was true for a yfinance payload whose every
+    # scoring field is None, which turned _score_fundamentals()'s placeholder
+    # 50/50/45/50 into four "measured" factors. The payload now carries the
+    # same evidence contract as the other adapters; gate on that instead.
+    fundamentals_usable = evidence_is_usable(fundamental_data)
     options_usable = evidence_is_usable(options_flow_data)
     short_usable = evidence_is_usable(short_interest_data)
     revisions_usable = evidence_is_usable(analyst_revision_data)
@@ -1076,7 +1164,7 @@ async def _build_portfolio_overlay(
     )
     holding_rows = holdings_result.all()
 
-    price_history = context.get("price_history", {}) or {}
+    price_history = _oldest_first_history_map(context.get("price_history"))
 
     holdings: list[dict[str, Any]] = []
     sector_values: dict[str, float] = {}
@@ -1196,7 +1284,9 @@ async def run_daily_factor_scoring(
         price_history_days=90,
     )
 
-    price_history = context.get("price_history", {}) or {}
+    # ContextBuilder hands back newest-first bars; every scoring helper below
+    # reads the tail as "now".  Normalize once, here.
+    price_history = _oldest_first_history_map(context.get("price_history"))
     technical_indicators = context.get("technical_indicators", {}) or {}
     rich_technical = context.get("rich_technical", {}) or {}
     fundamentals = context.get("fundamentals", {}) or {}

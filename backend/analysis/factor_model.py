@@ -163,6 +163,30 @@ class FactorScore:
 
 
 # ---------------------------------------------------------------------------
+# Helper: rendering optional factor scores
+# ---------------------------------------------------------------------------
+def format_factor_value(
+    value: float | None,
+    spec: str = ".0f",
+    missing: str = "n/a",
+) -> str:
+    """Render one factor score, or an explicit absence marker when unmeasured.
+
+    Per-factor scores are ``None`` by design (see :class:`FactorScore`), so a
+    bare ``f"{value:.0f}"`` raises ``TypeError`` on exactly the honest-coverage
+    rows this model was changed to produce.  Every text formatter goes through
+    here; the HTML report's ``_factor_cell`` is the same rule in markup.
+
+    Note what this deliberately does *not* do: substitute ``0`` or ``50``.  A
+    missing factor must read as missing all the way to the prompt, or the
+    coverage accounting upstream is decorative.
+    """
+    if value is None:
+        return missing
+    return format(float(value), spec)
+
+
+# ---------------------------------------------------------------------------
 # Helper: z-score -> percentile rank (0-100)
 # ---------------------------------------------------------------------------
 def _zscore_to_percentile(values: list[float | None]) -> list[float | None]:

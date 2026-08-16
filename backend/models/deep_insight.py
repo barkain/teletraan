@@ -120,20 +120,33 @@ class DeepInsight(TimestampMixin, Base):
     )
 
     # Trading levels (autonomous analysis)
+    #
+    # These hold a numeric level *plus* the condition attached to it, because
+    # that is what the synthesis prompt asks for ("$830 (below 50-day SMA)",
+    # "$180 within 3 months"). At the old 50/30 characters the application
+    # sliced that prose before insert and stored mid-word garbage -- live rows
+    # read "$28-30 (wait for regulatory clarity and sector sta". 255/100 is
+    # comfortably past any level a synthesis run has produced, so nothing is
+    # cut in practice.
+    #
+    # Widening is safe without DDL on SQLite, which does not enforce VARCHAR
+    # length (TEXT affinity). On PostgreSQL it needs a real ALTER COLUMN TYPE:
+    # database.py's auto-migration only ADDs missing columns and will not
+    # widen an existing one.
     entry_zone: Mapped[str | None] = mapped_column(
-        String(50),
+        String(255),
         nullable=True,
-    )  # e.g., "$150-155"
+    )  # e.g., "$150-155 (on a retest of the breakout)"
     target_price: Mapped[str | None] = mapped_column(
-        String(50),
+        String(255),
         nullable=True,
     )  # e.g., "$180 within 3 months"
     stop_loss: Mapped[str | None] = mapped_column(
-        String(50),
+        String(255),
         nullable=True,
-    )  # e.g., "$142 (-5%)"
+    )  # e.g., "$142 (-5%, below the 50-day SMA)"
     timeframe: Mapped[str | None] = mapped_column(
-        String(30),
+        String(100),
         nullable=True,
     )  # swing, position, long-term
 
