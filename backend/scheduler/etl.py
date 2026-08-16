@@ -4,14 +4,18 @@ This module provides scheduled data fetching and storage for stock prices,
 economic indicators, and analysis pipelines.
 """
 
+import asyncio
 import logging
-from datetime import date, timedelta
+import time
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-not-found]
 from apscheduler.triggers.cron import CronTrigger  # type: ignore[import-not-found]
+from apscheduler.triggers.date import DateTrigger  # type: ignore[import-not-found]
 from apscheduler.triggers.interval import IntervalTrigger  # type: ignore[import-not-found]
-from sqlalchemy import select  # type: ignore[import-not-found]
+from sqlalchemy import func, select  # type: ignore[import-not-found]
 from db_utils import dialect_insert  # type: ignore[import-not-found]
 from sqlalchemy.ext.asyncio import AsyncSession  # type: ignore[import-not-found]
 
@@ -23,6 +27,16 @@ from models.price import PriceHistory  # type: ignore[import-not-found]
 from models.economic import EconomicIndicator  # type: ignore[import-not-found]
 from models.analysis_task import AnalysisTask, AnalysisTaskStatus  # type: ignore[import-not-found]
 from analysis.engine import AnalysisEngine  # type: ignore[import-not-found]
+from analysis.price_coverage import (  # type: ignore[import-not-found]
+    log_coverage_report,
+    price_coverage_report,
+)
+from analysis.price_freshness import (  # type: ignore[import-not-found]
+    STALE_AFTER_TRADING_DAYS,
+    coerce_date as _coerce_date,
+    last_weekday,
+    trading_days_between,
+)
 from analysis.alpha_engine import create_daily_alpha_run  # type: ignore[import-not-found]
 from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
 from analysis.thematic_outcome_tracker import ThematicOutcomeTracker  # type: ignore[import-not-found]
@@ -31,6 +45,109 @@ from analysis.statistical_calculator import StatisticalFeatureCalculator  # type
 from config import get_settings  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
+
+#: Days of settled history re-fetched behind a symbol's newest stored bar.
+#: yfinance revises recent bars (splits, dividends, late prints), so the daily
+#: refresh overlaps rather than appending blindly.
+PRICE_REFRESH_OVERLAP_DAYS = 5
+
+#: Lookback used for a symbol that has no stored bars at all.  Wide enough for
+#: the 200-day moving averages the technical analysts compute.
+PRICE_INITIAL_LOOKBACK_DAYS = 400
+
+#: Ceiling on any single symbol's refresh window.  A symbol frozen for years
+#: should not trigger an unbounded download on a nightly job.
+PRICE_REFRESH_MAX_LOOKBACK_DAYS = 800
+
+#: Concurrent yfinance fetches.  yfinance is unofficial and rate-limits by IP;
+#: six in flight refreshes ~400 symbols in a couple of minutes without tripping
+#: it, and each fetch already runs in the shared thread-pool executor.
+PRICE_REFRESH_CONCURRENCY = 6
+
+#: How many failed symbols to name in the failure log line.
+PRICE_FAILURE_SAMPLE_SIZE = 10
+
+#: Window the catch-up scans for *interior* holes.  Trailing staleness is not
+#: the only failure mode: SPY had a bar for yesterday and no bars at all for
+#: July, because every past run could only see five days back.  A symbol whose
+#: newest bar is current can still be full of holes, so the catch-up measures
+#: bar density over this window rather than trusting the newest bar alone.
+PRICE_GAP_SCAN_DAYS = 120
+
+#: Fraction of the window's weekdays a symbol must have bars for before its
+#: history counts as intact.  Exchange holidays cost roughly 4% of weekdays per
+#: quarter, so 0.90 tolerates them without tolerating a real hole.
+PRICE_GAP_DENSITY_THRESHOLD = 0.90
+
+
+def _chunks(items: list[str], size: int) -> list[list[str]]:
+    """Split *items* into consecutive lists of at most *size* elements."""
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+@dataclass
+class PriceRefreshReport:
+    """Structured outcome of a price refresh pass.
+
+    The refresh used to return ``dict[symbol, int]`` and set the count to ``0``
+    on exception, which made "this symbol raised" indistinguishable from "this
+    symbol had no new bars".  Nothing aggregated it and nothing looked at it,
+    so a run in which every single symbol failed logged exactly like a healthy
+    one.  This report separates the two and carries the requested-vs-written
+    counts a caller needs to tell a partial failure from a success.
+    """
+
+    requested: int = 0
+    attempted: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    skipped_current: int = 0
+    returned_no_data: int = 0
+    bars_written: int = 0
+    new_bars: int = 0
+    duration_seconds: float = 0.0
+    per_symbol: dict[str, int] = field(default_factory=dict)
+    failures: dict[str, str] = field(default_factory=dict)
+    no_data_symbols: list[str] = field(default_factory=list)
+
+    @property
+    def is_complete(self) -> bool:
+        """True when every requested symbol was accounted for without error."""
+        return (
+            self.failed == 0
+            and self.attempted + self.skipped_current == self.requested
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        """JSON-serialisable view for API responses and structured logs."""
+        return {
+            "requested": self.requested,
+            "attempted": self.attempted,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "skipped_current": self.skipped_current,
+            "returned_no_data": self.returned_no_data,
+            "bars_written": self.bars_written,
+            "new_bars": self.new_bars,
+            "duration_seconds": round(self.duration_seconds, 2),
+            "is_complete": self.is_complete,
+            "failures": dict(
+                sorted(self.failures.items())[:PRICE_FAILURE_SAMPLE_SIZE]
+            ),
+            "no_data_symbols": sorted(self.no_data_symbols)[
+                :PRICE_FAILURE_SAMPLE_SIZE
+            ],
+        }
+
+    def summary(self) -> str:
+        """One-line human-readable rendering."""
+        return (
+            f"price refresh: {self.succeeded}/{self.requested} symbols ok, "
+            f"{self.failed} failed, {self.returned_no_data} returned no data, "
+            f"{self.skipped_current} already current, "
+            f"{self.new_bars} new bars ({self.bars_written} upserted) "
+            f"in {self.duration_seconds:.1f}s"
+        )
 
 
 class ETLOrchestrator:
@@ -159,48 +276,316 @@ class ETLOrchestrator:
 
         await session.execute(stmt)
 
+    async def _active_symbols(self) -> list[str]:
+        """Every active ticker in the DB, unioned with the benchmark set.
+
+        The daily refresh job is registered with no arguments, so ``symbols``
+        arrives as ``None`` and used to fall through to ``DEFAULT_SYMBOLS`` --
+        sixteen indices and sector ETFs.  The universe-expansion scripts had
+        meanwhile grown ``stocks`` to ~400 rows, each seeded once with a
+        one-off ``backfill_history`` call and never refreshed again.  Selecting
+        from the table is what makes the nightly job cover the universe it is
+        supposed to cover.
+
+        ``DEFAULT_SYMBOLS`` stays in the union so the benchmarks are refreshed
+        even on a fresh database where ``stocks`` is still empty.
+        """
+        async with async_session_factory() as session:
+            rows = await session.execute(
+                select(Stock.symbol).where(Stock.is_active.is_(True))
+            )
+            db_symbols = [row[0] for row in rows.all() if row[0]]
+
+        merged = {s.upper() for s in db_symbols} | {
+            s.upper() for s in self.DEFAULT_SYMBOLS
+        }
+        return sorted(merged)
+
+    async def _latest_bar_dates(self, symbols: list[str]) -> dict[str, date]:
+        """Newest stored bar date per symbol, in one query."""
+        if not symbols:
+            return {}
+
+        latest: dict[str, date] = {}
+        async with async_session_factory() as session:
+            # Chunked to stay under SQLite's variable limit on large universes.
+            for chunk in _chunks(symbols, 400):
+                rows = await session.execute(
+                    select(Stock.symbol, func.max(PriceHistory.date))
+                    .select_from(Stock)
+                    .join(PriceHistory, PriceHistory.stock_id == Stock.id)
+                    .where(Stock.symbol.in_(chunk))
+                    .group_by(Stock.symbol)
+                )
+                for symbol, raw in rows.all():
+                    coerced = _coerce_date(raw)
+                    if coerced is not None:
+                        latest[str(symbol).upper()] = coerced
+        return latest
+
+    async def _bar_counts_since(
+        self,
+        symbols: list[str],
+        since: date,
+    ) -> dict[str, int]:
+        """Bars stored per symbol on or after *since*, in one query."""
+        if not symbols:
+            return {}
+
+        counts: dict[str, int] = {}
+        async with async_session_factory() as session:
+            for chunk in _chunks(symbols, 400):
+                rows = await session.execute(
+                    select(Stock.symbol, func.count(PriceHistory.id))
+                    .select_from(Stock)
+                    .join(PriceHistory, PriceHistory.stock_id == Stock.id)
+                    .where(Stock.symbol.in_(chunk))
+                    .where(PriceHistory.date >= since)
+                    .group_by(Stock.symbol)
+                )
+                for symbol, count in rows.all():
+                    counts[str(symbol).upper()] = int(count or 0)
+        return counts
+
+    def _has_interior_gap(self, bars_in_window: int, expected_weekdays: int) -> bool:
+        """True when a symbol's recent history is too sparse to be intact.
+
+        A symbol whose *newest* bar is current can still be riddled with holes:
+        SPY had a bar for yesterday and none at all for July, because every run
+        under the old five-day window wrote only what it could see and left
+        everything older permanently unwritten.  Checking the newest bar alone
+        calls that symbol healthy, so the catch-up measures density instead.
+        """
+        if expected_weekdays <= 0:
+            return False
+        return bars_in_window < expected_weekdays * PRICE_GAP_DENSITY_THRESHOLD
+
+    def _refresh_window(self, last_bar: date | None, today: date) -> date:
+        """Start date for a symbol's refresh, derived from what it already has.
+
+        The old job asked yfinance for ``period="5d"`` unconditionally.  That
+        window is narrower than any outage longer than a long weekend, so a run
+        after a two-week gap wrote the last five days and left the other nine
+        permanently unwritten -- which is precisely why the SPY series has no
+        July 2026 bars but does have August ones.  Deriving the window from the
+        newest stored bar means the first run after any outage closes it.
+        """
+        if last_bar is None:
+            return today - timedelta(days=PRICE_INITIAL_LOOKBACK_DAYS)
+        start = last_bar - timedelta(days=PRICE_REFRESH_OVERLAP_DAYS)
+        floor = today - timedelta(days=PRICE_REFRESH_MAX_LOOKBACK_DAYS)
+        return max(start, floor)
+
+    async def _refresh_one_symbol(
+        self,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[int, int]:
+        """Fetch and upsert one symbol's bars.
+
+        Each symbol gets its own session so one failure cannot roll back a
+        sibling's committed writes.
+
+        Returns:
+            ``(bars_upserted, new_bars)`` -- the second counts only dates that
+            were not already present, which is the number that tells an
+            operator whether a gap actually closed.
+        """
+        prices = await yahoo_adapter.get_price_history(
+            symbol, start_date=start_date, end_date=end_date
+        )
+        if not prices:
+            return 0, 0
+
+        async with async_session_factory() as session:
+            stock = await self._get_or_create_stock(session, symbol)
+
+            existing_rows = await session.execute(
+                select(PriceHistory.date)
+                .where(PriceHistory.stock_id == stock.id)
+                .where(PriceHistory.date >= start_date)
+            )
+            existing = {
+                coerced
+                for coerced in (_coerce_date(row[0]) for row in existing_rows.all())
+                if coerced is not None
+            }
+
+            written = 0
+            new_bars = 0
+            for price in prices:
+                if price.get("close") is None or price.get("date") is None:
+                    continue
+                await self._upsert_price(session, stock.id, price)
+                written += 1
+                if _coerce_date(price["date"]) not in existing:
+                    new_bars += 1
+
+            await session.commit()
+
+        return written, new_bars
+
     async def fetch_and_store_prices(
         self,
         symbols: list[str] | None = None,
-    ) -> dict[str, int]:
-        """Fetch latest prices and store in database.
+        *,
+        stale_only: bool = False,
+    ) -> PriceRefreshReport:
+        """Refresh daily bars for the active universe and store them.
+
+        Every symbol's fetch window is derived from its own stored history, so
+        this single method serves both the nightly refresh and the catch-up
+        backfill: a symbol that is current downloads a few overlapping days, a
+        symbol three months behind downloads three months, and a symbol that is
+        current but full of interior holes downloads the whole scan window.
 
         Args:
-            symbols: List of symbols to fetch. Uses DEFAULT_SYMBOLS if not provided.
+            symbols: Symbols to refresh.  Defaults to every active stock in the
+                DB unioned with :attr:`DEFAULT_SYMBOLS`.
+            stale_only: Skip symbols whose recent history is both current and
+                intact.  Used by the startup catch-up so a warm database costs
+                almost nothing.
 
         Returns:
-            Dict mapping symbols to number of prices stored
+            A :class:`PriceRefreshReport` counting what was requested, written
+            and failed.  Failures are never folded into a zero count.
         """
-        symbols = symbols or self.DEFAULT_SYMBOLS
-        logger.info(f"Fetching prices for {len(symbols)} symbols")
+        started = time.monotonic()
+        resolved = (
+            [s.upper() for s in symbols]
+            if symbols is not None
+            else await self._active_symbols()
+        )
+        report = PriceRefreshReport(requested=len(resolved))
+        if not resolved:
+            logger.warning("Price refresh requested with no symbols to fetch")
+            return report
 
-        results: dict[str, int] = {}
+        today = date.today()
+        as_of = last_weekday(today)
+        scan_start = today - timedelta(days=PRICE_GAP_SCAN_DAYS)
+        latest = await self._latest_bar_dates(resolved)
+        bar_counts = await self._bar_counts_since(resolved, scan_start)
+        expected_weekdays = trading_days_between(
+            scan_start - timedelta(days=1), as_of
+        )
 
-        async with async_session_factory() as session:
-            for symbol in symbols:
+        plan: list[tuple[str, date]] = []
+        gapped = 0
+        for symbol in resolved:
+            last_bar = latest.get(symbol)
+            has_gap = last_bar is not None and self._has_interior_gap(
+                bar_counts.get(symbol, 0), expected_weekdays
+            )
+            if has_gap:
+                gapped += 1
+            if stale_only and last_bar is not None and not has_gap:
+                if trading_days_between(last_bar, as_of) <= STALE_AFTER_TRADING_DAYS:
+                    report.skipped_current += 1
+                    continue
+            start = self._refresh_window(last_bar, today)
+            # An interior hole sits *behind* the newest bar, so the window
+            # derived from that bar cannot reach it.  Widen to the scan window.
+            if has_gap:
+                start = min(start, scan_start)
+            plan.append((symbol, start))
+
+        logger.info(
+            "Price refresh starting: %d symbols to fetch (%d with interior gaps), "
+            "%d already current",
+            len(plan),
+            gapped,
+            report.skipped_current,
+        )
+
+        # yfinance rate-limits by IP, so the fan-out is bounded rather than
+        # unleashing ~400 concurrent downloads.
+        semaphore = asyncio.Semaphore(PRICE_REFRESH_CONCURRENCY)
+        # end is exclusive in yfinance's history(); +1 day includes today's bar.
+        end_date = today + timedelta(days=1)
+
+        async def _run(symbol: str, start_date: date) -> None:
+            async with semaphore:
                 try:
-                    # Get or create stock record
-                    stock = await self._get_or_create_stock(session, symbol)
-
-                    # Fetch price history (last 5 days to ensure we get latest)
-                    prices = await yahoo_adapter.get_price_history(
-                        symbol, period="5d"
+                    written, new_bars = await self._refresh_one_symbol(
+                        symbol, start_date, end_date
                     )
+                except Exception as e:  # noqa: BLE001 -- recorded, not swallowed
+                    report.failed += 1
+                    report.failures[symbol] = f"{type(e).__name__}: {e}"
+                    logger.warning("Price refresh failed for %s: %s", symbol, e)
+                    return
+                report.succeeded += 1
+                report.bars_written += written
+                report.new_bars += new_bars
+                report.per_symbol[symbol] = new_bars
+                # "The request succeeded and returned nothing" is its own
+                # outcome -- a delisted or renamed ticker that will never
+                # catch up no matter how often the job runs.  Counting it as
+                # a plain success is how 19 dead symbols stayed invisible.
+                if written == 0:
+                    report.returned_no_data += 1
+                    report.no_data_symbols.append(symbol)
 
-                    # Store prices
-                    for price in prices:
-                        await self._upsert_price(session, stock.id, price)
+        report.attempted = len(plan)
+        await asyncio.gather(*(_run(symbol, start) for symbol, start in plan))
 
-                    await session.commit()
-                    results[symbol] = len(prices)
-                    logger.info(f"Updated {symbol}: {len(prices)} prices")
+        report.duration_seconds = time.monotonic() - started
 
-                except Exception as e:
-                    logger.error(f"Error fetching {symbol}: {e}")
-                    await session.rollback()
-                    results[symbol] = 0
+        # A partial failure has to be loud.  The previous implementation logged
+        # one line per symbol and nothing in aggregate, so a run in which every
+        # symbol raised looked identical to a healthy one in the log.
+        if report.failed:
+            logger.error(
+                "%s -- %d symbols failed: %s",
+                report.summary(),
+                report.failed,
+                ", ".join(
+                    sorted(report.failures)[:PRICE_FAILURE_SAMPLE_SIZE]
+                ),
+            )
+        else:
+            logger.info(report.summary())
 
-        return results
+        if report.returned_no_data:
+            logger.warning(
+                "%d symbols returned no data at all (likely delisted or "
+                "renamed): %s",
+                report.returned_no_data,
+                ", ".join(
+                    sorted(report.no_data_symbols)[:PRICE_FAILURE_SAMPLE_SIZE]
+                ),
+            )
+
+        await self.log_price_coverage()
+        return report
+
+    async def catch_up_prices(self) -> PriceRefreshReport:
+        """Close any accumulated price gap for symbols that are behind.
+
+        The scheduler only fires while the app is up, so a development or
+        single-host deployment that is down over a weekend simply never runs
+        that night's job -- there is no catch-up in cron semantics.  This runs
+        shortly after startup and refreshes only the symbols whose newest bar
+        is stale, which makes a gap self-healing instead of something an
+        operator has to notice and backfill by hand.
+        """
+        logger.info("Price catch-up backfill starting")
+        report = await self.fetch_and_store_prices(stale_only=True)
+        logger.info("Price catch-up backfill complete -- %s", report.summary())
+        return report
+
+    async def log_price_coverage(self) -> dict[str, Any]:
+        """Compute and log the table-wide price coverage report."""
+        try:
+            async with async_session_factory() as session:
+                report = await price_coverage_report(session)
+            log_coverage_report(report)
+            return report
+        except Exception as e:  # noqa: BLE001 -- diagnostics must never break ETL
+            logger.warning("Price coverage report failed: %s", e)
+            return {}
 
     async def fetch_economic_indicators(self) -> dict[str, int]:
         """Fetch latest economic data from FRED.
@@ -802,13 +1187,37 @@ class ETLOrchestrator:
             logger.warning("Scheduler is already running")
             return
 
-        # Daily price refresh at 6:30 PM ET (after market close)
+        settings = get_settings()
+
+        # Daily price refresh at 6:30 PM ET (after market close).  Registered
+        # with no arguments, so it refreshes every active stock in the DB.
         self.scheduler.add_job(
             self.fetch_and_store_prices,
             CronTrigger(hour=18, minute=30, timezone="America/New_York"),
             id="daily_price_refresh",
             replace_existing=True,
         )
+
+        # Catch-up backfill shortly after startup.  Cron jobs do not run while
+        # the process is down and APScheduler will not fire a missed one, so
+        # without this a gap opened by any downtime stays open forever.  It is
+        # delayed rather than awaited inline so it never slows app boot, and it
+        # only touches symbols that are actually stale.
+        if settings.PRICE_CATCHUP_ON_STARTUP:
+            self.scheduler.add_job(
+                self.catch_up_prices,
+                DateTrigger(
+                    run_date=datetime.now()
+                    + timedelta(seconds=settings.PRICE_CATCHUP_DELAY_SECONDS)
+                ),
+                id="startup_price_catchup",
+                name="Startup price catch-up backfill",
+                replace_existing=True,
+            )
+            logger.info(
+                "Startup price catch-up scheduled in %ds",
+                settings.PRICE_CATCHUP_DELAY_SECONDS,
+            )
 
         # Weekly economic data refresh (Saturdays at 10 AM)
         self.scheduler.add_job(
@@ -940,7 +1349,6 @@ class ETLOrchestrator:
         # Neon PostgreSQL keepalive ping every 4 minutes (prevents free-tier
         # compute suspension after 5 min idle, which causes 3-5s cold starts).
         # Only enabled when using a PostgreSQL backend.
-        settings = get_settings()
         if settings.DATABASE_URL.startswith("postgresql"):
             self.scheduler.add_job(
                 self.keepalive_ping,
@@ -979,6 +1387,7 @@ class ETLOrchestrator:
 
         job_names = [
             "daily_price_refresh",
+            "startup_price_catchup",
             "weekly_economic_refresh",
             "daily_analysis",
             "daily_alpha_engine_preflight",

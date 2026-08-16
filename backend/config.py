@@ -92,6 +92,14 @@ class Settings(BaseSettings):
     SCHEDULED_ANALYSIS_MAX_INSIGHTS: int = 5
     SCHEDULED_ANALYSIS_DEEP_DIVE_COUNT: int = 5
 
+    # --- Price ETL catch-up ---
+    # The daily price refresh is a cron job, so it simply does not run while
+    # the process is down and APScheduler never fires the missed occurrence.
+    # This backfill runs shortly after startup and refreshes only the symbols
+    # whose newest bar is stale, so a gap opened by downtime self-heals.
+    PRICE_CATCHUP_ON_STARTUP: bool = True
+    PRICE_CATCHUP_DELAY_SECONDS: int = 30
+
     # --- Report Publishing ---
     # Publishing is DISABLED by default for fork safety.
     # If you fork this repo and run discovery, reports will NOT be pushed

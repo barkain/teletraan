@@ -110,6 +110,8 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
 - **ClaudeSDK client pool**: 3 persistent connections in `llm/client_pool.py` with lazy creation and async checkout
 - **Auto-migration**: `database.py` auto-detects missing columns on startup via `_sync_migrate_missing_columns()`
 - **yfinance TTL cache**: 5-min module-level cache in `analysis/agents/heatmap_fetcher.py` for batch downloads and market caps
+- **Gap-aware price ETL**: `daily_price_refresh` refreshes every active stock (not a hardcoded watchlist) and derives each symbol's fetch window from its own newest stored bar, so any outage self-heals on the next run; `catch_up_prices()` runs shortly after startup for stale symbols only. `fetch_and_store_prices()` returns a `PriceRefreshReport` counting requested/succeeded/failed so a partial failure cannot be silent.
+- **Price coverage check**: `analysis/price_coverage.py` reports table-wide staleness and benchmark interior gaps; logged after every refresh and exposed at `GET /api/v1/health/price-coverage`
 - **ThreadPoolExecutor**: 8-worker pool in `heatmap_fetcher.py` for parallel market cap fetching
 - **FD limit**: Raised to 4096 in `main.py` to handle concurrent subprocess + connection load
 - **Portfolio-aware discovery**: `AutonomousDeepEngine` loads portfolio holdings and ensures held symbols are included in deep dives
@@ -126,6 +128,8 @@ Teletraan -- Full-stack AI market intelligence app: **FastAPI** backend + **Next
 - `SCHEDULED_ANALYSIS_HOUR` / `SCHEDULED_ANALYSIS_MINUTE` — schedule time in ET (default `16` / `30`)
 - `SCHEDULED_ANALYSIS_MAX_INSIGHTS` — max insights per run (default `5`)
 - `SCHEDULED_ANALYSIS_DEEP_DIVE_COUNT` — stocks to deep-dive per run (default `5`)
+- `PRICE_CATCHUP_ON_STARTUP` — default `true`; backfills stale price history shortly after startup
+- `PRICE_CATCHUP_DELAY_SECONDS` — how long after startup the catch-up runs (default `30`)
 - GitHub Pages URL is auto-derived from git remote origin (defaults to `barkain/teletraan`)
 
 **Frontend** (`frontend/.env.local` — auto-created by `start.sh`):
