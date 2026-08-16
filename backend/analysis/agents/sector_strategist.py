@@ -11,6 +11,20 @@ agent, which specializes in:
 import json
 import re
 
+from analysis.price_freshness import (
+    build_freshness,
+    describe,
+    is_usable,
+    price_line,
+    resolve_snapshot,
+    snapshot_price,
+)
+from analysis.symbol_slice import (
+    format_peer_comparison,
+    slice_context_for_symbol,
+    target_banner,
+)
+
 
 SECTOR_STRATEGIST_PROMPT = """You are a Sector Strategist specializing in sector rotation analysis and relative strength assessment.
 
@@ -56,7 +70,17 @@ Return JSON:
 """
 
 
-def format_sector_context(market_data: dict) -> str:
+def _since(base_date: str | None) -> str:
+    """Name the bar a multi-day return is measured from, when it is known.
+
+    The weekly/monthly returns are computed from stored daily bars, so a gap in
+    the price history stretches them well past 5 / 20 sessions.  Printing the
+    base bar's date stops the label from overstating the window.
+    """
+    return f" (since {base_date})" if base_date else ""
+
+
+def format_sector_context(market_data: dict, target_symbol: str | None = None) -> str:
     """Format sector data for strategist consumption.
 
     Takes raw market data and formats it into a structured context string
@@ -70,6 +94,11 @@ def format_sector_context(market_data: dict) -> str:
             - market_summary: Overall market status
             - economic_indicators: List of economic indicator dicts
             Or legacy format with sector_metrics, rotation_analysis, etc.
+        target_symbol: The one symbol this analysis is about.  When given, the
+            individual-stock section covers only that symbol and the others move
+            into a labelled comparison block; sector ETF performance, rankings
+            and rotation stay shared, since that is the strategist's whole job.
+            When omitted, every symbol is rendered as before.
 
     Returns:
         Formatted string context for the LLM agent.
@@ -78,6 +107,15 @@ def format_sector_context(market_data: dict) -> str:
         return "No sector data available for analysis."
 
     context_parts = []
+
+    if target_symbol:
+        market_data = slice_context_for_symbol(market_data, target_symbol)
+        context_parts.append(target_banner(target_symbol))
+        context_parts.append("")
+
+    # The banner is not data -- the "nothing to analyse" check below measures
+    # what was appended after it.
+    header_len = len(context_parts)
 
     # Check for new context builder format (sector_performance from ETFs)
     sector_performance = market_data.get("sector_performance", {})
@@ -107,10 +145,22 @@ def format_sector_context(market_data: dict) -> str:
             context_parts.append(
                 f"- **{name}** ({symbol}) - {sector}"
             )
-            context_parts.append(
-                f"  Price: ${current:.2f}, Daily: {daily_pct:+.2f}%, "
-                f"Weekly: {weekly_pct:+.2f}%, Monthly: {monthly_pct:+.2f}%"
+            # The context builder dates and re-quotes each ETF and attaches the
+            # record; derive one only for a hand-built market_data dict.
+            etf_freshness = metrics.get("freshness") or build_freshness(
+                symbol, metrics.get("as_of"), current, "db_close",
             )
+            context_parts.append(
+                f"  Close: ${current:.2f} {describe(etf_freshness)}, "
+                f"Daily: {daily_pct:+.2f}%, "
+                f"Weekly{_since(metrics.get('week_base_date'))}: {weekly_pct:+.2f}%, "
+                f"Monthly{_since(metrics.get('month_base_date'))}: {monthly_pct:+.2f}%"
+            )
+            if not is_usable(etf_freshness):
+                context_parts.append(
+                    "  ** STALE: this ETF close is not current; treat the returns above "
+                    "as historical **"
+                )
             context_parts.append(f"  Volume: {volume:,}")
 
         context_parts.append("")
@@ -169,12 +219,22 @@ def format_sector_context(market_data: dict) -> str:
                 if prices and len(prices) >= 2:
                     latest = prices[0]  # Sorted descending
                     prev = prices[1]
-                    current = latest.get("close", 0)
+                    # Quote the reconciled snapshot, not whatever bar happens to
+                    # sit at index 0 -- the two can be months apart.
+                    current, stock_freshness = snapshot_price(market_data, symbol)
+                    if not current:
+                        current = latest.get("close", 0)
                     daily_change = ((current - prev.get("close", current)) / prev.get("close", 1)) * 100 if prev.get("close") else 0
                     volume = latest.get("volume", 0)
 
+                    suffix = (
+                        describe(stock_freshness) if stock_freshness else "(date unknown)"
+                    )
+                    if stock_freshness and not is_usable(stock_freshness):
+                        suffix += " [STALE -- not a current price]"
                     context_parts.append(
-                        f"- {symbol} ({name}): ${current:.2f} ({daily_change:+.2f}%), Vol: {volume:,}"
+                        f"- {symbol} ({name}): ${current:.2f} {suffix} "
+                        f"({daily_change:+.2f}% vs prior bar), Vol: {volume:,}"
                     )
             context_parts.append("")
 
@@ -182,9 +242,18 @@ def format_sector_context(market_data: dict) -> str:
     market_summary = market_data.get("market_summary", {})
     market_index = market_summary.get("market_index", {})
     if market_index:
+        benchmark_symbol = market_index.get("symbol", "SPY")
+        benchmark_freshness = (
+            market_index.get("freshness")
+            or resolve_snapshot(market_data, benchmark_symbol)
+            or build_freshness(
+                benchmark_symbol, market_index.get("date"),
+                market_index.get("current"), "db_close",
+            )
+        )
         context_parts.append("## Benchmark (SPY)")
         context_parts.append("")
-        context_parts.append(f"Current: ${market_index.get('current', 0):.2f}")
+        context_parts.append(price_line(benchmark_freshness, label="Last Close"))
         context_parts.append(f"Daily Change: {market_index.get('change_pct', 0):+.2f}%")
         context_parts.append(f"Volume: {market_index.get('volume', 0):,}")
         context_parts.append("")
@@ -280,8 +349,17 @@ def format_sector_context(market_data: dict) -> str:
                     context_parts.append(f"- {formatted_name}: {value}")
         context_parts.append("")
 
-    if not context_parts or context_parts == [""]:
+    body = context_parts[header_len:]
+    if not body or body == [""]:
         return "No sector data available for analysis."
+
+    # Peers go last and under their own heading -- everything above this line
+    # is the target's own data.
+    if target_symbol:
+        peer_block = format_peer_comparison(market_data)
+        if peer_block:
+            context_parts.append("")
+            context_parts.append(peer_block)
 
     return "\n".join(context_parts)
 

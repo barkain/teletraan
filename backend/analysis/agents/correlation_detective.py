@@ -13,6 +13,12 @@ from typing import Any
 import json
 import re
 
+from analysis.price_freshness import (
+    build_freshness,
+    price_line,
+    resolve_snapshot,
+)
+
 
 CORRELATION_DETECTIVE_PROMPT = """You are a Correlation Detective specializing in cross-asset relationships, divergence detection, and pattern matching.
 
@@ -205,8 +211,14 @@ def format_correlation_context(market_data: dict[str, Any]) -> str:
                     weekly_change = ((latest.get("close", 0) - week_ago.get("close", 1)) /
                                     week_ago.get("close", 1) * 100) if week_ago.get("close") else 0
 
+                # Date the quote off the reconciled snapshot, falling back to the
+                # bar it was read from so the number and its date always agree.
+                freshness = resolve_snapshot(market_data, symbol) or build_freshness(
+                    symbol, latest.get("date"), latest.get("close"),
+                    latest.get("source") or "db_close",
+                )
                 context_parts.append(
-                    f"\n{symbol}: ${latest.get('close', 0):.2f} "
+                    f"\n{price_line(freshness, label=symbol)} "
                     f"(1D: {daily_change:+.2f}%, 1W: {weekly_change:+.2f}%)"
                 )
 
@@ -263,8 +275,22 @@ def format_correlation_context(market_data: dict[str, Any]) -> str:
         market_summary = market_data.get("market_summary", {})
         market_index = market_summary.get("market_index", {})
         if market_index:
+            benchmark_symbol = market_index.get("symbol", "SPY")
+            # The context builder dates and re-quotes the benchmark; fall back to
+            # deriving the record so a hand-built market_data dict is still dated.
+            benchmark_freshness = (
+                market_index.get("freshness")
+                or resolve_snapshot(market_data, benchmark_symbol)
+                or build_freshness(
+                    benchmark_symbol, market_index.get("date"),
+                    market_index.get("current"), "db_close",
+                )
+            )
             context_parts.append("\n\n--- Market Index (SPY) ---")
-            context_parts.append(f"\nSPY: ${market_index.get('current', 0):.2f} ({market_index.get('change_pct', 0):+.2f}%)")
+            context_parts.append(
+                f"\n{price_line(benchmark_freshness, label=f'{benchmark_symbol} Last Close')}"
+            )
+            context_parts.append(f"\nDaily Change: {market_index.get('change_pct', 0):+.2f}%")
 
     else:
         # Legacy format support
@@ -288,8 +314,14 @@ def format_correlation_context(market_data: dict[str, Any]) -> str:
                         weekly_change = ((latest.get("close", 0) - week_ago.get("close", 1)) /
                                         week_ago.get("close", 1) * 100) if week_ago.get("close") else 0
 
+                    # Legacy payloads never went through the context builder, so
+                    # date the quote off the bar it was read from.
+                    freshness = build_freshness(
+                        symbol, latest.get("date"), latest.get("close"),
+                        latest.get("source") or "db_close",
+                    )
                     context_parts.append(
-                        f"\n{symbol}: ${latest.get('close', 0):.2f} "
+                        f"\n{price_line(freshness, label=symbol)} "
                         f"(1D: {daily_change:+.2f}%, 1W: {weekly_change:+.2f}%)"
                     )
 

@@ -15,6 +15,22 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any
 
+from analysis.price_freshness import (
+    build_freshness,
+    coerce_date,
+    describe,
+    is_usable,
+    price_line,
+    resolve_snapshot,
+    snapshot_price,
+    stale_warning,
+)
+from analysis.symbol_slice import (
+    format_peer_comparison,
+    slice_context_for_symbol,
+    target_banner,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -289,7 +305,10 @@ If rich TA data is NOT provided, fall back to analyzing any basic indicators ava
 # HELPER FUNCTIONS
 # =============================================================================
 
-def format_technical_context(market_data: dict[str, Any]) -> str:
+def format_technical_context(
+    market_data: dict[str, Any],
+    target_symbol: str | None = None,
+) -> str:
     """Format market data for technical analyst consumption.
 
     Takes raw market data from context builder and formats it into a structured
@@ -301,11 +320,22 @@ def format_technical_context(market_data: dict[str, Any]) -> str:
             - price_history: Dict mapping symbols to list of OHLCV dicts
             - technical_indicators: Dict mapping symbols to indicator values
             - market_summary: Overall market status
+        target_symbol: The one symbol this analysis is about.  When given, the
+            body is sliced to that symbol and the other symbols in the context
+            are moved into a labelled comparison block, so the model is never
+            asked to guess which stock it is analysing.  When omitted (the
+            multi-symbol ``DeepAnalysisEngine`` path) every symbol is rendered
+            as before.
 
     Returns:
         Formatted string context for the technical analyst prompt.
     """
     context_parts: list[str] = []
+
+    if target_symbol:
+        market_data = slice_context_for_symbol(market_data, target_symbol)
+        context_parts.append(target_banner(target_symbol))
+        context_parts.append("")
 
     # Handle both old-style (per-stock) and new-style (aggregated) data formats
     # New format from context_builder has price_history as dict mapping symbol -> prices
@@ -322,7 +352,9 @@ def format_technical_context(market_data: dict[str, Any]) -> str:
         market_index = market_summary.get("market_index", {})
         if market_index:
             context_parts.append("## Market Overview (SPY)")
-            context_parts.append(f"Current: ${market_index.get('current', 0):.2f}")
+            context_parts.append(
+                price_line(_index_freshness(market_data, market_index), label="Last Close")
+            )
             change_pct = market_index.get("change_pct", 0)
             context_parts.append(f"Change: {change_pct:+.2f}%")
             context_parts.append(f"Volume: {market_index.get('volume', 0):,}")
@@ -345,13 +377,19 @@ def format_technical_context(market_data: dict[str, Any]) -> str:
             if stock_info.get("thematic_description"):
                 context_parts.append(f"Thematic Profile: {stock_info['thematic_description']}")
 
-            # Current price from most recent data
-            current_price: float = 0.0
+            # The reconciled snapshot -- one dated price for the whole section,
+            # rather than an undated close from whichever source got there first.
+            current_price, freshness = snapshot_price(market_data, symbol)
+            warning = stale_warning(freshness)
+            if warning:
+                context_parts.append(warning)
+            context_parts.append(price_line(freshness, label="Last Close"))
             if prices:
                 latest = prices[0]  # Prices are sorted descending by date
-                current_price = float(latest.get("close", 0))
-                context_parts.append(f"Current Price: ${current_price:.2f}")
-                context_parts.append(f"Volume: {latest.get('volume', 0):,}")
+                latest_date = _format_date(latest.get("date"))
+                context_parts.append(
+                    f"Volume ({latest_date} bar): {latest.get('volume', 0):,}"
+                )
 
             # Price history summary
             context_parts.append(f"\n### Price History ({len(prices)} periods)")
@@ -366,8 +404,9 @@ def format_technical_context(market_data: dict[str, Any]) -> str:
                 low_20 = min(p.get("low", float("inf")) for p in recent_prices if p.get("low"))
                 avg_volume = sum(p.get("volume", 0) for p in recent_prices) / len(recent_prices)
 
-                context_parts.append(f"20-Period High: ${high_20:.2f}")
-                context_parts.append(f"20-Period Low: ${low_20:.2f}")
+                window = _window_label(recent_prices)
+                context_parts.append(f"20-Period High: ${high_20:.2f} (window {window})")
+                context_parts.append(f"20-Period Low: ${low_20:.2f} (window {window})")
                 context_parts.append(f"Average Volume: {avg_volume:,.0f}")
 
             # Recent OHLCV data (last 5 periods)
@@ -409,11 +448,19 @@ def format_technical_context(market_data: dict[str, Any]) -> str:
                             elif "sma" in indicator_type.lower() or "ema" in indicator_type.lower():
                                 context_parts.append(f"{indicator_type.upper()}: ${value:.2f}")
                             elif indicator_type.lower() == "atr":
-                                if current_price and current_price > 0:
+                                # Percentage is only meaningful against a price
+                                # we are willing to call current.
+                                if current_price and current_price > 0 and is_usable(freshness):
                                     atr_pct = (value / current_price) * 100
-                                    context_parts.append(f"ATR(14): ${value:.2f} ({atr_pct:.2f}% of price)")
+                                    context_parts.append(
+                                        f"ATR(14): ${value:.2f} ({atr_pct:.2f}% of the "
+                                        f"{freshness.get('latest_bar_date')} price)"
+                                    )
                                 else:
-                                    context_parts.append(f"ATR(14): ${value:.2f}")
+                                    context_parts.append(
+                                        f"ATR(14): ${value:.2f} (% of price not shown -- "
+                                        "no current price to measure against)"
+                                    )
                             elif indicator_type.lower() == "bollinger_bands":
                                 if metadata:
                                     upper = metadata.get("upper", 0)
@@ -438,7 +485,18 @@ def format_technical_context(market_data: dict[str, Any]) -> str:
 
         legacy_current_price = market_data.get("current_price")
         if legacy_current_price is not None:
-            context_parts.append(f"Current Price: ${float(legacy_current_price):.2f}")
+            # Legacy single-stock payloads carry no bar date of their own, so
+            # date the quote off the newest bar in the payload when present.
+            legacy_prices = market_data.get("prices", [])
+            legacy_date = legacy_prices[-1].get("date") if legacy_prices else None
+            context_parts.append(
+                price_line(
+                    build_freshness(
+                        symbol, legacy_date, float(legacy_current_price), "db_close",
+                    ),
+                    label="Last Close",
+                )
+            )
 
         prices = market_data.get("prices", [])
         if prices:
@@ -553,6 +611,14 @@ def format_technical_context(market_data: dict[str, Any]) -> str:
         if revision_text:
             context_parts.append("")
             context_parts.append(revision_text)
+
+    # Peers go last and under their own heading -- everything above this line
+    # is the target's own data.
+    if target_symbol:
+        peer_block = format_peer_comparison(market_data)
+        if peer_block:
+            context_parts.append("")
+            context_parts.append(peer_block)
 
     return "\n".join(context_parts)
 
@@ -670,6 +736,13 @@ def _format_rich_ta_section(rich_ta: dict[str, Any]) -> str:
             f"### {symbol} -- Technical Score: {score:.2f} "
             f"({rating}, {confidence:.0%} confidence)"
         )
+        # State the price these indicators were computed from, with its date.
+        # Without this the reader cannot tell whether it agrees with the price
+        # quoted in the price-history section above.
+        price_fr = build_freshness(
+            symbol, data.get("latest_date"), data.get("latest_price"), "yfinance_history",
+        )
+        lines.append(price_line(price_fr, label="**Reference Price**"))
         lines.append("")
 
         # -- Trend -------------------------------------------------------------
@@ -776,11 +849,54 @@ def _format_rich_ta_section(rich_ta: dict[str, Any]) -> str:
         if pivot is not None:
             level_parts.append(f"Pivot: {pivot:.1f} (SMA50)")
         if level_parts:
-            lines.append(f"**Key Levels:** {'. '.join(level_parts)}.")
+            # Levels are only meaningful next to the price they were derived
+            # from -- the audit found support/resistance quoted hundreds of
+            # dollars away from the traded price with nothing to flag it.
+            lines.append(
+                f"**Key Levels** {describe(price_fr)}: {'. '.join(level_parts)}."
+            )
 
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _index_freshness(market_data: dict[str, Any], market_index: dict[str, Any]) -> dict[str, Any]:
+    """Freshness record for the benchmark index quoted in the market overview.
+
+    ``market_summary.market_index`` is built from its own DB query, so it can be
+    stale independently of the per-symbol history.  The context builder now
+    dates and re-quotes it in its own right and attaches the record, so prefer
+    that; otherwise prefer the reconciled snapshot when the benchmark is also
+    one of the analysed symbols, and fall back to dating the index off the bar
+    date the summary already carries.
+    """
+    symbol = market_index.get("symbol", "SPY")
+    snapshot = resolve_snapshot(market_data, symbol)
+    index_date = coerce_date(market_index.get("date"))
+
+    attached = market_index.get("freshness")
+    if isinstance(attached, dict) and attached.get("latest_bar_date"):
+        attached_date = coerce_date(attached["latest_bar_date"])
+        if snapshot is not None and attached_date is not None:
+            snapshot_date = coerce_date(snapshot.get("latest_bar_date"))
+            if snapshot_date is not None and snapshot_date > attached_date:
+                return snapshot
+        return attached
+
+    if snapshot and (index_date is None or coerce_date(snapshot.get("latest_bar_date")) >= index_date):
+        return snapshot
+
+    return build_freshness(symbol, index_date, market_index.get("current"), "db_close")
+
+
+def _window_label(prices: list[dict[str, Any]]) -> str:
+    """Describe the date range a rolling window of bars actually covers."""
+    if not prices:
+        return ""
+    newest = _format_date(prices[0].get("date"))
+    oldest = _format_date(prices[-1].get("date"))
+    return f"{oldest} to {newest}"
 
 
 def _format_date(date_value: Any) -> str:

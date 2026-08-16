@@ -45,6 +45,16 @@ from typing import Any
 # =============================================================================
 
 
+def _opt_float(value: Any) -> float | None:
+    """Coerce *value* to float, returning None for missing/unparseable input."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class StockHeatmapEntry:
     """Per-stock data point in the market heatmap.
@@ -53,51 +63,86 @@ class StockHeatmapEntry:
     volume characteristics, and classification metadata. Fetched from
     yfinance for all S&P 500 constituents.
 
+    Metrics that could not be computed from the available price history are
+    ``None`` rather than a neutral placeholder — a missing 20-day return must
+    not be indistinguishable from a flat one, because downstream factor
+    scoring treats "missing" as "exclude and renormalize".
+
+    ``to_dict()`` omits keys whose value is None so that consumers using
+    ``payload.get("change_20d", 0)`` keep working, and so that a missing
+    metric stays missing when the payload is fed back into the factor model.
+
     Attributes:
         symbol: Ticker symbol (e.g., "AAPL")
         sector: GICS sector name (e.g., "Technology")
         price: Current/last price in USD
         change_1d: 1-day price change percentage
-        change_5d: 5-day price change percentage
-        change_20d: 20-day price change percentage
-        volume_ratio: Current volume / 20-day average volume
+        change_5d: 5-day price change percentage (None if <6 bars)
+        change_20d: True 20-bar lookback change percentage (None if <21 bars)
+        change_60d: True 60-bar lookback change percentage (None if <61 bars)
+        volume_ratio: Latest volume / trailing 20-session average volume
         market_cap: Market capitalization in billions USD
+        rsi_14: 14-period RSI (None if <15 bars)
+        volatility_20d: 20-day annualized realized volatility, % (None if <21 bars)
     """
 
     symbol: str
     sector: str
     price: float = 0.0
     change_1d: float = 0.0
-    change_5d: float = 0.0
-    change_20d: float = 0.0
-    volume_ratio: float = 1.0
+    change_5d: float | None = None
+    change_20d: float | None = None
+    change_60d: float | None = None
+    volume_ratio: float | None = None
     market_cap: float = 0.0
+    rsi_14: float | None = None
+    volatility_20d: float | None = None
+
+    # Optional metric fields, in serialization order. Absent from to_dict()
+    # output whenever the value is None.
+    _OPTIONAL_FIELDS = (
+        "change_5d",
+        "change_20d",
+        "change_60d",
+        "volume_ratio",
+        "rsi_14",
+        "volatility_20d",
+    )
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary representation."""
-        return {
+        """Convert to dictionary representation (None metrics are omitted)."""
+        result: dict[str, Any] = {
             "symbol": self.symbol,
             "sector": self.sector,
             "price": round(self.price, 2),
             "change_1d": round(self.change_1d, 2),
-            "change_5d": round(self.change_5d, 2),
-            "change_20d": round(self.change_20d, 2),
-            "volume_ratio": round(self.volume_ratio, 2),
             "market_cap": round(self.market_cap, 2),
         }
+        for name in self._OPTIONAL_FIELDS:
+            value = getattr(self, name)
+            if value is not None:
+                result[name] = round(float(value), 2)
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> StockHeatmapEntry:
-        """Create from dictionary."""
+        """Create from dictionary.
+
+        Tolerant of legacy payloads persisted before the optional metric
+        fields existed: any absent key simply stays None.
+        """
         return cls(
             symbol=data.get("symbol", "UNKNOWN"),
             sector=data.get("sector", "Unknown"),
-            price=float(data.get("price", 0.0)),
-            change_1d=float(data.get("change_1d", 0.0)),
-            change_5d=float(data.get("change_5d", 0.0)),
-            change_20d=float(data.get("change_20d", 0.0)),
-            volume_ratio=float(data.get("volume_ratio", 1.0)),
-            market_cap=float(data.get("market_cap", 0.0)),
+            price=_opt_float(data.get("price")) or 0.0,
+            change_1d=_opt_float(data.get("change_1d")) or 0.0,
+            change_5d=_opt_float(data.get("change_5d")),
+            change_20d=_opt_float(data.get("change_20d")),
+            change_60d=_opt_float(data.get("change_60d")),
+            volume_ratio=_opt_float(data.get("volume_ratio")),
+            market_cap=_opt_float(data.get("market_cap")) or 0.0,
+            rsi_14=_opt_float(data.get("rsi_14")),
+            volatility_20d=_opt_float(data.get("volatility_20d")),
         )
 
 
@@ -115,10 +160,24 @@ class SectorHeatmapEntry:
         change_5d: 5-day sector ETF change percentage
         change_20d: 20-day sector ETF change percentage
         change_60d: 60-day sector ETF change percentage (None if unavailable)
-        breadth: Fraction of stocks in sector with positive 1d change (0.0-1.0)
+        breadth: Fraction of stocks in sector with positive 1d change (0.0-1.0).
+            Only meaningful when ``breadth_valid`` is True.
         top_gainers: Symbols of top 3 gainers in sector (by 1d change)
         top_losers: Symbols of top 3 losers in sector (by 1d change)
         stock_count: Number of stocks tracked in this sector
+        data_coverage: Fraction of the requested constituents that returned
+            usable price data (None for legacy payloads).
+        metrics_valid: False when the change_* figures are not backed by
+            enough evidence to be treated as a real sector reading.
+        breadth_valid: False when too few constituents reported to compute
+            breadth; ``breadth`` then holds a placeholder, not a measurement.
+        metrics_source: "etf" when change_* come from the sector ETF,
+            "constituents" when derived from constituent medians because the
+            ETF itself returned no data.
+
+    The change_* fields stay non-optional floats because several downstream
+    formatters interpolate them directly; use ``metrics_valid`` to decide
+    whether to trust them.
     """
 
     name: str
@@ -131,6 +190,10 @@ class SectorHeatmapEntry:
     top_gainers: list[str] = field(default_factory=list)
     top_losers: list[str] = field(default_factory=list)
     stock_count: int = 0
+    data_coverage: float | None = None
+    metrics_valid: bool = True
+    breadth_valid: bool = True
+    metrics_source: str = "etf"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
@@ -144,14 +207,23 @@ class SectorHeatmapEntry:
             "top_gainers": self.top_gainers,
             "top_losers": self.top_losers,
             "stock_count": self.stock_count,
+            "metrics_valid": self.metrics_valid,
+            "breadth_valid": self.breadth_valid,
+            "metrics_source": self.metrics_source,
         }
         if self.change_60d is not None:
             result["change_60d"] = round(self.change_60d, 2)
+        if self.data_coverage is not None:
+            result["data_coverage"] = round(self.data_coverage, 3)
         return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SectorHeatmapEntry:
-        """Create from dictionary."""
+        """Create from dictionary.
+
+        Legacy payloads lacking the coverage/validity keys are assumed valid
+        so that historical runs keep rendering the way they were recorded.
+        """
         change_60d = data.get("change_60d")
         return cls(
             name=data.get("name", "Unknown"),
@@ -164,6 +236,10 @@ class SectorHeatmapEntry:
             top_gainers=data.get("top_gainers", []),
             top_losers=data.get("top_losers", []),
             stock_count=int(data.get("stock_count", 0)),
+            data_coverage=_opt_float(data.get("data_coverage")),
+            metrics_valid=bool(data.get("metrics_valid", True)),
+            breadth_valid=bool(data.get("breadth_valid", True)),
+            metrics_source=str(data.get("metrics_source", "etf")),
         )
 
 
@@ -182,21 +258,32 @@ class HeatmapData:
         stocks: List of individual stock entries
         timestamp: When this heatmap was fetched
         market_status: Current market status (open, closed, pre_market, after_hours)
+        data_coverage: Fraction of requested symbols that returned usable
+            price history (None when not recorded).
+        missing_symbols: Symbols that were requested but never resolved, even
+            after individual retries.
     """
 
     sectors: list[SectorHeatmapEntry] = field(default_factory=list)
     stocks: list[StockHeatmapEntry] = field(default_factory=list)
     timestamp: datetime = field(default_factory=datetime.utcnow)
     market_status: str = "unknown"
+    data_coverage: float | None = None
+    missing_symbols: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
-        return {
+        result: dict[str, Any] = {
             "sectors": [s.to_dict() for s in self.sectors],
             "stocks": [s.to_dict() for s in self.stocks],
             "timestamp": self.timestamp.isoformat(),
             "market_status": self.market_status,
         }
+        if self.data_coverage is not None:
+            result["data_coverage"] = round(self.data_coverage, 3)
+        if self.missing_symbols:
+            result["missing_symbols"] = self.missing_symbols
+        return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> HeatmapData:
@@ -226,6 +313,8 @@ class HeatmapData:
             stocks=stocks,
             timestamp=timestamp,
             market_status=data.get("market_status", "unknown"),
+            data_coverage=_opt_float(data.get("data_coverage")),
+            missing_symbols=list(data.get("missing_symbols", [])),
         )
 
     def get_sector_stocks(self, sector_name: str) -> list[StockHeatmapEntry]:
@@ -259,15 +348,21 @@ class HeatmapData:
 
         Returns:
             List of StockHeatmapEntry objects that are statistical outliers,
-            sorted by absolute change descending.
+            sorted by absolute change descending. Stocks whose *change_field*
+            is None are excluded rather than counted as 0%.
         """
         if not self.stocks:
             return []
 
-        values = [getattr(s, change_field, 0.0) for s in self.stocks]
-        if not values:
+        measured = [
+            (s, getattr(s, change_field, None))
+            for s in self.stocks
+        ]
+        measured = [(s, v) for s, v in measured if v is not None]
+        if len(measured) < 2:
             return []
 
+        values = [v for _, v in measured]
         mean = sum(values) / len(values)
         variance = sum((v - mean) ** 2 for v in values) / len(values)
         std = variance ** 0.5
@@ -275,12 +370,10 @@ class HeatmapData:
         if std == 0:
             return []
 
-        outliers = [
-            s
-            for s in self.stocks
-            if abs(getattr(s, change_field, 0.0) - mean) > threshold_std * std
-        ]
-        outliers.sort(key=lambda s: abs(getattr(s, change_field, 0.0)), reverse=True)
+        outliers = [s for s, v in measured if abs(v - mean) > threshold_std * std]
+        outliers.sort(
+            key=lambda s: abs(getattr(s, change_field, 0.0) or 0.0), reverse=True
+        )
         return outliers
 
     def get_divergences(self) -> list[tuple[StockHeatmapEntry, SectorHeatmapEntry]]:

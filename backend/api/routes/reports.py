@@ -3457,27 +3457,36 @@ def _build_factor_scores_section(factor_scores: dict) -> str:
             return "#F59E0B"
         return "#EF4444"
 
+    def _factor_cell(scores: dict, name: str) -> str:
+        """Render one factor cell, or an em dash when the factor was not measured.
+
+        ``FactorScore.to_dict()`` omits unmeasured factors, so a default here
+        would print a plausible 50 where the model said "unknown".
+        """
+        val = scores.get(f"{name}_score")
+        if val is None:
+            return '<td style="color:#64748B;" title="not measured">&mdash;</td>'
+        return f'<td style="color:{_score_color(val)};">{val:.0f}</td>'
+
     rows_html = ""
     for _sym, scores in sorted_items:
         sym_esc = _esc(_sym)
         composite = scores.get("composite_score", 0)
-        momentum = scores.get("momentum_score", 50)
-        value = scores.get("value_score", 50)
-        quality = scores.get("quality_score", 50)
-        volatility = scores.get("volatility_score", 50)
-        volume = scores.get("volume_score", 50)
-        technical = scores.get("technical_score", 50)
+        coverage = scores.get("coverage")
+        coverage_cell = (
+            f"{coverage * 100:.0f}%" if isinstance(coverage, (int, float)) else "&mdash;"
+        )
 
+        cells = "".join(
+            _factor_cell(scores, name)
+            for name in ("momentum", "value", "quality", "volatility", "volume", "technical")
+        )
         rows_html += (
             "<tr>"
             f'<td style="font-weight:700;color:#E2E8F0;font-family:\'JetBrains Mono\',monospace;">{sym_esc}</td>'
             f'<td style="color:{_score_color(composite)};font-weight:700;font-family:\'JetBrains Mono\',monospace;">{composite:.1f}</td>'
-            f'<td style="color:{_score_color(momentum)};">{momentum:.0f}</td>'
-            f'<td style="color:{_score_color(value)};">{value:.0f}</td>'
-            f'<td style="color:{_score_color(quality)};">{quality:.0f}</td>'
-            f'<td style="color:{_score_color(volatility)};">{volatility:.0f}</td>'
-            f'<td style="color:{_score_color(volume)};">{volume:.0f}</td>'
-            f'<td style="color:{_score_color(technical)};">{technical:.0f}</td>'
+            f"{cells}"
+            f'<td style="color:#94A3B8;">{coverage_cell}</td>'
             "</tr>"
         )
 
@@ -3496,6 +3505,7 @@ def _build_factor_scores_section(factor_scores: dict) -> str:
               <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Vol</th>
               <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Volume</th>
               <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;">Tech</th>
+              <th style="padding:8px 12px;color:#64748B;font-size:11px;text-transform:uppercase;letter-spacing:1px;" title="Share of factor weight actually measured">Cov</th>
             </tr>
           </thead>
           <tbody style="font-family:'JetBrains Mono',monospace;">

@@ -7,8 +7,13 @@ converted to a 0-100 percentile rank before weighted aggregation.
 
 Fundamental data (PE, PB, ROE, etc.) is fetched via yfinance with a 5-min TTL
 cache. Blocking yfinance calls use run_in_executor with a ThreadPoolExecutor.
-When fundamental data is unavailable, the model gracefully degrades by
-redistributing weight to market-data-only factors.
+
+Missing evidence is represented as missing, never as a neutral 50: a factor
+that could not be measured is dropped from that symbol's composite and the
+remaining weights are renormalized to sum to 1.0. A symbol whose measured
+factors cover less than MIN_FACTOR_COVERAGE of the total weight is not scored
+at all, so thin evidence cannot masquerade as an average-across-the-board
+candidate and outrank a fully measured one.
 """
 
 from __future__ import annotations
@@ -76,7 +81,10 @@ FACTOR_WEIGHTS = {
     "technical": 0.10,
 }
 
-# Degraded weights when fundamentals unavailable (value+quality redistributed)
+# Retained for backwards compatibility. No longer used to switch weighting
+# schemes: missing factors are now dropped and the surviving FACTOR_WEIGHTS are
+# renormalized, which reproduces roughly these numbers when fundamentals are
+# absent (momentum 0.417, volatility 0.25, volume 0.167, technical 0.167).
 DEGRADED_WEIGHTS = {
     "momentum": 0.40,
     "value": 0.0,
@@ -86,58 +94,104 @@ DEGRADED_WEIGHTS = {
     "technical": 0.15,
 }
 
+FACTOR_NAMES = ("momentum", "value", "quality", "volatility", "volume", "technical")
+
+# A symbol must have factors covering at least this share of the total weight
+# before it gets a ranked composite. 0.50 admits the market-data-only path
+# (momentum + volatility + volume + technical = 0.60 of total weight) while
+# rejecting anything thinner — e.g. momentum + volume alone (0.35), which is
+# not enough evidence to put a stock in front of an analyst.
+MIN_FACTOR_COVERAGE = 0.50
+
+# Momentum is itself a composite of 5d/20d/60d returns. Require sub-components
+# covering at least half its internal weight so "momentum" never means a lone
+# 5-day return.
+_MOMENTUM_SUBWEIGHTS = {"5d": 0.3, "20d": 0.5, "60d": 0.2}
+MIN_MOMENTUM_COVERAGE = 0.5
+
 
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
 @dataclass
 class FactorScore:
-    """Composite and per-factor scores for a single symbol."""
+    """Composite and per-factor scores for a single symbol.
+
+    Per-factor scores are ``None`` when the underlying input was unavailable —
+    never a neutral 50 — and such factors are excluded from the composite with
+    the remaining weights renormalized. ``coverage`` is the share of total
+    factor weight that was actually measured.
+    """
 
     symbol: str
-    composite_score: float  # 0-100 weighted sum
-    momentum_score: float = 50.0
-    value_score: float = 50.0
-    quality_score: float = 50.0
-    volatility_score: float = 50.0
-    volume_score: float = 50.0
-    technical_score: float = 50.0
+    composite_score: float  # 0-100, weighted over measured factors only
+    coverage: float = 0.0
+    momentum_score: float | None = None
+    value_score: float | None = None
+    quality_score: float | None = None
+    volatility_score: float | None = None
+    volume_score: float | None = None
+    technical_score: float | None = None
+    factors_used: list[str] = field(default_factory=list)
+    missing_factors: list[str] = field(default_factory=list)
+    effective_weights: dict[str, float] = field(default_factory=dict)
     factor_details: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        """Serialize. Unmeasured per-factor scores are omitted, not zeroed.
+
+        Consumers that default a missing key (``scores.get("value_score", 50)``)
+        keep rendering; ``missing_factors`` tells them which of those defaults
+        are placeholders.
+        """
+        result: dict[str, Any] = {
             "symbol": self.symbol,
             "composite_score": round(self.composite_score, 2),
-            "momentum_score": round(self.momentum_score, 2),
-            "value_score": round(self.value_score, 2),
-            "quality_score": round(self.quality_score, 2),
-            "volatility_score": round(self.volatility_score, 2),
-            "volume_score": round(self.volume_score, 2),
-            "technical_score": round(self.technical_score, 2),
+            "coverage": round(self.coverage, 3),
+            "factors_used": self.factors_used,
+            "missing_factors": self.missing_factors,
+            "effective_weights": {
+                k: round(v, 4) for k, v in self.effective_weights.items()
+            },
             "factor_details": self.factor_details,
         }
+        for name in FACTOR_NAMES:
+            value = getattr(self, f"{name}_score")
+            if value is not None:
+                result[f"{name}_score"] = round(value, 2)
+        return result
 
 
 # ---------------------------------------------------------------------------
 # Helper: z-score -> percentile rank (0-100)
 # ---------------------------------------------------------------------------
-def _zscore_to_percentile(values: list[float | None]) -> list[float]:
+def _zscore_to_percentile(values: list[float | None]) -> list[float | None]:
     """Convert raw values to 0-100 percentile ranks via z-scoring.
 
-    NaN/None entries receive the median score (50).
+    None entries stay None: a symbol that did not report a factor must remain
+    distinguishable from one that reported an average value. Fewer than two
+    observations means the factor cannot be ranked cross-sectionally at all,
+    so every entry comes back None.
     """
     clean: list[tuple[int, float]] = [
         (i, v) for i, v in enumerate(values) if v is not None
     ]
     if len(clean) < 2:
-        return [50.0] * len(values)
+        return [None] * len(values)
 
     vals = [v for _, v in clean]
     mean = sum(vals) / len(vals)
     variance = sum((v - mean) ** 2 for v in vals) / len(vals)
-    std = variance**0.5 if variance > 0 else 1.0
 
-    result = [50.0] * len(values)
+    result: list[float | None] = [None] * len(values)
+    if variance <= 0:
+        # No cross-sectional dispersion — every observation genuinely sits at
+        # the median. This is a measurement, not a placeholder.
+        for idx, _ in clean:
+            result[idx] = 50.0
+        return result
+
+    std = variance**0.5
     for idx, val in clean:
         z = (val - mean) / std
         # Clamp z to [-3, 3] then map to 0-100
@@ -146,13 +200,30 @@ def _zscore_to_percentile(values: list[float | None]) -> list[float]:
     return result
 
 
-def _inverse_zscore_to_percentile(values: list[float | None]) -> list[float]:
+def _inverse_zscore_to_percentile(values: list[float | None]) -> list[float | None]:
     """Like _zscore_to_percentile but inverted (lower raw = higher score).
 
     Used for volatility where lower is better.
     """
     inverted: list[float | None] = [(-v if v is not None else None) for v in values]
     return _zscore_to_percentile(inverted)
+
+
+def _first_present(data: dict[str, Any], *keys: str) -> float | None:
+    """Return the first key that is present and non-None, as a float.
+
+    Uses an explicit None check rather than ``or`` chaining so a legitimate
+    0.0 return is not treated as absent.
+    """
+    for key in keys:
+        value = data.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +233,9 @@ class FactorModel:
     """Multi-factor scoring model for stock screening."""
 
     def __init__(self) -> None:
-        self._executor = ThreadPoolExecutor(max_workers=8)
+        # Symbols dropped by the most recent compute_factor_scores() call,
+        # mapped to the coverage they achieved. Useful for diagnostics.
+        self.last_excluded: dict[str, float] = {}
 
     async def compute_factor_scores(
         self,
@@ -170,6 +243,12 @@ class FactorModel:
         fundamental_data: dict[str, dict] | None = None,
     ) -> dict[str, FactorScore]:
         """Compute composite factor scores for all symbols in the heatmap.
+
+        Factors that could not be measured for a symbol are excluded from that
+        symbol's composite and the surviving weights are renormalized to sum to
+        1.0, so a score is always an average over real evidence. Symbols whose
+        measured factors cover less than ``MIN_FACTOR_COVERAGE`` of the total
+        weight are omitted from the result entirely — they are not ranked.
 
         Args:
             heatmap_data: Mapping of symbol -> dict with keys like price,
@@ -181,14 +260,15 @@ class FactorModel:
                 debt_to_equity. If None, value/quality factors are skipped.
 
         Returns:
-            Dict mapping symbol -> FactorScore.
+            Dict mapping symbol -> FactorScore, covering only symbols that
+            cleared the coverage threshold.
         """
         symbols = list(heatmap_data.keys())
+        self.last_excluded = {}
         if not symbols:
             return {}
 
         has_fundamentals = fundamental_data is not None and len(fundamental_data) > 0
-        weights = FACTOR_WEIGHTS if has_fundamentals else DEGRADED_WEIGHTS
 
         # --- Extract raw factor values ---
         momentum_raw: list[float | None] = []
@@ -204,36 +284,45 @@ class FactorModel:
             d = heatmap_data[sym]
             det: dict[str, Any] = {}
 
-            # Momentum: composite of 5d (30%), 20d (50%), 60d (20%)
-            r5 = d.get("return_5d") or d.get("change_5d")
-            r20 = d.get("return_20d") or d.get("change_20d")
-            r60 = d.get("return_60d") or d.get("change_60d")
-            if r5 is not None and r20 is not None:
-                r60_val = r60 if r60 is not None else 0.0
-                mom = float(r5) * 0.3 + float(r20) * 0.5 + float(r60_val) * 0.2
+            # Momentum: composite of 5d (30%), 20d (50%), 60d (20%).
+            # Whichever windows are present are renormalized among themselves;
+            # a missing window is never substituted with 0.0 ("flat").
+            returns = {
+                "5d": _first_present(d, "return_5d", "change_5d"),
+                "20d": _first_present(d, "return_20d", "change_20d"),
+                "60d": _first_present(d, "return_60d", "change_60d"),
+            }
+            present = {k: v for k, v in returns.items() if v is not None}
+            sub_coverage = sum(_MOMENTUM_SUBWEIGHTS[k] for k in present)
+            if present and sub_coverage >= MIN_MOMENTUM_COVERAGE:
+                mom = (
+                    sum(_MOMENTUM_SUBWEIGHTS[k] * v for k, v in present.items())
+                    / sub_coverage
+                )
                 momentum_raw.append(mom)
                 det["momentum_composite"] = round(mom, 4)
+                det["momentum_windows"] = sorted(present)
             else:
                 momentum_raw.append(None)
+                det["momentum_windows"] = sorted(present)
 
             # Volume ratio
-            vr = d.get("volume_ratio")
-            volume_raw.append(float(vr) if vr is not None else None)
+            vr = _first_present(d, "volume_ratio")
+            volume_raw.append(vr)
             det["volume_ratio"] = vr
 
             # Volatility (lower is better — will be inverted)
-            vol = d.get("volatility_20d")
-            volatility_raw.append(float(vol) if vol is not None else None)
+            vol = _first_present(d, "volatility_20d")
+            volatility_raw.append(vol)
             det["volatility_20d"] = vol
 
             # Technical: RSI mean-reversion signal
             # Oversold (<30) = bullish -> high score; Overbought (>70) = bearish -> low score
-            rsi = d.get("rsi_14") or d.get("rsi")
+            rsi = _first_present(d, "rsi_14", "rsi")
             if rsi is not None:
-                rsi_val = float(rsi)
                 # Invert RSI: 100 - RSI so that oversold maps to high values
-                technical_raw.append(100.0 - rsi_val)
-                det["rsi_14"] = rsi_val
+                technical_raw.append(100.0 - rsi)
+                det["rsi_14"] = rsi
             else:
                 technical_raw.append(None)
 
@@ -265,8 +354,14 @@ class FactorModel:
                 margins = fd.get("profit_margins")
                 dte = fd.get("debt_to_equity")
 
-                # For debt_to_equity, lower is better -> invert
-                inv_dte = (1.0 / (1.0 + dte)) if dte is not None and dte >= 0 else None
+                # For debt_to_equity, lower is better -> invert. yfinance
+                # reports D/E as a percentage (150.0 == 1.5x), so rescale
+                # before inverting; otherwise inv_dte collapses toward 0 and
+                # drags the average of roe/margins (both ~0-1) with it.
+                inv_dte = None
+                if dte is not None and dte >= 0:
+                    dte_ratio = dte / 100.0 if dte > 3.0 else float(dte)
+                    inv_dte = 1.0 / (1.0 + dte_ratio)
                 components = [
                     v for v in [roe, margins, inv_dte] if v is not None
                 ]
@@ -290,33 +385,67 @@ class FactorModel:
         value_pct = _zscore_to_percentile(value_raw)
         quality_pct = _zscore_to_percentile(quality_raw)
 
-        # --- Compute weighted composite ---
+        by_factor: dict[str, list[float | None]] = {
+            "momentum": momentum_pct,
+            "value": value_pct,
+            "quality": quality_pct,
+            "volatility": volatility_pct,
+            "volume": volume_pct,
+            "technical": technical_pct,
+        }
+
+        # --- Compute weighted composite over measured factors only ---
         result: dict[str, FactorScore] = {}
         for i, sym in enumerate(symbols):
-            composite = (
-                momentum_pct[i] * weights["momentum"]
-                + value_pct[i] * weights["value"]
-                + quality_pct[i] * weights["quality"]
-                + volatility_pct[i] * weights["volatility"]
-                + volume_pct[i] * weights["volume"]
-                + technical_pct[i] * weights["technical"]
+            measured: dict[str, float] = {}
+            for name in FACTOR_NAMES:
+                value = by_factor[name][i]
+                if value is not None:
+                    measured[name] = value
+            missing = [name for name in FACTOR_NAMES if name not in measured]
+            coverage = sum(FACTOR_WEIGHTS[name] for name in measured)
+
+            if coverage < MIN_FACTOR_COVERAGE:
+                # Not enough measured evidence to rank this symbol at all.
+                self.last_excluded[sym] = round(coverage, 3)
+                continue
+
+            # Renormalize the surviving weights so they sum to 1.0.
+            effective = {
+                name: FACTOR_WEIGHTS[name] / coverage for name in measured
+            }
+            composite = sum(
+                measured[name] * weight for name, weight in effective.items()
             )
+
+            details = details_per_symbol[i]
+            details["coverage"] = round(coverage, 3)
+            details["missing_factors"] = missing
+
             result[sym] = FactorScore(
                 symbol=sym,
                 composite_score=round(composite, 2),
+                coverage=coverage,
                 momentum_score=momentum_pct[i],
                 value_score=value_pct[i],
                 quality_score=quality_pct[i],
                 volatility_score=volatility_pct[i],
                 volume_score=volume_pct[i],
                 technical_score=technical_pct[i],
-                factor_details=details_per_symbol[i],
+                factors_used=sorted(measured),
+                missing_factors=missing,
+                effective_weights=effective,
+                factor_details=details,
             )
 
         logger.info(
-            "Factor scores computed for %d symbols (fundamentals=%s)",
+            "Factor scores computed for %d/%d symbols (fundamentals=%s); "
+            "%d excluded below %.0f%% coverage",
             len(result),
+            len(symbols),
             has_fundamentals,
+            len(self.last_excluded),
+            MIN_FACTOR_COVERAGE * 100,
         )
         return result
 
@@ -403,19 +532,30 @@ class FactorModel:
     ) -> list[dict]:
         """Return top N candidates sorted by composite score with factor breakdown.
 
+        Symbols whose measured factors cover less than ``MIN_FACTOR_COVERAGE``
+        of the total weight are never returned, even if a caller hands in a
+        score dict assembled elsewhere: a composite built on too little
+        evidence must not compete with one built on the full factor set.
+
         Args:
             scores: Dict mapping symbol -> FactorScore.
             top_n: Number of top candidates to return.
 
         Returns:
-            List of dicts with symbol, composite_score, and factor breakdown.
+            List of dicts with symbol, composite_score, coverage, and the
+            factor breakdown.
         """
-        sorted_scores = sorted(
-            scores.values(),
-            key=lambda s: s.composite_score,
-            reverse=True,
-        )
-        return [s.to_dict() for s in sorted_scores[:top_n]]
+        eligible = [
+            s for s in scores.values() if s.coverage >= MIN_FACTOR_COVERAGE
+        ]
+        dropped = len(scores) - len(eligible)
+        if dropped:
+            logger.info(
+                "rank_candidates dropped %d symbol(s) below %.0f%% factor coverage",
+                dropped, MIN_FACTOR_COVERAGE * 100,
+            )
+        eligible.sort(key=lambda s: s.composite_score, reverse=True)
+        return [s.to_dict() for s in eligible[:top_n]]
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,7 @@ from analysis.agents.universe_builder import get_screening_universe
 from analysis.context_builder import MarketContextBuilder as ContextBuilder
 from analysis.alpha_synthesis import synthesize_alpha_run
 from analysis.sectors import SECTOR_ETFS
+from data.adapters.evidence import evidence_is_usable
 from data.adapters.yahoo import yahoo_adapter
 from models.alpha_engine import (
     AnalysisRun,
@@ -890,6 +891,177 @@ def _thesis_type(technical: float, fundamental: float, valuation: float, flow: f
     return "setup", 45
 
 
+#: Composite factor weights. They sum to 1.00, and `_score_with_evidence()`
+#: renormalizes over whichever factors are usable so that property survives a
+#: missing source.
+_FACTOR_WEIGHTS: dict[str, float] = {
+    "technical": 0.28,
+    "fundamental": 0.20,
+    "valuation": 0.12,
+    "flow": 0.10,
+    "sentiment": 0.08,
+    "macro": 0.10,
+    "catalyst": 0.07,
+    "liquidity": 0.05,
+}
+
+_RISK_PENALTY_WEIGHT = 0.14
+
+
+def _driver_value(score: float | None) -> str:
+    """Render an optional adapter score for `key_drivers`.
+
+    'n/a' is deliberate: an unavailable source must not read as a zero score.
+    """
+    return "n/a" if score is None else f"{score:.0f}"
+
+
+@dataclass
+class _EvidenceScoring:
+    """Result of folding adapter evidence into the composite."""
+
+    fundamental_score: float
+    flow_proxy: float
+    catalyst_score: float
+    positive: float
+    data_completeness: float
+    adapter_scores: dict[str, float | None]
+    usable_factors: list[str]
+    applied_weights: dict[str, float]
+
+
+def _score_with_evidence(
+    *,
+    tech_score: float,
+    fundamental_score: float,
+    valuation_score: float,
+    flow_proxy: float,
+    sentiment_score: float,
+    macro_score: float,
+    catalyst_score: float,
+    liquidity_score: float,
+    fundamental_notes: list[str],
+    fundamental_data: dict[str, Any] | None,
+    options_flow_data: Any,
+    short_interest_data: Any,
+    analyst_revision_data: Any,
+    has_technical: bool,
+    has_rich_technical: bool,
+    has_volume_ratio: bool,
+    has_sentiment: bool,
+) -> _EvidenceScoring:
+    """Blend adapter evidence into the factors and build the composite.
+
+    Two rules, both of which the previous inline version broke:
+
+    1. A source contributes only when it is *usable*. Gating on ``score > 0``
+       let an unavailable analyst-revisions record -- which carried a hardcoded
+       50.0 -- pull `fundamental_score` toward neutral for every symbol with no
+       analyst coverage.
+    2. Unusable evidence is dropped, never substituted with a neutral value. The
+       composite weights are renormalized over the usable factors, so a symbol
+       scored from fewer sources is scored honestly rather than diluted toward
+       50 -- and `data_completeness` records that fewer sources were used.
+
+    Consequence worth stating: for a given source, an *unavailable* record and
+    an *absent* record produce exactly the same output.
+    """
+    fundamentals_usable = bool(fundamental_data)
+    options_usable = evidence_is_usable(options_flow_data)
+    short_usable = evidence_is_usable(short_interest_data)
+    revisions_usable = evidence_is_usable(analyst_revision_data)
+
+    def _adapter_score(record: Any, key: str, usable: bool) -> float | None:
+        if not usable or not isinstance(record, dict):
+            return None
+        raw = record.get(key)
+        return float(raw) if raw is not None else None
+
+    options_flow_score = _adapter_score(options_flow_data, "signal_score", options_usable)
+    short_interest_score = _adapter_score(short_interest_data, "squeeze_score", short_usable)
+    revision_score = _adapter_score(analyst_revision_data, "revision_score", revisions_usable)
+
+    if options_flow_score is not None:
+        flow_proxy = _clamp((flow_proxy + options_flow_score) / 2.0, 0.0, 100.0)
+    if short_interest_score is not None:
+        catalyst_score = _clamp((catalyst_score + short_interest_score) / 2.0, 0.0, 100.0)
+    if revision_score is not None:
+        fundamental_score = _clamp((fundamental_score * 0.7) + (revision_score * 0.3), 0.0, 100.0)
+        catalyst_score = _clamp((catalyst_score * 0.8) + (revision_score * 0.2), 0.0, 100.0)
+
+    # For high-quality growth companies, absence of retail flow is not a negative
+    # signal. Floor at 35 (neutral) so WSB silence doesn't sink fundamentally
+    # strong innovators.
+    if "growth_mode" in fundamental_notes and fundamental_score >= 65 and flow_proxy < 35.0:
+        flow_proxy = 35.0
+
+    fundamentals = fundamental_data if isinstance(fundamental_data, dict) else {}
+    completeness_flags = [
+        True,  # price history -- callers only reach here with a series
+        has_technical,
+        has_rich_technical,
+        fundamentals_usable,
+        options_usable,
+        short_usable,
+        revisions_usable,
+        has_volume_ratio,
+        has_sentiment,
+        fundamentals.get("target_mean_price") is not None,
+        fundamentals.get("market_cap") is not None,
+    ]
+    data_completeness = sum(1 for flag in completeness_flags if flag) / len(completeness_flags)
+
+    # A factor is usable when at least one real source fed it. `flow` and
+    # `technical` come from the price series, `macro` from the regime, so they
+    # are always present; the rest depend on evidence that may be missing.
+    factor_values: dict[str, float] = {
+        "technical": tech_score,
+        "fundamental": fundamental_score,
+        "valuation": valuation_score,
+        "flow": flow_proxy,
+        "sentiment": sentiment_score,
+        "macro": macro_score,
+        "catalyst": catalyst_score,
+        "liquidity": liquidity_score,
+    }
+    factor_usable: dict[str, bool] = {
+        "technical": True,
+        "fundamental": fundamentals_usable or revisions_usable,
+        "valuation": fundamentals_usable,
+        "flow": True,
+        "sentiment": has_sentiment,
+        "macro": True,
+        "catalyst": fundamentals_usable or short_usable or revisions_usable,
+        "liquidity": fundamentals_usable,
+    }
+
+    applied_weights = {name: weight for name, weight in _FACTOR_WEIGHTS.items() if factor_usable[name]}
+    total_weight = sum(applied_weights.values())
+    if total_weight <= 0:  # pragma: no cover - `technical` is always usable
+        positive = 0.0
+        applied_weights = {}
+    else:
+        applied_weights = {name: weight / total_weight for name, weight in applied_weights.items()}
+        positive = sum(weight * factor_values[name] for name, weight in applied_weights.items())
+
+    return _EvidenceScoring(
+        fundamental_score=fundamental_score,
+        flow_proxy=flow_proxy,
+        catalyst_score=catalyst_score,
+        positive=positive,
+        data_completeness=data_completeness,
+        adapter_scores={
+            "options_flow": options_flow_score,
+            "short_interest": short_interest_score,
+            "analyst_revisions": revision_score,
+        },
+        usable_factors=sorted(applied_weights),
+        # Kept unrounded so the weights provably still sum to 1.00; callers
+        # round at the serialization boundary.
+        applied_weights=applied_weights,
+    )
+
+
 async def _build_portfolio_overlay(
     db: AsyncSession,
     candidate_rows: list[ScoredCandidate],
@@ -1071,25 +1243,32 @@ async def run_daily_factor_scoring(
         sentiment_score, sentiment_evidence = _sentiment_score(symbol, sentiment_lookup, news_lookup)
         macro_score = _macro_alignment_score(regime.name, sector)
 
-        options_flow_score = float(options_flow_data.get("signal_score") or 0.0) if isinstance(options_flow_data, dict) else 0.0
-        short_interest_score = float(short_interest_data.get("squeeze_score") or 0.0) if isinstance(short_interest_data, dict) else 0.0
-        revision_score = float(analyst_revision_data.get("revision_score") or 0.0) if isinstance(analyst_revision_data, dict) else 0.0
-        if options_flow_score > 0:
-            flow_proxy = _clamp((flow_proxy + options_flow_score) / 2.0, 0.0, 100.0)
-        if short_interest_score > 0:
-            catalyst_score = _clamp((catalyst_score + short_interest_score) / 2.0, 0.0, 100.0)
-        if revision_score > 0:
-            fundamental_score = _clamp((fundamental_score * 0.7) + (revision_score * 0.3), 0.0, 100.0)
-            catalyst_score = _clamp((catalyst_score * 0.8) + (revision_score * 0.2), 0.0, 100.0)
-
-        # For high-quality growth companies, absence of retail flow is not a negative signal.
-        # Floor at 35 (neutral) so WSB silence doesn't sink fundamentally strong innovators.
-        if (
-            "growth_mode" in fundamental_notes
-            and fundamental_score >= 65
-            and flow_proxy < 35.0
-        ):
-            flow_proxy = 35.0
+        scoring = _score_with_evidence(
+            tech_score=tech_score,
+            fundamental_score=fundamental_score,
+            valuation_score=valuation_score,
+            flow_proxy=flow_proxy,
+            sentiment_score=sentiment_score,
+            macro_score=macro_score,
+            catalyst_score=catalyst_score,
+            liquidity_score=liquidity_score,
+            fundamental_notes=fundamental_notes,
+            fundamental_data=fundamental_data,
+            options_flow_data=options_flow_data,
+            short_interest_data=short_interest_data,
+            analyst_revision_data=analyst_revision_data,
+            has_technical=bool(technical_data),
+            has_rich_technical=bool(rich_data),
+            has_volume_ratio=_volume_ratio(history, 20) is not None,
+            has_sentiment=sentiment_evidence.get("source_kind") != "none",
+        )
+        fundamental_score = scoring.fundamental_score
+        flow_proxy = scoring.flow_proxy
+        catalyst_score = scoring.catalyst_score
+        options_flow_score = scoring.adapter_scores["options_flow"]
+        short_interest_score = scoring.adapter_scores["short_interest"]
+        revision_score = scoring.adapter_scores["analyst_revisions"]
+        data_completeness = scoring.data_completeness
 
         prediction_boost = 0.0
         predictions = context.get("predictions") or {}
@@ -1101,32 +1280,8 @@ async def run_daily_factor_scoring(
                             prediction_boost = 5.0
                             break
 
-        data_completeness_flags = [
-            bool(history),
-            bool(technical_data),
-            bool(rich_data),
-            bool(fundamental_data),
-            bool(options_flow_data),
-            bool(short_interest_data),
-            bool(analyst_revision_data),
-            _volume_ratio(history, 20) is not None,
-            symbol in sentiment_lookup,
-            bool(fundamental_data.get("target_mean_price") if isinstance(fundamental_data, dict) else None),
-            bool(fundamental_data.get("market_cap") if isinstance(fundamental_data, dict) else None),
-        ]
-        data_completeness = sum(1 for flag in data_completeness_flags if flag) / len(data_completeness_flags)
-
-        positive = (
-            0.28 * tech_score
-            + 0.20 * fundamental_score
-            + 0.12 * valuation_score
-            + 0.10 * flow_proxy
-            + 0.08 * sentiment_score
-            + 0.10 * macro_score
-            + 0.07 * catalyst_score
-            + 0.05 * liquidity_score
-        )
-        overall = positive - (0.14 * risk_score)
+        positive = scoring.positive
+        overall = positive - (_RISK_PENALTY_WEIGHT * risk_score)
         if prediction_boost:
             overall += prediction_boost
         overall *= (0.70 + 0.30 * data_completeness)
@@ -1183,9 +1338,9 @@ async def run_daily_factor_scoring(
             f"fund:{fundamental_score:.0f}",
             f"val:{valuation_score:.0f}",
             f"flow:{flow_proxy:.0f}",
-            f"optflow:{options_flow_score:.0f}",
-            f"short:{short_interest_score:.0f}",
-            f"rev:{revision_score:.0f}",
+            f"optflow:{_driver_value(options_flow_score)}",
+            f"short:{_driver_value(short_interest_score)}",
+            f"rev:{_driver_value(revision_score)}",
             f"sent:{sentiment_score:.0f}",
             f"macro:{macro_score:.0f}",
             f"catalyst:{catalyst_score:.0f}",
@@ -1209,6 +1364,12 @@ async def run_daily_factor_scoring(
             "sector_performance": sector_performance.get(sector_etf, {}) if sector_etf else {},
             "prediction_boost": prediction_boost,
             "completeness": round(data_completeness, 3),
+            "factor_coverage": {
+                "usable_factors": scoring.usable_factors,
+                "applied_weights": {
+                    name: round(weight, 4) for name, weight in scoring.applied_weights.items()
+                },
+            },
         }
 
         subscores = {
@@ -1216,9 +1377,10 @@ async def run_daily_factor_scoring(
             "fundamental": round(fundamental_score, 2),
             "valuation": round(valuation_score, 2),
             "flow": round(flow_proxy, 2),
-            "options_flow": round(options_flow_score, 2),
-            "short_interest": round(short_interest_score, 2),
-            "analyst_revisions": round(revision_score, 2),
+            # None means "no usable evidence", which is not the same as 0.
+            "options_flow": round(options_flow_score, 2) if options_flow_score is not None else None,
+            "short_interest": round(short_interest_score, 2) if short_interest_score is not None else None,
+            "analyst_revisions": round(revision_score, 2) if revision_score is not None else None,
             "sentiment": round(sentiment_score, 2),
             "macro": round(macro_score, 2),
             "catalyst": round(catalyst_score, 2),
@@ -1297,17 +1459,10 @@ async def run_daily_factor_scoring(
             "candidate_rows": len(candidate_rows),
             "top_symbol": scored[0].symbol if scored else None,
             "top_score": scored[0].overall_score if scored else None,
-            "factor_weights": {
-                "technical": 0.28,
-                "fundamental": 0.20,
-                "valuation": 0.12,
-                "flow": 0.10,
-                "sentiment": 0.08,
-                "macro": 0.10,
-                "catalyst": 0.07,
-                "liquidity": 0.05,
-                "risk_penalty": 0.14,
-            },
+            # Base weights. Per-symbol weights are renormalized over the factors
+            # backed by usable evidence; see each candidate's
+            # evidence["factor_coverage"].
+            "factor_weights": {**_FACTOR_WEIGHTS, "risk_penalty": _RISK_PENALTY_WEIGHT},
             "portfolio_overlay": overlay,
         },
     }

@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from analysis.price_freshness import build_freshness, price_line
+
 logger = logging.getLogger(__name__)
 
 
@@ -405,8 +407,17 @@ def format_macro_context(market_data: dict) -> str:
     if market_summary:
         market_index = market_summary.get("market_index", {})
         if market_index:
+            index_symbol = market_index.get("symbol", "SPY")
+            # The context builder dates and re-quotes the benchmark and attaches
+            # the record; derive one only for a hand-built market_data dict.
+            index_freshness = market_index.get("freshness") or build_freshness(
+                index_symbol,
+                market_index.get("date"),
+                market_index.get("current"),
+                "db_close",
+            )
             context_parts.append("\n=== MARKET INDEX (SPY) ===")
-            context_parts.append(f"Current: ${market_index.get('current', 0):.2f}")
+            context_parts.append(price_line(index_freshness, label="Last Close"))
             context_parts.append(f"Change: {market_index.get('change_pct', 0):+.2f}%")
             context_parts.append(f"Volume: {market_index.get('volume', 0):,}")
 

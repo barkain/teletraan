@@ -6,6 +6,20 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from analysis.price_freshness import (
+    build_freshness,
+    describe,
+    is_usable,
+    price_line,
+    snapshot_price,
+    stale_warning,
+)
+from analysis.symbol_slice import (
+    format_peer_comparison,
+    slice_context_for_symbol,
+    target_banner,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -207,6 +221,11 @@ def _format_volatility_context(rich_ta: dict) -> str:
 
     for symbol, data in sorted(rich_ta.items()):
         latest_price = data.get("latest_price", 0)
+        # This price comes from yfinance, independently of the stored bars the
+        # rest of the prompt uses; date it so the two can be compared.
+        price_freshness = build_freshness(
+            symbol, data.get("latest_date"), latest_price or None, "yfinance_history",
+        )
         vol_data = data.get("volatility", {})
         volume_data = data.get("volume", {})
         signal_summary = data.get("signal_summary", {})
@@ -217,8 +236,17 @@ def _format_volatility_context(rich_ta: dict) -> str:
         # --- ATR ---
         atr = vol_data.get("atr_14")
         if atr is not None:
-            atr_pct = (atr / latest_price * 100) if latest_price else 0
-            section_parts.append(f"  ATR (14): ${atr:.2f} ({atr_pct:.1f}% of price)")
+            if latest_price and is_usable(price_freshness):
+                atr_pct = atr / latest_price * 100
+                section_parts.append(
+                    f"  ATR (14): ${atr:.2f} ({atr_pct:.1f}% of the "
+                    f"{price_freshness.get('latest_bar_date')} price)"
+                )
+            else:
+                section_parts.append(
+                    f"  ATR (14): ${atr:.2f} (% of price withheld -- "
+                    "no current price to measure against)"
+                )
 
         # --- Bollinger Bands ---
         bb = vol_data.get("bollinger", {})
@@ -300,7 +328,7 @@ def _format_volatility_context(rich_ta: dict) -> str:
             section_parts.append(f"  Volatility Sub-Score: {vol_score:.1f}")
 
         if section_parts:
-            lines.append(f"\n--- {symbol} (Price: ${latest_price:.2f}) ---")
+            lines.append(f"\n--- {symbol} (Price: ${latest_price:.2f} {describe(price_freshness)}) ---")
             lines.extend(section_parts)
 
     if len(lines) <= 1:
@@ -309,7 +337,7 @@ def _format_volatility_context(rich_ta: dict) -> str:
     return "\n".join(lines)
 
 
-def format_risk_context(market_data: dict) -> str:
+def format_risk_context(market_data: dict, target_symbol: str | None = None) -> str:
     """
     Format volatility and risk data for analyst consumption.
 
@@ -323,11 +351,21 @@ def format_risk_context(market_data: dict) -> str:
             - market_summary: Overall market status
             - rich_technical: (optional) Dict mapping symbols to rich TA data
             Or legacy format with vix_data, price_data, portfolio, correlations.
+        target_symbol: The one symbol this analysis is about.  When given, the
+            price/volatility section covers only that symbol and the others move
+            into a labelled comparison block; sector performance and economic
+            risk factors stay shared.  When omitted, every symbol is rendered as
+            before.
 
     Returns:
         Formatted string context for the risk analyst prompt.
     """
     context_parts = []
+
+    if target_symbol:
+        market_data = slice_context_for_symbol(market_data, target_symbol)
+        context_parts.append(target_banner(target_symbol))
+        context_parts.append("")
 
     # Check for new context builder format
     price_history = market_data.get("price_history", {})
@@ -353,13 +391,23 @@ def format_risk_context(market_data: dict) -> str:
             if stock_info.get("sector"):
                 context_parts.append(f"Sector: {stock_info.get('sector')}")
 
-            # Current price from most recent data (prices sorted descending)
+            # The reconciled snapshot drives every derived risk metric below.
+            # The bar at index 0 is whatever the last ingest stored -- calling
+            # its high/low "Today's" was wrong whenever the ETL had lagged.
             latest = prices[0]
-            current_price = float(latest.get("close", 0))
-            context_parts.append(f"Current Price: ${current_price:.2f}")
-            context_parts.append(f"Today's High: ${latest.get('high', 0):.2f}")
-            context_parts.append(f"Today's Low: ${latest.get('low', 0):.2f}")
-            context_parts.append(f"Volume: {latest.get('volume', 0):,}")
+            current_price, freshness = snapshot_price(market_data, symbol)
+            if not current_price:
+                current_price = float(latest.get("close", 0))
+
+            warning = stale_warning(freshness)
+            if warning:
+                context_parts.append(warning)
+            context_parts.append(price_line(freshness, label="Last Close"))
+
+            bar_date = str(latest.get("date", ""))[:10] or "unknown date"
+            context_parts.append(f"Session High ({bar_date}): ${latest.get('high', 0):.2f}")
+            context_parts.append(f"Session Low ({bar_date}): ${latest.get('low', 0):.2f}")
+            context_parts.append(f"Volume ({bar_date}): {latest.get('volume', 0):,}")
 
             # Calculate historical volatility from price data
             if len(prices) >= 21:
@@ -396,8 +444,11 @@ def format_risk_context(market_data: dict) -> str:
                 if recent_lows and recent_highs:
                     support = min(recent_lows)
                     resistance = max(recent_highs)
-                    context_parts.append(f"20-Period Support: ${support:.2f}")
-                    context_parts.append(f"20-Period Resistance: ${resistance:.2f}")
+                    window_start = str(prices[19].get("date", ""))[:10] or "?"
+                    window_end = str(prices[0].get("date", ""))[:10] or "?"
+                    window = f"window {window_start} to {window_end}"
+                    context_parts.append(f"20-Period Support: ${support:.2f} ({window})")
+                    context_parts.append(f"20-Period Resistance: ${resistance:.2f} ({window})")
 
             # Technical indicators for this symbol (e.g., ATR)
             indicators = technical_indicators.get(symbol, {})
@@ -407,11 +458,17 @@ def format_risk_context(market_data: dict) -> str:
                         value = ind_data.get("value")
                         if value is not None:
                             if ind_type.lower() == "atr":
-                                if current_price > 0:
+                                if current_price > 0 and is_usable(freshness):
                                     atr_pct = (value / current_price) * 100
-                                    context_parts.append(f"ATR (14-day): ${value:.2f} ({atr_pct:.1f}% of price)")
+                                    context_parts.append(
+                                        f"ATR (14-day): ${value:.2f} ({atr_pct:.1f}% of the "
+                                        f"{freshness.get('latest_bar_date')} price)"
+                                    )
                                 else:
-                                    context_parts.append(f"ATR (14-day): ${value:.2f}")
+                                    context_parts.append(
+                                        f"ATR (14-day): ${value:.2f} (% of price withheld -- "
+                                        "no current price to measure against)"
+                                    )
                             elif ind_type.lower() == "rsi":
                                 context_parts.append(f"RSI: {value:.1f}")
                             elif "bollinger" in ind_type.lower():
@@ -426,11 +483,21 @@ def format_risk_context(market_data: dict) -> str:
         market_summary = market_data.get("market_summary", {})
         market_index = market_summary.get("market_index", {})
         if market_index:
+            index_symbol = market_index.get("symbol", "SPY")
+            # The context builder dates and re-quotes the benchmark and attaches
+            # the record; derive one only for a hand-built market_data dict.
+            index_freshness = market_index.get("freshness") or build_freshness(
+                index_symbol,
+                market_index.get("date"),
+                market_index.get("current"),
+                "db_close",
+            )
+            index_date = index_freshness.get("latest_bar_date") or "unknown date"
             context_parts.append("\n=== MARKET INDEX (SPY) ===")
-            context_parts.append(f"Current: ${market_index.get('current', 0):.2f}")
+            context_parts.append(price_line(index_freshness, label="Last Close"))
             context_parts.append(f"Change: {market_index.get('change_pct', 0):+.2f}%")
-            context_parts.append(f"High: ${market_index.get('high', 0):.2f}")
-            context_parts.append(f"Low: ${market_index.get('low', 0):.2f}")
+            context_parts.append(f"Session High ({index_date}): ${market_index.get('high', 0):.2f}")
+            context_parts.append(f"Session Low ({index_date}): ${market_index.get('low', 0):.2f}")
 
         # Sector performance for diversification context
         sector_performance = market_data.get("sector_performance", {})
@@ -481,7 +548,19 @@ def format_risk_context(market_data: dict) -> str:
             for symbol, data in market_data["price_data"].items():
                 context_parts.append(f"\n--- {symbol} ---")
                 if "current_price" in data:
-                    context_parts.append(f"Current Price: ${data['current_price']:.2f}")
+                    # Legacy payload: date it off whatever the caller supplied
+                    # so it still cannot be printed as an undated "current" price.
+                    context_parts.append(
+                        price_line(
+                            build_freshness(
+                                symbol,
+                                data.get("as_of") or data.get("date"),
+                                data["current_price"],
+                                "db_close",
+                            ),
+                            label="Last Close",
+                        )
+                    )
                 if "historical_vol_30d" in data:
                     context_parts.append(f"30-Day Historical Vol: {data['historical_vol_30d']:.1f}%")
                 if "historical_vol_90d" in data:
@@ -565,6 +644,14 @@ def format_risk_context(market_data: dict) -> str:
         if sentiment_text:
             context_parts.append("")
             context_parts.append(sentiment_text)
+
+    # Peers go last and under their own heading -- everything above this line
+    # is the target's own data.
+    if target_symbol:
+        peer_block = format_peer_comparison(market_data)
+        if peer_block:
+            context_parts.append("")
+            context_parts.append(peer_block)
 
     return "\n".join(context_parts)
 

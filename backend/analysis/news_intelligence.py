@@ -9,18 +9,28 @@ sentiment the analysis pipeline consumes, per issue #20:
 - news-vacuum detection (symbols with sparse coverage — potential surprises)
 - ``format_news_context`` renders the LLM-prompt block the synthesis agents read
 
+Records carry a ``data_status`` (``ok`` / ``empty`` / ``error``) and an
+``available`` flag propagated from the adapter, because "the feed failed" and
+"there was genuinely no news" are different facts: only the second is a quiet
+tape. A failed fetch must never surface as NEUTRAL sentiment and must never be
+counted as a news vacuum — that would turn an outage into a tradeable signal.
+
 This is a scoring augmentation for the deep analysis, not a user-facing feed.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any
 
-from analysis.sentiment.scorer import get_sentiment_scorer
-from data.adapters.news import get_news_adapter
+from analysis.sentiment.scorer import get_sentiment_scorer  # type: ignore[import-not-found]
+from data.adapters.news import (  # type: ignore[import-not-found]
+    STATUS_EMPTY,
+    STATUS_ERROR,
+    STATUS_OK,
+    get_news_adapter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,18 +134,46 @@ def score_articles(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return scored
 
 
+def unavailable_record(symbol: str, reason: str = "fetch failed") -> dict[str, Any]:
+    """A record meaning "we could not read the news", not "the news was neutral".
+
+    ``sentiment_score`` is None rather than 0.0 so no consumer can average or
+    threshold an outage into a signal, and the label is UNAVAILABLE rather than
+    NEUTRAL. ``available`` is the flag callers should branch on.
+    """
+    return {
+        "symbol": symbol.upper(),
+        "sentiment_score": None,
+        "label": "UNAVAILABLE",
+        "article_count": 0,
+        "trend": "UNKNOWN",
+        "events": [],
+        "top_article": None,
+        "articles": [],
+        "data_status": STATUS_ERROR,
+        "available": False,
+        "unavailable_reason": reason,
+    }
+
+
 def compute_symbol_news_intelligence(
     symbol: str,
     articles: list[dict[str, Any]],
     days: int = 7,
+    status: str = STATUS_OK,
 ) -> dict[str, Any]:
     """Aggregate a symbol's articles into a news-intelligence record.
 
     Returns keys: symbol, sentiment_score, label, article_count, trend,
-    events, top_article, articles (scored, newest first). Empty coverage
-    yields a zeroed record with trend STABLE.
+    events, top_article, articles (scored, newest first), plus data_status and
+    available. Empty *successful* coverage yields a zeroed record with trend
+    STABLE; a *failed* fetch (``status=STATUS_ERROR``) yields an unavailable
+    record instead — see ``unavailable_record``.
     """
     symbol = symbol.upper()
+    if status == STATUS_ERROR:
+        return unavailable_record(symbol)
+
     scored = score_articles(articles)
     if not scored:
         return {
@@ -147,6 +185,8 @@ def compute_symbol_news_intelligence(
             "events": [],
             "top_article": None,
             "articles": [],
+            "data_status": STATUS_EMPTY,
+            "available": True,
         }
 
     now = datetime.now(timezone.utc)
@@ -184,6 +224,8 @@ def compute_symbol_news_intelligence(
             "sentiment_score": top["sentiment_score"],
         },
         "articles": scored,
+        "data_status": STATUS_OK,
+        "available": True,
     }
 
 
@@ -216,10 +258,35 @@ def detect_news_vacuum(
     intelligence_by_symbol: dict[str, dict[str, Any]],
     threshold: int = _VACUUM_THRESHOLD,
 ) -> list[str]:
-    """Symbols with sparse coverage (< threshold articles) — surprise risk."""
+    """Symbols with sparse coverage (< threshold articles) — surprise risk.
+
+    Symbols whose feed failed are excluded: a vacuum is a claim about the world
+    (nobody is writing about this name), and an outage is no evidence for it.
+    Records without a status are assumed fetched, so pre-status callers are
+    unaffected.
+    """
     return sorted(
         sym for sym, intel in intelligence_by_symbol.items()
-        if intel.get("article_count", 0) < threshold
+        if intel.get("available", True)
+        and intel.get("data_status", STATUS_OK) != STATUS_ERROR
+        and intel.get("article_count", 0) < threshold
+    )
+
+
+def _is_unavailable(record: dict[str, Any] | None) -> bool:
+    """True when *record* represents a failed fetch rather than a reading."""
+    if not record:
+        return False
+    return record.get("data_status") == STATUS_ERROR or record.get("available") is False
+
+
+def unavailable_symbols(
+    intelligence_by_symbol: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Symbols whose news feed failed — coverage unknown, not zero."""
+    return sorted(
+        sym for sym, intel in intelligence_by_symbol.items()
+        if intel.get("data_status") == STATUS_ERROR or intel.get("available") is False
     )
 
 
@@ -230,19 +297,34 @@ async def get_news_intelligence(
 ) -> dict[str, Any]:
     """Fetch + score news for *symbols* and the market. The pipeline entry point.
 
-    Returns a persistable dict: {as_of, market, per_symbol, vacuum}.
+    Returns a persistable dict: {as_of, market, per_symbol, vacuum, unavailable}.
+    ``vacuum`` lists only symbols we successfully checked; ``unavailable`` lists
+    symbols whose feed failed.
     """
     adapter = get_news_adapter()
     uniq = list(dict.fromkeys(s.upper().strip() for s in symbols if s and s.strip()))
 
-    news_by_symbol, market_articles = await _gather(adapter, uniq, days, limit_per_symbol)
+    news_by_symbol, market = await _gather(adapter, uniq, days, limit_per_symbol)
 
     per_symbol: dict[str, dict[str, Any]] = {
-        sym: compute_symbol_news_intelligence(sym, articles, days=days)
-        for sym, articles in news_by_symbol.items()
+        sym: compute_symbol_news_intelligence(
+            sym,
+            record.get("articles") or [],
+            days=days,
+            status=record.get("status", STATUS_OK),
+        )
+        for sym, record in news_by_symbol.items()
     }
     vacuum = detect_news_vacuum(per_symbol)
-    market_intel = compute_symbol_news_intelligence("MARKET", market_articles, days=days)
+    unavailable = unavailable_symbols(per_symbol)
+    if unavailable:
+        logger.warning("News feed unavailable for %s", ", ".join(unavailable))
+    market_intel = compute_symbol_news_intelligence(
+        "MARKET",
+        market.get("articles") or [],
+        days=days,
+        status=market.get("status", STATUS_OK),
+    )
 
     return {
         "as_of": datetime.now(timezone.utc).isoformat(),
@@ -251,6 +333,8 @@ async def get_news_intelligence(
             "label": market_intel["label"],
             "article_count": market_intel["article_count"],
             "trend": market_intel["trend"],
+            "data_status": market_intel["data_status"],
+            "available": market_intel["available"],
             "top_headlines": [
                 {"headline": a["headline"], "source": a["source"],
                  "sentiment_label": a["sentiment_label"]}
@@ -259,6 +343,7 @@ async def get_news_intelligence(
         },
         "per_symbol": [per_symbol[s] for s in uniq if s in per_symbol],
         "vacuum": vacuum,
+        "unavailable": unavailable,
     }
 
 
@@ -276,14 +361,31 @@ _MACRO_TOPIC_LABELS: dict[str, str] = {
 async def get_macro_news_intelligence(days: int = 3, limit: int = 40) -> dict[str, Any]:
     """Fetch + score macro-economic news into a regime-relevant signal.
 
-    Returns {as_of, sentiment_score, label, article_count, by_topic, top_headlines}.
-    by_topic maps each macro topic -> {label, article_count, sentiment_score,
-    sentiment_label, top_headline}. Best-effort: returns a zeroed record on
-    failure (the adapter never raises).
+    Returns {as_of, sentiment_score, label, article_count, by_topic,
+    top_headlines, data_status, available}. by_topic maps each macro topic ->
+    {label, article_count, sentiment_score, sentiment_label, top_headline}.
+    Best-effort: the adapter never raises. A failed fetch returns an
+    UNAVAILABLE record (score None) rather than a NEUTRAL zero, so an outage
+    cannot be read as a calm macro backdrop.
     """
     adapter = get_news_adapter()
-    articles = await adapter.get_macro_news(days=days, limit=limit)
-    scored = score_articles(articles)
+    fetched = await adapter.get_macro_news_with_status(days=days, limit=limit)
+    status = fetched.get("status", STATUS_OK)
+
+    if status == STATUS_ERROR:
+        logger.warning("Macro news feed unavailable — reporting UNAVAILABLE, not neutral")
+        return {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "sentiment_score": None,
+            "label": "UNAVAILABLE",
+            "article_count": 0,
+            "by_topic": {},
+            "top_headlines": [],
+            "data_status": STATUS_ERROR,
+            "available": False,
+        }
+
+    scored = score_articles(fetched.get("articles") or [])
 
     if not scored:
         return {
@@ -293,6 +395,8 @@ async def get_macro_news_intelligence(days: int = 3, limit: int = 40) -> dict[st
             "article_count": 0,
             "by_topic": {},
             "top_headlines": [],
+            "data_status": STATUS_EMPTY,
+            "available": True,
         }
 
     now = datetime.now(timezone.utc)
@@ -322,6 +426,8 @@ async def get_macro_news_intelligence(days: int = 3, limit: int = 40) -> dict[st
         "label": _label(agg),
         "article_count": len(scored),
         "by_topic": by_topic,
+        "data_status": STATUS_OK,
+        "available": True,
         "top_headlines": [
             {"headline": a["headline"], "source": a["source"],
              "sentiment_label": a["sentiment_label"],
@@ -334,9 +440,20 @@ async def get_macro_news_intelligence(days: int = 3, limit: int = 40) -> dict[st
 def format_macro_news_context(macro: dict[str, Any] | None) -> str:
     """Render macro-news intelligence into a markdown block for the MacroScanner.
 
-    Returns '' when there is no usable data so the caller can omit the section.
+    Returns '' when there is no usable data so the caller can omit the section,
+    except on a fetch failure, which is stated explicitly — silently rendering
+    nothing there would let the model assume a quiet macro tape.
     """
-    if not macro or not macro.get("article_count"):
+    if not macro:
+        return ""
+    if macro.get("data_status") == STATUS_ERROR or macro.get("available") is False:
+        return (
+            "## Macro-Economic News\n"
+            "**Macro news feed UNAVAILABLE** — the headline fetch failed for this run. "
+            "Macro-news tone is UNKNOWN, not neutral: do not infer a calm news "
+            "backdrop from its absence, and do not let it move regime confidence."
+        )
+    if not macro.get("article_count"):
         return ""
     lines = [
         "## Macro-Economic News",
@@ -362,13 +479,16 @@ def format_macro_news_context(macro: dict[str, Any] | None) -> str:
 
 
 async def _gather(adapter: Any, symbols: list[str], days: int, limit_per_symbol: int):
+    """Fetch per-symbol and market news as status-bearing records."""
     import asyncio
-    news_by_symbol, market_articles = await asyncio.gather(
-        adapter.get_company_news_batch(symbols, days=days, limit_per_symbol=limit_per_symbol)
+    news_by_symbol, market = await asyncio.gather(
+        adapter.get_company_news_batch_with_status(
+            symbols, days=days, limit_per_symbol=limit_per_symbol
+        )
         if symbols else _empty_dict(),
-        adapter.get_market_news(days=min(days, 3)),
+        adapter.get_market_news_with_status(days=min(days, 3)),
     )
-    return news_by_symbol, market_articles
+    return news_by_symbol, market
 
 
 async def _empty_dict() -> dict[str, Any]:
@@ -391,7 +511,12 @@ def format_news_context(intelligence: dict[str, Any] | None, max_symbols: int = 
 
     lines: list[str] = []
     market = intelligence.get("market") or {}
-    if market.get("article_count"):
+    if _is_unavailable(market):
+        lines.append(
+            "**Market News Tone:** UNAVAILABLE — the market-news fetch failed. "
+            "Tone is unknown, not neutral; do not weigh it either way."
+        )
+    elif market.get("article_count"):
         lines.append(
             f"**Market News Tone:** {market.get('label', 'NEUTRAL')} "
             f"(score {market.get('sentiment_score', 0):+.2f}, "
@@ -405,7 +530,11 @@ def format_news_context(intelligence: dict[str, Any] | None, max_symbols: int = 
     raw_per_symbol = intelligence.get("per_symbol", [])
     if isinstance(raw_per_symbol, dict):
         raw_per_symbol = list(raw_per_symbol.values())
-    per_symbol = [s for s in raw_per_symbol if isinstance(s, dict) and s.get("article_count")]
+    records = [s for s in raw_per_symbol if isinstance(s, dict)]
+    unavailable = [str(s.get("symbol") or "?") for s in records if _is_unavailable(s)]
+    per_symbol = [
+        s for s in records if not _is_unavailable(s) and s.get("article_count")
+    ]
     if per_symbol:
         lines.append("")
         lines.append("**Per-Symbol News Sentiment (recent window):**")
@@ -419,7 +548,16 @@ def format_news_context(intelligence: dict[str, Any] | None, max_symbols: int = 
             if top and top.get("headline"):
                 lines.append(f"    Top: \"{top['headline']}\" ({top.get('source', '')})")
 
-    vacuum = intelligence.get("vacuum") or []
+    if unavailable:
+        lines.append("")
+        lines.append(
+            "**News Feed UNAVAILABLE (fetch failed — coverage unknown, NOT a news "
+            "vacuum):** " + ", ".join(unavailable[:20])
+        )
+
+    # Never present an unavailable symbol as a vacuum, even if a caller passed a
+    # vacuum list built before the statuses were known.
+    vacuum = [s for s in (intelligence.get("vacuum") or []) if s not in unavailable]
     if vacuum:
         lines.append("")
         lines.append(

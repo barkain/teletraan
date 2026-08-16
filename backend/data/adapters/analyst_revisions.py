@@ -19,6 +19,12 @@ from typing import Any
 
 import yfinance as yf  # type: ignore[import-untyped]
 
+from data.adapters.evidence import (
+    STATUS_OK,
+    STATUS_PARTIAL,
+    STATUS_UNAVAILABLE,
+    utc_now_iso,
+)
 from data.adapters.finnhub import finnhub_adapter
 
 logger = logging.getLogger(__name__)
@@ -26,6 +32,27 @@ logger = logging.getLogger(__name__)
 _CACHE_TTL = 60 * 60
 _MAX_WORKERS = 4
 _NON_EQUITY_PATTERNS = ("=F", "^", "-USD", "=X")
+
+#: yfinance ``info`` keys that actually carry analyst opinion. As elsewhere, a
+#: non-empty ``info`` dict proves nothing -- yfinance returns
+#: ``{'trailingPegRatio': None}`` for symbols it has no coverage for.
+_ANALYST_INFO_FIELDS = (
+    "recommendationMean",
+    "recommendationKey",
+    "targetMeanPrice",
+    "targetHighPrice",
+    "targetLowPrice",
+    "numberOfAnalystOpinions",
+)
+
+#: Weights for the two scoring components. They are renormalized over whichever
+#: components are present, so an all-neutral input lands on 50 rather than the
+#: 42.5 the unnormalized 0.55/0.30 pair used to produce.
+_TREND_WEIGHT = 0.55
+_RECOMMENDATION_WEIGHT = 0.30
+
+#: Evidence buckets counted for coverage: trend history, recommendation, target.
+_COVERAGE_BUCKETS = 3
 
 
 def _is_equity_symbol(symbol: str) -> bool:
@@ -57,13 +84,20 @@ class AnalystRevisionSignal:
     target_upside_pct: float | None
     latest_trend: dict[str, Any] | None = None
     trend_history: list[dict[str, Any]] = field(default_factory=list)
+    # Evidence contract (see data/adapters/evidence.py). `as_of` is kept as the
+    # legacy key; `fetched_at`/`status`/`coverage` are additive.
+    status: str = STATUS_UNAVAILABLE
+    coverage: float = 0.0
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "as_of": self.as_of,
+            "fetched_at": self.as_of,
             "available": self.available,
+            "status": self.status,
+            "coverage": self.coverage,
             "revision_score": self.revision_score,
             "recommendation_key": self.recommendation_key,
             "recommendation_mean": self.recommendation_mean,
@@ -97,16 +131,18 @@ class AnalystRevisionAdapter:
         return await loop.run_in_executor(self._executor, func, *args)
 
     @staticmethod
-    def _score_recommendation_mean(rec_mean: float | None) -> float:
+    def _score_recommendation_mean(rec_mean: float | None) -> float | None:
+        """Score a consensus rating, or None when there is no rating to score."""
         if rec_mean is None:
-            return 50.0
+            return None
         # 1=strong buy, 5=strong sell
         return max(0.0, min(100.0, 100.0 - ((rec_mean - 1.0) / 4.0) * 100.0))
 
     @staticmethod
-    def _trend_score(trends: list[dict[str, Any]]) -> tuple[float, dict[str, Any] | None]:
+    def _trend_score(trends: list[dict[str, Any]]) -> tuple[float | None, dict[str, Any] | None]:
+        """Score revision momentum, or None when there is no trend history."""
         if not trends:
-            return 50.0, None
+            return None, None
 
         latest = trends[0]
         latest_buy = float(latest.get("buy", 0) or 0) + float(latest.get("strongBuy", 0) or 0)
@@ -136,17 +172,7 @@ class AnalystRevisionAdapter:
             return cached
 
         if not _is_equity_symbol(symbol):
-            signal = AnalystRevisionSignal(
-                symbol=symbol,
-                as_of=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                available=False,
-                revision_score=50.0,
-                recommendation_key=None,
-                recommendation_mean=None,
-                target_mean_price=None,
-                target_upside_pct=None,
-                notes=["non_equity_symbol"],
-            )
+            signal = self._empty_signal(symbol, note="non_equity_symbol")
             self._set_cached(cache_key, signal)
             return signal
 
@@ -165,6 +191,15 @@ class AnalystRevisionAdapter:
             logger.debug("Analyst revision yfinance fetch failed for %s: %s", symbol, exc)
             info = {}
 
+        present_fields = [key for key in _ANALYST_INFO_FIELDS if info.get(key) is not None]
+        if not trends and not present_fields:
+            # Nothing to score. The old code still emitted 42.5 here (the
+            # unnormalized 0.55+0.30 weights applied to two neutral 50s), which
+            # downstream read as a real, mildly bearish revision signal.
+            signal = self._empty_signal(symbol, note="no_analyst_coverage")
+            self._set_cached(cache_key, signal)
+            return signal
+
         recommendation_mean = info.get("recommendationMean")
         recommendation_key = info.get("recommendationKey")
         target_mean_price = info.get("targetMeanPrice")
@@ -182,7 +217,21 @@ class AnalystRevisionAdapter:
             except Exception:
                 upside_pct = None
 
-        score = 0.55 * trend_score + 0.30 * rec_score
+        # Renormalize over the components we actually have, so a missing
+        # component leaves the score where the present ones put it instead of
+        # dragging it toward zero.
+        weighted: list[tuple[float, float]] = []
+        if trend_score is not None:
+            weighted.append((_TREND_WEIGHT, trend_score))
+        if rec_score is not None:
+            weighted.append((_RECOMMENDATION_WEIGHT, rec_score))
+        if weighted:
+            total_weight = sum(weight for weight, _ in weighted)
+            score = sum(weight * value for weight, value in weighted) / total_weight
+        else:
+            # Only price-target evidence: start neutral and let the upside and
+            # rating adjustments below move it.
+            score = 50.0
         if upside_pct is not None:
             score += max(-10.0, min(10.0, upside_pct / 10.0))
         if recommendation_key:
@@ -202,10 +251,20 @@ class AnalystRevisionAdapter:
         if trends:
             notes.append(f"trend_months={len(trends)}")
 
+        buckets_present = sum(
+            1
+            for present in (
+                bool(trends),
+                recommendation_mean is not None or recommendation_key is not None,
+                target_mean_price is not None,
+            )
+            if present
+        )
+
         signal = AnalystRevisionSignal(
             symbol=symbol,
-            as_of=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            available=bool(trends or info),
+            as_of=utc_now_iso(),
+            available=True,
             revision_score=round(max(0.0, min(100.0, score)), 2),
             recommendation_key=str(recommendation_key) if recommendation_key is not None else None,
             recommendation_mean=float(recommendation_mean) if recommendation_mean is not None else None,
@@ -213,11 +272,36 @@ class AnalystRevisionAdapter:
             target_upside_pct=round(upside_pct, 2) if upside_pct is not None else None,
             latest_trend=latest_trend,
             trend_history=trends,
+            status=STATUS_OK if buckets_present == _COVERAGE_BUCKETS else STATUS_PARTIAL,
+            coverage=round(buckets_present / _COVERAGE_BUCKETS, 4),
             notes=notes,
         )
 
         self._set_cached(cache_key, signal)
         return signal
+
+    @staticmethod
+    def _empty_signal(symbol: str, *, note: str) -> AnalystRevisionSignal:
+        """No analyst evidence: no score at all.
+
+        The score is 0.0 rather than the old 50.0 so that the three signal
+        adapters share one convention (options flow and short interest already
+        used 0.0); consumers must gate on `available`/`status`, never on the
+        number.
+        """
+        return AnalystRevisionSignal(
+            symbol=symbol,
+            as_of=utc_now_iso(),
+            available=False,
+            revision_score=0.0,
+            recommendation_key=None,
+            recommendation_mean=None,
+            target_mean_price=None,
+            target_upside_pct=None,
+            status=STATUS_UNAVAILABLE,
+            coverage=0.0,
+            notes=[note],
+        )
 
     async def get_symbol_revisions(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
         if not symbols:

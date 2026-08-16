@@ -16,6 +16,14 @@ from typing import Any
 
 import yfinance as yf  # type: ignore[import-untyped]
 
+from data.adapters.evidence import (
+    STATUS_ERROR,
+    STATUS_OK,
+    STATUS_PARTIAL,
+    STATUS_UNAVAILABLE,
+    utc_now_iso,
+)
+
 logger = logging.getLogger(__name__)
 
 _CACHE_TTL = 30 * 60
@@ -26,6 +34,48 @@ _NON_EQUITY_PATTERNS = ("=F", "^", "-USD", "=X")
 def _is_equity_symbol(symbol: str) -> bool:
     upper = symbol.upper()
     return not any(pat in upper for pat in _NON_EQUITY_PATTERNS)
+
+
+def _to_float(value: Any) -> float | None:
+    """Coerce a chain cell to a float, treating NaN/None/junk as missing.
+
+    yfinance leaves ``volume``/``openInterest`` as NaN for untraded strikes, and
+    NaN is truthy -- ``float(row.get("volume") or 0)`` happily yields NaN and
+    ``int(NaN)`` then raises.  Now that we walk the whole chain instead of the
+    first twelve strikes, those rows are the common case, not the exception.
+    """
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if result != result or result in (float("inf"), float("-inf")):  # NaN / inf
+        return None
+    return result
+
+
+def _to_int(value: Any) -> int:
+    result = _to_float(value)
+    return int(result) if result is not None else 0
+
+
+def _weighted_average_iv(samples: list[tuple[float, int]]) -> float | None:
+    """Open-interest weighted mean implied volatility.
+
+    A flat mean over a full chain is dominated by the wings of the volatility
+    smile, which would add a near-constant positive tilt to `signal_score` now
+    that we read every strike. Weighting by open interest concentrates the
+    average where the contracts actually are, i.e. near the money. Falls back to
+    a flat mean when no strike carries open interest.
+    """
+    if not samples:
+        return None
+    total_weight = sum(oi for _, oi in samples if oi > 0)
+    if total_weight:
+        weighted = sum(iv * oi for iv, oi in samples if oi > 0)
+        return round(weighted / total_weight, 4)
+    return round(sum(iv for iv, _ in samples) / len(samples), 4)
 
 
 class _CacheEntry:
@@ -68,6 +118,12 @@ class OptionsFlowSignal:
     as_of: str
     available: bool
     expirations_scanned: int
+    # Evidence contract (see data/adapters/evidence.py). `as_of` is kept as the
+    # legacy key; `fetched_at`/`status`/`coverage` are additive.
+    status: str
+    coverage: float
+    contracts_parsed: int
+    chains_failed: int
     call_volume: int
     put_volume: int
     call_open_interest: int
@@ -84,7 +140,12 @@ class OptionsFlowSignal:
         return {
             "symbol": self.symbol,
             "as_of": self.as_of,
+            "fetched_at": self.as_of,
             "available": self.available,
+            "status": self.status,
+            "coverage": self.coverage,
+            "contracts_parsed": self.contracts_parsed,
+            "chains_failed": self.chains_failed,
             "expirations_scanned": self.expirations_scanned,
             "call_volume": self.call_volume,
             "put_volume": self.put_volume,
@@ -129,61 +190,70 @@ class OptionsFlowAdapter:
             return cached
 
         if not _is_equity_symbol(symbol):
-            signal = OptionsFlowSignal(
-                symbol=symbol,
-                as_of=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                available=False,
-                expirations_scanned=0,
-                call_volume=0,
-                put_volume=0,
-                call_open_interest=0,
-                put_open_interest=0,
-                call_put_volume_ratio=None,
-                call_put_oi_ratio=None,
-                average_iv=None,
-                sentiment="neutral",
-                signal_score=0.0,
-                notes=["non_equity_symbol"],
+            signal = self._empty_signal(
+                symbol,
+                status=STATUS_UNAVAILABLE,
+                note="non_equity_symbol",
             )
             self._set_cached(cache_key, signal)
             return signal
 
         ticker = yf.Ticker(symbol)
 
+        expiry_fetch_failed = False
         try:
             expiries = await self._run_blocking(lambda t=ticker: list(getattr(t, "options", []) or []))
         except Exception as exc:
             logger.debug("Options flow: failed to load expirations for %s: %s", symbol, exc)
             expiries = []
+            expiry_fetch_failed = True
+
+        if not expiries:
+            signal = self._empty_signal(
+                symbol,
+                status=STATUS_ERROR if expiry_fetch_failed else STATUS_UNAVAILABLE,
+                note="expiry_fetch_failed" if expiry_fetch_failed else "no_expirations",
+            )
+            self._set_cached(cache_key, signal)
+            return signal
 
         expiries = expiries[: max(1, expirations)]
         total_call_volume = 0
         total_put_volume = 0
         total_call_oi = 0
         total_put_oi = 0
-        iv_values: list[float] = []
+        # (implied_vol, open_interest) pairs -- see the OI weighting below.
+        iv_samples: list[tuple[float, int]] = []
         contracts: list[OptionsContract] = []
+        chains_ok = 0
+        chains_failed = 0
 
         for expiry in expiries:
             try:
                 chain = await self._run_blocking(lambda t=ticker, e=expiry: t.option_chain(e))
             except Exception as exc:
                 logger.debug("Options flow: failed to load chain for %s %s: %s", symbol, expiry, exc)
+                chains_failed += 1
                 continue
 
+            rows_this_chain = 0
             for option_type, frame in (("call", getattr(chain, "calls", None)), ("put", getattr(chain, "puts", None))):
                 if frame is None or getattr(frame, "empty", True):
                     continue
-                for _, row in frame.head(12).iterrows():
-                    volume = int(float(row.get("volume") or 0))
-                    open_interest = int(float(row.get("openInterest") or 0))
-                    implied_vol = row.get("impliedVolatility")
+                # Total over the COMPLETE chain for each selected expiry. The
+                # previous `frame.head(12)` took the twelve lowest strikes --
+                # deep-ITM calls and deep-OTM puts -- which is not a sample of
+                # the chain at all: for AAPL it reported a call/put volume ratio
+                # of 1.02 against a true 2.52, inverting the signal. Expiry
+                # count (`expirations`) stays the liquidity window; within an
+                # expiry every listed strike counts.
+                for _, row in frame.iterrows():
+                    volume = _to_int(row.get("volume"))
+                    open_interest = _to_int(row.get("openInterest"))
+                    implied_vol = _to_float(row.get("impliedVolatility"))
                     if implied_vol is not None:
-                        try:
-                            iv_values.append(float(implied_vol))
-                        except Exception:
-                            pass
-                    strike = float(row.get("strike") or 0.0)
+                        iv_samples.append((implied_vol, open_interest))
+                    strike = _to_float(row.get("strike")) or 0.0
                     contract_symbol = str(row.get("contractSymbol") or "")
                     contracts.append(
                         OptionsContract(
@@ -193,9 +263,10 @@ class OptionsFlowAdapter:
                             strike=strike,
                             volume=volume,
                             open_interest=open_interest,
-                            implied_volatility=float(implied_vol) if implied_vol is not None else None,
+                            implied_volatility=implied_vol,
                         )
                     )
+                    rows_this_chain += 1
                     if option_type == "call":
                         total_call_volume += volume
                         total_call_oi += open_interest
@@ -203,11 +274,31 @@ class OptionsFlowAdapter:
                         total_put_volume += volume
                         total_put_oi += open_interest
 
+            if rows_this_chain:
+                chains_ok += 1
+            else:
+                chains_failed += 1
+
         total_volume = total_call_volume + total_put_volume
         total_oi = total_call_oi + total_put_oi
+
+        # A chain we could not read is not a balanced chain. Emitting the
+        # neutral 50 below for zero parsed rows is what let a total fetch
+        # failure look like "no directional edge".
+        if not contracts or (total_volume == 0 and total_oi == 0):
+            signal = self._empty_signal(
+                symbol,
+                status=STATUS_ERROR if chains_failed and not chains_ok else STATUS_UNAVAILABLE,
+                note="all_chains_failed" if chains_failed and not chains_ok else "empty_chains",
+                expirations_scanned=len(expiries),
+                chains_failed=chains_failed,
+            )
+            self._set_cached(cache_key, signal)
+            return signal
+
         vol_ratio = round(total_call_volume / total_put_volume, 2) if total_put_volume else (float("inf") if total_call_volume else None)
         oi_ratio = round(total_call_oi / total_put_oi, 2) if total_put_oi else (float("inf") if total_call_oi else None)
-        average_iv = round(sum(iv_values) / len(iv_values), 4) if iv_values else None
+        average_iv = _weighted_average_iv(iv_samples)
 
         imbalance = 0.0
         if total_volume:
@@ -223,6 +314,9 @@ class OptionsFlowAdapter:
             notes.append(f"oi_ratio={oi_ratio}")
         if average_iv is not None:
             notes.append(f"avg_iv={average_iv:.4f}")
+        notes.append(f"contracts_parsed={len(contracts)}")
+        if chains_failed:
+            notes.append(f"chains_failed={chains_failed}")
 
         raw_score = 50.0 + imbalance * 35.0 + oi_imbalance * 20.0
         if average_iv is not None:
@@ -238,9 +332,13 @@ class OptionsFlowAdapter:
 
         signal = OptionsFlowSignal(
             symbol=symbol,
-            as_of=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            available=bool(expiries),
-            expirations_scanned=len(expiries),
+            as_of=utc_now_iso(),
+            available=True,
+            status=STATUS_OK if not chains_failed else STATUS_PARTIAL,
+            coverage=round(chains_ok / len(expiries), 4),
+            contracts_parsed=len(contracts),
+            chains_failed=chains_failed,
+            expirations_scanned=chains_ok,
             call_volume=total_call_volume,
             put_volume=total_put_volume,
             call_open_interest=total_call_oi,
@@ -256,6 +354,38 @@ class OptionsFlowAdapter:
 
         self._set_cached(cache_key, signal)
         return signal
+
+    @staticmethod
+    def _empty_signal(
+        symbol: str,
+        *,
+        status: str,
+        note: str,
+        expirations_scanned: int = 0,
+        chains_failed: int = 0,
+    ) -> OptionsFlowSignal:
+        """No usable chain: no score, so downstream gating cannot mistake this
+        for a balanced market."""
+        return OptionsFlowSignal(
+            symbol=symbol,
+            as_of=utc_now_iso(),
+            available=False,
+            status=status,
+            coverage=0.0,
+            contracts_parsed=0,
+            chains_failed=chains_failed,
+            expirations_scanned=expirations_scanned,
+            call_volume=0,
+            put_volume=0,
+            call_open_interest=0,
+            put_open_interest=0,
+            call_put_volume_ratio=None,
+            call_put_oi_ratio=None,
+            average_iv=None,
+            sentiment="unknown",
+            signal_score=0.0,
+            notes=[note],
+        )
 
     async def get_symbol_flows(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
         if not symbols:

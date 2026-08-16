@@ -35,6 +35,7 @@ from models.insight_conversation import (
 from models.insight_research_context import InsightResearchContext
 
 from analysis.context_builder import market_context_builder
+from analysis.price_freshness import build_freshness, price_line, resolve_snapshot
 
 
 logger = logging.getLogger(__name__)
@@ -512,7 +513,20 @@ class FollowUpResearchLauncher:
         summary = context.get("market_summary", {})
         market_index = summary.get("market_index", {})
         if market_index:
-            parts.append(f"\nSPY: ${market_index.get('current', 0):.2f}")
+            benchmark_symbol = market_index.get("symbol", "SPY")
+            # The context builder dates and re-quotes the benchmark; fall back to
+            # deriving the record so a hand-built context is still dated.
+            benchmark_freshness = (
+                market_index.get("freshness")
+                or resolve_snapshot(context, benchmark_symbol)
+                or build_freshness(
+                    benchmark_symbol, market_index.get("date"),
+                    market_index.get("current"), "db_close",
+                )
+            )
+            parts.append(
+                f"\n{price_line(benchmark_freshness, label=f'{benchmark_symbol} Last Close')}"
+            )
             parts.append(f"Change: {market_index.get('change_pct', 0):+.2f}%")
 
         # Price history summary
@@ -520,7 +534,13 @@ class FollowUpResearchLauncher:
         for symbol, prices in list(price_history.items())[:5]:
             if prices:
                 latest = prices[0]
-                parts.append(f"\n{symbol}: ${latest.get('close', 0):.2f}")
+                # Date the quote off the reconciled snapshot, falling back to the
+                # bar it was read from so the number and its date always agree.
+                freshness = resolve_snapshot(context, symbol) or build_freshness(
+                    symbol, latest.get("date"), latest.get("close"),
+                    latest.get("source") or "db_close",
+                )
+                parts.append(f"\n{price_line(freshness, label=symbol)}")
 
         # Technical indicators summary
         tech_indicators = context.get("technical_indicators", {})

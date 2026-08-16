@@ -19,6 +19,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from analysis.price_freshness import (
+    build_freshness,
+    price_line,
+    resolve_snapshot,
+)
 from analysis.sectors import get_sector_etfs, SECTOR_ETFS  # noqa: F401 (re-exported for backwards compat)
 
 logger = logging.getLogger(__name__)
@@ -514,6 +519,44 @@ def calculate_momentum(sector_data: dict[str, SectorData]) -> dict[str, Momentum
     return momentum
 
 
+def _date_span(dates: list[str]) -> str:
+    """Render a set of bar dates as one date, or as the range they cover."""
+    return dates[0] if len(dates) == 1 else f"{dates[0]}..{dates[-1]}"
+
+
+def _return_window_note(sector_performance: dict[str, Any]) -> str:
+    """State which bars the Weekly/Monthly columns actually span.
+
+    Those columns are computed from stored daily bars, so a gap in the price
+    history silently stretches them -- a "Weekly" return can cover two months
+    when the ETL has been down.  Naming the base bars keeps the column headers
+    from overstating the window.  Returns ``""`` for data that predates the
+    base-date fields.
+    """
+    def _collect(key: str) -> list[str]:
+        return sorted({
+            m[key] for m in sector_performance.values()
+            if isinstance(m, dict) and m.get(key)
+        })
+
+    week_bases = _collect("week_base_date")
+    month_bases = _collect("month_base_date")
+    if not week_bases and not month_bases:
+        return ""
+
+    parts: list[str] = []
+    if week_bases:
+        parts.append(f"Weekly from the {_date_span(week_bases)} close")
+    if month_bases:
+        parts.append(f"Monthly from the {_date_span(month_bases)} close")
+
+    note = "Return windows: " + ", ".join(parts)
+    ends = _collect("as_of")
+    if ends:
+        note += f", both ending at the {_date_span(ends)} close"
+    return note + "."
+
+
 def format_sector_rotator_context(
     market_data: dict[str, Any],
     macro_context: dict[str, Any] | None = None,
@@ -593,6 +636,11 @@ def format_sector_rotator_context(
 
         context_parts.append("")
 
+        window_note = _return_window_note(sector_performance)
+        if window_note:
+            context_parts.append(window_note)
+            context_parts.append("")
+
         # Calculate and display relative strength vs SPY
         spy_performance = sector_performance.get("SPY", {})
         if spy_performance:
@@ -645,9 +693,20 @@ def format_sector_rotator_context(
     market_summary = market_data.get("market_summary", {})
     market_index = market_summary.get("market_index", {})
     if market_index:
+        benchmark_symbol = market_index.get("symbol", "SPY")
+        # The context builder dates and re-quotes the benchmark; fall back to
+        # deriving the record so a hand-built market_data dict is still dated.
+        benchmark_freshness = (
+            market_index.get("freshness")
+            or resolve_snapshot(market_data, benchmark_symbol)
+            or build_freshness(
+                benchmark_symbol, market_index.get("date"),
+                market_index.get("current"), "db_close",
+            )
+        )
         context_parts.append("## Benchmark (SPY)")
         context_parts.append("")
-        context_parts.append(f"Current Price: ${market_index.get('current', 0):.2f}")
+        context_parts.append(price_line(benchmark_freshness, label="Last Close"))
         context_parts.append(f"Daily Change: {market_index.get('change_pct', 0):+.2f}%")
         context_parts.append(f"Volume: {market_index.get('volume', 0):,}")
         context_parts.append("")

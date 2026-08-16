@@ -24,12 +24,25 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from data.adapters.evidence import evidence_is_usable
 from database import async_session_factory
 from models import Stock, PriceHistory, TechnicalIndicator, EconomicIndicator
 from models.statistical_feature import StatisticalFeature
 
 from .sectors import SECTOR_ETFS
 from .memory_service import InstitutionalMemoryService
+from .price_freshness import (
+    STALE_AFTER_TRADING_DAYS,
+    STATUS_MISSING,
+    STATUS_REFRESHED,
+    STATUS_STALE,
+    build_freshness,
+    coerce_date,
+    last_weekday,
+    missing_freshness,
+    reconcile,
+    trading_days_between,
+)
 
 # ---------------------------------------------------------------------------
 # Optional rich technical analysis — graceful degradation if pandas_ta absent
@@ -79,6 +92,15 @@ except ImportError:
     _HAS_NEWS = False
 
 logger = logging.getLogger(__name__)
+
+# Upper bound on live re-quotes per context build, so a long-lagging DB cannot
+# turn one context build into hundreds of Yahoo requests.
+MAX_REFRESH_SYMBOLS = 50
+
+# Separate, much smaller bound for the benchmark/sector-ETF refresh: that set is
+# the index plus the eleven sector SPDRs, so anything beyond this is a bug in the
+# ETF configuration rather than a legitimate fan-out.
+MAX_BENCHMARK_REFRESH_SYMBOLS = 15
 
 
 def _flatten_indicators_for_scorer(raw: dict[str, Any]) -> dict[str, Any]:
@@ -227,6 +249,10 @@ class MarketContextBuilder:
             - timestamp: ISO format timestamp of when context was built
             - stocks: List of stock metadata dicts
             - price_history: Dict mapping symbols to OHLCV data
+            - price_freshness: Dict mapping symbols to freshness records
+                ({status, latest_bar_date, age_days, trading_age_days, price,
+                source, as_of, reason}) -- the reconciled price snapshot every
+                formatter must quote instead of an undated "current" price
             - technical_indicators: Dict mapping symbols to indicator values
             - rich_technical: (optional) Dict mapping symbols to rich TA data
             - predictions: (optional) Dict with prediction market data
@@ -235,8 +261,12 @@ class MarketContextBuilder:
                 {as_of, market, per_symbol: {SYMBOL: {...}}, vacuum: [...]}
             - fundamentals: (optional) Dict mapping symbols to fundamental data
             - economic_indicators: List of economic indicator readings
-            - sector_performance: Dict of sector ETF performance metrics
-            - market_summary: Overall market status summary
+            - sector_performance: Dict of sector ETF performance metrics, each
+                carrying its own ``freshness`` record and the base bar dates the
+                weekly/monthly returns are measured from
+            - market_summary: Overall market status summary; its ``market_index``
+                carries a ``freshness`` record of the same shape as
+                ``price_freshness`` entries
         """
         # Build a cache key from the call parameters so cache hits only occur
         # when the exact same query is repeated within the TTL window.
@@ -283,7 +313,7 @@ class MarketContextBuilder:
 
             if include_price_history:
                 tasks.append(self._get_price_history(db, symbols, stock_ids, days=price_history_days))
-                task_keys.append("price_history")
+                task_keys.append("_price_bundle")
 
             if include_technical:
                 tasks.append(self._get_technical_indicators(db, symbols, stock_ids))
@@ -308,6 +338,17 @@ class MarketContextBuilder:
                     else:
                         context[key] = result
 
+            # _get_price_history returns bars plus their freshness verdicts;
+            # split them into the two top-level, symbol-keyed context entries.
+            bundle = context.pop("_price_bundle", None)
+            if bundle is not None:
+                context["price_history"] = bundle.get("bars", {})
+                context["price_freshness"] = bundle.get("freshness", {})
+
+            # The benchmark and the sector ETFs come from their own queries and
+            # so miss the per-symbol refresh above; date and re-quote them here.
+            await self._refresh_benchmark_prices(context)
+
         # Rich technical analysis (pandas_ta-based composite scoring)
         if include_rich_technical and _HAS_RICH_TA:
             target_symbols = (
@@ -317,6 +358,7 @@ class MarketContextBuilder:
             context["rich_technical"] = await self._get_rich_technical(
                 target_symbols, context,
             )
+            self._reconcile_price_snapshots(context)
 
         # Prediction market data (Kalshi + Polymarket)
         if include_predictions and _HAS_PREDICTIONS:
@@ -631,6 +673,49 @@ class MarketContextBuilder:
 
         return results
 
+    def _reconcile_price_snapshots(self, context: dict[str, Any]) -> None:
+        """Fold the yfinance-sourced rich-TA price into the freshness records.
+
+        ``_get_price_history`` sources its price from the DB (or a live quote)
+        while ``_get_rich_technical`` independently pulls a 3-month yfinance
+        history and keeps its own ``latest_price``/``latest_date``.  Both used
+        to be printed in the same prompt with no indication they disagreed.
+        This picks the most recent of the two as *the* snapshot for the symbol,
+        so ``price_freshness`` is the single source every derived technical is
+        computed against.
+
+        Args:
+            context: The context dict being built; updated in place before it
+                is stored in the TTL cache.
+        """
+        rich = context.get("rich_technical") or {}
+        if not rich:
+            return
+
+        freshness: dict[str, Any] = context.setdefault("price_freshness", {})
+        for symbol, data in rich.items():
+            if not isinstance(data, dict):
+                continue
+            updated = reconcile(
+                freshness.get(symbol),
+                symbol,
+                data.get("latest_date"),
+                data.get("latest_price"),
+                "yfinance_history",
+            )
+            if updated is not None:
+                freshness[symbol] = updated
+
+        promoted = [
+            s for s, f in freshness.items()
+            if f.get("status") == STATUS_REFRESHED and f.get("source") == "yfinance_history"
+        ]
+        if promoted:
+            logger.info(
+                "Price freshness: %d symbol(s) recovered from rich-TA snapshot: %s",
+                len(promoted), ", ".join(sorted(promoted)[:10]),
+            )
+
     async def _get_fundamental_data(
         self,
         symbols: list[str] | None,
@@ -762,8 +847,17 @@ class MarketContextBuilder:
         symbols: list[str] | None,
         stock_ids: dict[str, int],
         days: int = 60,
-    ) -> dict[str, list[dict[str, Any]]]:
-        """Get price history for analysis.
+    ) -> dict[str, Any]:
+        """Get price history for analysis, with a per-symbol freshness verdict.
+
+        The stored ``PriceHistory`` table is only as current as the last ETL
+        run.  Reading it blind is how months-old closes ended up in analyst
+        prompts labelled "Current Price".  Any symbol whose newest stored bar
+        is more than ``STALE_AFTER_TRADING_DAYS`` trading days behind is
+        re-quoted from the live Yahoo adapter; the quote is prepended as a bar
+        so ``prices[0]`` is genuinely current.  Symbols that cannot be
+        refreshed are labelled ``stale`` rather than silently passed off as
+        current.
 
         Args:
             db: Database session.
@@ -772,7 +866,11 @@ class MarketContextBuilder:
             days: Number of days of history to retrieve.
 
         Returns:
-            Dict mapping symbols to lists of OHLCV data dictionaries.
+            Dict with two keys:
+            - ``bars``: Dict mapping symbols to lists of OHLCV dicts, newest
+              first (unchanged shape from before this contract).
+            - ``freshness``: Dict mapping symbols to freshness records (see
+              ``analysis.price_freshness.build_freshness``).
         """
         cutoff = datetime.utcnow() - timedelta(days=days)
         cutoff_date = cutoff.date()
@@ -804,9 +902,346 @@ class MarketContextBuilder:
                 "close": h.close,
                 "volume": h.volume,
                 "adjusted_close": h.adjusted_close,
+                "source": "db_close",
             })
 
-        return by_symbol
+        freshness = await self._assess_price_freshness(by_symbol, symbols, stock_ids)
+        return {"bars": by_symbol, "freshness": freshness}
+
+    async def _assess_price_freshness(
+        self,
+        by_symbol: dict[str, list[dict[str, Any]]],
+        symbols: list[str] | None,
+        stock_ids: dict[str, int],
+    ) -> dict[str, dict[str, Any]]:
+        """Date-stamp each symbol's newest bar and re-quote the stale ones.
+
+        Mutates *by_symbol* in place by prepending a live-quote bar for any
+        symbol successfully refreshed.  This runs during context construction,
+        before the result is handed to the ``build_context`` TTL cache, so no
+        cached dict is ever mutated after the fact.
+
+        Args:
+            by_symbol: Newest-first OHLCV bars grouped by symbol.
+            symbols: The symbols the caller asked for, if any.
+            stock_ids: Symbol -> stock id map for the active universe.
+
+        Returns:
+            Dict mapping symbol -> freshness record.
+        """
+        as_of = datetime.utcnow().date()
+
+        # Every symbol the caller cares about needs a verdict, including ones
+        # with no stored bars at all -- absent data must read as "missing",
+        # not as a silently omitted symbol.
+        universe = set(by_symbol)
+        if symbols:
+            universe.update(s.upper() for s in symbols)
+        else:
+            universe.update(stock_ids)
+
+        freshness: dict[str, dict[str, Any]] = {}
+        needs_refresh: list[str] = []
+
+        for symbol in sorted(universe):
+            bars = by_symbol.get(symbol) or []
+            if not bars:
+                freshness[symbol] = missing_freshness(
+                    symbol, "no stored price history", as_of=as_of,
+                )
+                needs_refresh.append(symbol)
+                continue
+
+            bar_date = coerce_date(bars[0].get("date"))
+            close = bars[0].get("close")
+            record = build_freshness(symbol, bar_date, close, "db_close", as_of=as_of)
+            freshness[symbol] = record
+            if record["status"] in (STATUS_STALE, "missing"):
+                needs_refresh.append(symbol)
+
+        if needs_refresh:
+            # Bound the fan-out: a cold or long-lagging DB would otherwise fire
+            # one live quote per active symbol on every context build.  Symbols
+            # beyond the cap keep their stale label, which is the honest answer.
+            refreshable = sorted(needs_refresh)[:MAX_REFRESH_SYMBOLS]
+            skipped = sorted(set(needs_refresh) - set(refreshable))
+            for symbol in skipped:
+                freshness[symbol]["reason"] = (
+                    f"live refresh skipped: more than {MAX_REFRESH_SYMBOLS} symbols "
+                    "were behind in this run"
+                )
+            if skipped:
+                logger.warning(
+                    "Price refresh capped at %d symbols; %d left stale",
+                    MAX_REFRESH_SYMBOLS, len(skipped),
+                )
+            await self._refresh_stale_prices(by_symbol, freshness, refreshable, as_of)
+
+        stale = [s for s, f in freshness.items() if f["status"] != "fresh"]
+        if stale:
+            logger.warning(
+                "Price freshness: %d/%d symbols not fresh (threshold %d trading days): %s",
+                len(stale), len(freshness), STALE_AFTER_TRADING_DAYS, ", ".join(sorted(stale)[:10]),
+            )
+
+        return freshness
+
+    async def _refresh_stale_prices(
+        self,
+        by_symbol: dict[str, list[dict[str, Any]]],
+        freshness: dict[str, dict[str, Any]],
+        symbols: list[str],
+        as_of: date_type,
+    ) -> None:
+        """Re-quote *symbols* from the live Yahoo adapter and update the records.
+
+        Reuses the adapter already used by the outcome tracker.  Failed symbols
+        come back with an ``error`` key rather than raising, and any symbol we
+        cannot re-quote keeps its ``stale``/``missing`` status -- the old bar is
+        never promoted to "current".
+        """
+        quote_date = last_weekday(as_of)
+
+        try:
+            from data.adapters.yahoo import yahoo_adapter
+
+            quotes = await yahoo_adapter.get_multiple_prices(symbols)
+        except Exception as exc:
+            logger.warning("Live price refresh failed for %d symbols: %s", len(symbols), exc)
+            for symbol in symbols:
+                freshness[symbol]["reason"] = f"live refresh failed: {exc}"
+            return
+
+        for symbol in symbols:
+            quote = quotes.get(symbol) or {}
+            price = quote.get("price")
+            if quote.get("error") or price is None:
+                freshness[symbol]["reason"] = (
+                    f"live refresh failed: {quote.get('error', 'no quote returned')}"
+                )
+                continue
+
+            price = float(price)
+            high = quote.get("day_high") or price
+            low = quote.get("day_low") or price
+            previous_close = quote.get("previous_close") or price
+
+            bars = by_symbol.setdefault(symbol, [])
+            existing_date = coerce_date(bars[0].get("date")) if bars else None
+            live_bar = {
+                "date": quote_date.isoformat(),
+                "open": float(previous_close),
+                "high": float(high),
+                "low": float(low),
+                "close": price,
+                "volume": int(quote.get("volume") or 0),
+                "adjusted_close": price,
+                "source": "live_quote",
+                "partial": True,
+            }
+            if existing_date is not None and existing_date >= quote_date:
+                bars[0] = live_bar
+            else:
+                bars.insert(0, live_bar)
+
+            gap = trading_days_between(existing_date, quote_date) if existing_date else None
+            reason = None
+            if gap and gap > STALE_AFTER_TRADING_DAYS:
+                reason = (
+                    f"stored history stops at {existing_date.isoformat()}; "
+                    f"{gap} trading days are missing between it and this quote"
+                )
+            freshness[symbol] = build_freshness(
+                symbol, quote_date, price, "live_quote", as_of=as_of,
+                refreshed=True, reason=reason,
+            )
+
+    async def _refresh_benchmark_prices(self, context: dict[str, Any]) -> None:
+        """Date-stamp the benchmark index and the sector ETFs, re-quoting stale ones.
+
+        ``_get_market_summary`` and ``_calculate_sector_performance`` read
+        ``PriceHistory`` through their own queries, so the per-symbol refresh in
+        :meth:`_assess_price_freshness` never covered them.  A run could hand an
+        analyst a correctly re-quoted AAPL next to a two-month-old SPY, and every
+        relative-strength judgement made against that benchmark was worthless.
+
+        Both blocks are annotated with a ``freshness`` record built by the same
+        :func:`build_freshness` contract used per symbol -- so ``price_line``
+        renders them identically -- and every block whose stored bar is behind is
+        re-quoted through :meth:`_refresh_stale_prices` in ONE batched adapter
+        call shared by the index and the ETFs.
+
+        Mutates *context* in place during construction, before ``build_context``
+        hands the dict to its five-minute TTL cache.
+
+        Args:
+            context: The context under construction; ``market_summary`` and
+                ``sector_performance`` are read and annotated when present.
+        """
+        as_of = datetime.utcnow().date()
+
+        # symbol -> the freshness record, and symbol -> the block it describes.
+        records: dict[str, dict[str, Any]] = {}
+        index_targets: dict[str, dict[str, Any]] = {}
+        sector_targets: dict[str, dict[str, Any]] = {}
+
+        market_index = (context.get("market_summary") or {}).get("market_index") or {}
+        if market_index:
+            symbol = str(market_index.get("symbol") or "SPY").upper()
+            records[symbol] = build_freshness(
+                symbol, market_index.get("date"), market_index.get("current"),
+                "db_close", as_of=as_of,
+            )
+            index_targets[symbol] = market_index
+
+        for raw_symbol, metrics in (context.get("sector_performance") or {}).items():
+            if not isinstance(metrics, dict):
+                continue
+            symbol = str(raw_symbol).upper()
+            if symbol in records:
+                # The benchmark doubling as a sector row would otherwise be
+                # quoted twice in the same batch.
+                sector_targets[symbol] = metrics
+                continue
+            records[symbol] = build_freshness(
+                symbol, metrics.get("as_of"), metrics.get("current_price"),
+                "db_close", as_of=as_of,
+            )
+            sector_targets[symbol] = metrics
+
+        if not records:
+            return
+
+        behind = sorted(
+            s for s, r in records.items()
+            if r["status"] in (STATUS_STALE, STATUS_MISSING)
+        )
+        refreshable = behind[:MAX_BENCHMARK_REFRESH_SYMBOLS]
+        for symbol in behind[len(refreshable):]:
+            records[symbol]["reason"] = (
+                f"live refresh skipped: more than {MAX_BENCHMARK_REFRESH_SYMBOLS} "
+                "benchmark symbols were behind in this run"
+            )
+
+        # ``_refresh_stale_prices`` wants the stored bars so it can report the
+        # gap it is jumping; one bar per symbol is all it reads.
+        bars: dict[str, list[dict[str, Any]]] = {
+            symbol: [{
+                "date": records[symbol]["latest_bar_date"],
+                "close": records[symbol]["price"],
+                "source": "db_close",
+            }]
+            for symbol in refreshable
+            if records[symbol]["latest_bar_date"]
+        }
+
+        if refreshable:
+            logger.info(
+                "Refreshing %d stale benchmark/sector prices: %s",
+                len(refreshable), ", ".join(refreshable),
+            )
+            await self._refresh_stale_prices(bars, records, refreshable, as_of)
+
+        for symbol, target in index_targets.items():
+            self._apply_index_snapshot(target, records[symbol], bars.get(symbol))
+        for symbol, target in sector_targets.items():
+            self._apply_sector_snapshot(target, records[symbol], bars.get(symbol))
+
+        not_fresh = sorted(s for s, r in records.items() if r["status"] == STATUS_STALE)
+        if not_fresh:
+            logger.warning(
+                "Benchmark/sector prices still stale after refresh: %s",
+                ", ".join(not_fresh),
+            )
+
+    @staticmethod
+    def _quote_fields(
+        record: dict[str, Any], bar: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Pull price/previous-close/high/low/volume out of a refreshed quote.
+
+        Returns ``None`` when *record* did not come from a live re-quote, which
+        is the signal to leave the stored block exactly as the DB reported it.
+        """
+        if record.get("source") != "live_quote" or record.get("price") is None:
+            return None
+
+        live = bar or {}
+        if live.get("source") != "live_quote":
+            return None
+
+        price = float(record["price"])
+        # ``_refresh_stale_prices`` parks the quote's previous close in ``open``.
+        previous_close = float(live.get("open") or price)
+        change = price - previous_close
+        return {
+            "price": price,
+            "previous_close": previous_close,
+            "change": change,
+            "change_pct": (change / previous_close * 100) if previous_close else 0.0,
+            "high": float(live.get("high") or price),
+            "low": float(live.get("low") or price),
+            "volume": int(live.get("volume") or 0),
+            "date": record["latest_bar_date"],
+        }
+
+    @classmethod
+    def _apply_index_snapshot(
+        cls,
+        market_index: dict[str, Any],
+        record: dict[str, Any],
+        bar: list[dict[str, Any]] | None,
+    ) -> None:
+        """Attach the freshness record to the benchmark and fold in a live quote."""
+        market_index["freshness"] = record
+
+        quote = cls._quote_fields(record, (bar or [None])[0])
+        if quote is None:
+            return
+
+        market_index["current"] = quote["price"]
+        market_index["previous_close"] = quote["previous_close"]
+        market_index["change"] = quote["change"]
+        market_index["change_pct"] = quote["change_pct"]
+        market_index["high"] = quote["high"]
+        market_index["low"] = quote["low"]
+        market_index["volume"] = quote["volume"] or market_index.get("volume", 0)
+        market_index["date"] = quote["date"]
+
+    @classmethod
+    def _apply_sector_snapshot(
+        cls,
+        metrics: dict[str, Any],
+        record: dict[str, Any],
+        bar: list[dict[str, Any]] | None,
+    ) -> None:
+        """Attach the freshness record to a sector row and fold in a live quote.
+
+        The weekly/monthly returns are recomputed against the refreshed price so
+        every number on the row ends at the price shown next to it; the base bar
+        dates stay in the row so a formatter can say what window that really is.
+        """
+        metrics["freshness"] = record
+
+        quote = cls._quote_fields(record, (bar or [None])[0])
+        if quote is None:
+            return
+
+        price = quote["price"]
+        metrics["current_price"] = price
+        metrics["as_of"] = quote["date"]
+        metrics["previous_close"] = quote["previous_close"]
+        metrics["daily_change"] = quote["change"]
+        metrics["daily_change_pct"] = quote["change_pct"]
+        metrics["volume"] = quote["volume"] or metrics.get("volume", 0)
+
+        for window, base_key in (
+            ("weekly_change_pct", "week_base_close"),
+            ("monthly_change_pct", "month_base_close"),
+        ):
+            base = metrics.get(base_key)
+            if base:
+                metrics[window] = ((price - float(base)) / float(base)) * 100
 
     async def _get_technical_indicators(
         self,
@@ -955,10 +1390,13 @@ class MarketContextBuilder:
             if len(prices) >= 2:
                 current = prices[0].close
                 prev_day = prices[1].close if len(prices) > 1 else current
-                prev_week = prices[5].close if len(prices) > 5 else current
-                prev_month = prices[-1].close if len(prices) >= 20 else (
-                    prices[min(20, len(prices) - 1)].close
-                )
+                # Index of the bar each return is measured from.  The monthly
+                # base is the oldest bar of the 30-bar window either way -- both
+                # arms of the previous expression resolved to ``prices[-1]``.
+                week_idx = 5 if len(prices) > 5 else 0
+                month_idx = len(prices) - 1
+                prev_week = prices[week_idx].close
+                prev_month = prices[month_idx].close
 
                 performance[stock.symbol] = {
                     "name": stock.name,
@@ -976,6 +1414,17 @@ class MarketContextBuilder:
                         ((current - prev_month) / prev_month) * 100 if prev_month else 0
                     ),
                     "volume": prices[0].volume if prices else 0,
+                    # Date the ETF close so the strategist can label it rather
+                    # than printing an undated "Price:".
+                    "as_of": prices[0].date.isoformat(),
+                    # The bar each multi-day return is measured from.  Kept so a
+                    # live re-quote can recompute the return against the new
+                    # price, and so the prompt can state the true window when a
+                    # data gap has stretched it well past 5 / 20 sessions.
+                    "week_base_close": prev_week,
+                    "week_base_date": prices[week_idx].date.isoformat(),
+                    "month_base_close": prev_month,
+                    "month_base_date": prices[month_idx].date.isoformat(),
                 }
 
         return performance
@@ -1894,6 +2343,17 @@ def format_fundamental_context(fundamentals: dict[str, dict[str, Any]]) -> str:
     for symbol in sorted(fundamentals.keys()):
         data = fundamentals[symbol]
 
+        # Same gate as the revision block.  The yahoo fundamentals payload is
+        # currently metrics-only with no evidence contract, so this is inert
+        # today and the all-None check below is what filters -- but it stops
+        # the placeholder-as-measurement bug reappearing if that payload gains
+        # `status`/`available` scaffolding the way the other adapters did.
+        if not evidence_is_usable(data):
+            lines.append(f"=== FUNDAMENTAL DATA: {symbol} ===")
+            lines.append(_unavailable_line(data))
+            lines.append("")
+            continue
+
         # Skip symbols with no meaningful data
         if not any(v is not None for v in data.values()):
             continue
@@ -1971,8 +2431,26 @@ def format_fundamental_context(fundamentals: dict[str, dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _unavailable_line(record: dict[str, Any]) -> str:
+    """Render an unusable adapter record as an explicit absence, never a number.
+
+    Says what the source reported rather than dropping the symbol silently, so
+    the model can tell "we looked and found nothing" apart from "we never asked".
+    """
+    status = record.get("status") or "unavailable"
+    notes = record.get("notes") or []
+    reason = ", ".join(str(note) for note in notes) if notes else "no data returned"
+    return f"UNAVAILABLE (source status: {status}) -- {reason}"
+
+
 def format_analyst_revision_context(revisions: dict[str, dict[str, Any]]) -> str:
-    """Format analyst revision momentum data as readable markdown."""
+    """Format analyst revision momentum data as readable markdown.
+
+    Gated on ``evidence_is_usable``: an unavailable record still carries
+    non-None ``symbol``/``as_of``/``available``, so the old "does any field
+    have a value" guard let it through and its placeholder ``revision_score``
+    was printed to the LLM as if it were a measurement.
+    """
     if not revisions:
         return ""
 
@@ -1980,6 +2458,13 @@ def format_analyst_revision_context(revisions: dict[str, dict[str, Any]]) -> str
 
     for symbol in sorted(revisions.keys()):
         data = revisions[symbol]
+
+        if not evidence_is_usable(data):
+            lines.append(f"=== ANALYST REVISIONS: {symbol} ===")
+            lines.append(_unavailable_line(data))
+            lines.append("")
+            continue
+
         if not any(v is not None for v in data.values()):
             continue
 

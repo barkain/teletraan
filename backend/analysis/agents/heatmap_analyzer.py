@@ -303,8 +303,13 @@ def parse_heatmap_analysis_response(response: str) -> HeatmapAnalysis:
                 eiv = float(s.get("expected_insight_value", 0.5))
                 eiv = max(0.0, min(1.0, eiv))
 
+                # Upper-case the ticker: it is used as a lookup key against
+                # context blocks the builder stores under the upper-case
+                # symbol, and the model does not reliably capitalise it.
+                symbol = str(s.get("symbol") or "UNKNOWN").strip().upper()
+
                 selected_stocks.append(HeatmapStockSelection(
-                    symbol=s.get("symbol", "UNKNOWN"),
+                    symbol=symbol,
                     sector=s.get("sector", "Unknown"),
                     reason=s.get("reason", ""),
                     opportunity_type=opp_type,

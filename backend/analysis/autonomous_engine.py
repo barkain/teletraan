@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import inspect
 import json
 import logging
 from dataclasses import dataclass, field
@@ -101,8 +102,14 @@ from analysis.context_builder import (  # type: ignore[import-not-found]
     format_sentiment_context,
 )
 from analysis.news_intelligence import (  # type: ignore[import-not-found]
+    STATUS_ERROR,
     get_news_intelligence,
     format_news_context,
+)
+from analysis.symbol_slice import (  # type: ignore[import-not-found]
+    partition_by_freshness,
+    slice_context_for_symbol,
+    target_banner,
 )
 from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
 from analysis.pattern_extractor import PatternExtractor  # type: ignore[import-not-found]
@@ -169,6 +176,26 @@ class LLMActivityEntry:
 # Valid insight types and actions for validation
 VALID_INSIGHT_TYPES = {t.value for t in InsightType}
 VALID_ACTIONS = {a.value for a in InsightAction}
+
+# Entry-price sanity gate: an insight whose entry midpoint sits further than
+# this from the live price is quoting a stale chart rather than a tradable
+# level, so it is dropped instead of shown. Measured failure: a STRONG_BUY on
+# ARM with entry "$205-215" while ARM traded at $439.46 -- the entry was ARM's
+# close from seven weeks earlier.
+MAX_ENTRY_DEVIATION_PCT = 15.0
+
+# The factor model needs fundamentals for the whole heatmap universe
+# (300-500 names). Cap the wait so a slow yfinance degrades the model to
+# market-data-only instead of stalling the pipeline.
+FACTOR_FUNDAMENTALS_TIMEOUT_S = 120.0
+
+
+def _level_text(value: Any, max_len: int) -> str | None:
+    """Normalize a trading-level field to a bounded string, or None if absent."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text[:max_len] if text else None
 
 
 @dataclass
@@ -1155,23 +1182,12 @@ class AutonomousDeepEngine:
         portfolio_holdings = await self._get_portfolio_holdings()
 
         # ===== Compute Factor Scores from heatmap data =====
-        factor_scores: dict[str, Any] = {}
-        try:
-            from analysis.factor_model import get_factor_model  # type: ignore[import-not-found]
-
-            factor_model = get_factor_model()
-            heatmap_factor_data: dict[str, dict] = {}
-            for stock in heatmap_data.stocks:
-                heatmap_factor_data[stock.symbol] = stock.to_dict()
-            if heatmap_factor_data:
-                factor_scores = await factor_model.compute_factor_scores(heatmap_factor_data)
-                logger.info(f"[AUTO] Factor scores computed for {len(factor_scores)} symbols")
-                # Store factor scores on the result for report generation
-                result.factor_scores = {
-                    sym: fs.to_dict() for sym, fs in factor_scores.items()
-                }
-        except Exception as e:
-            logger.warning(f"[AUTO] Factor model computation failed (non-fatal): {e}")
+        factor_scores = await self._compute_factor_scores(heatmap_data)
+        if factor_scores:
+            # Store factor scores on the result for report generation
+            result.factor_scores = {
+                sym: fs.to_dict() for sym, fs in factor_scores.items()
+            }
 
         # ===== PHASE 3: Heatmap Analysis =====
         logger.info("Phase 3: Analyzing heatmap patterns...")
@@ -1341,6 +1357,37 @@ class AutonomousDeepEngine:
             include_rich_technical=True,
             include_fundamentals=True,
         )
+
+        # Drop candidates whose price snapshot is stale or missing.  A symbol
+        # whose last bar is weeks old cannot support entry, stop or target
+        # levels, and analysing it anyway is how months-old prices ended up in
+        # live recommendations.  partition_by_freshness logs each drop with the
+        # status and bar date behind it.
+        usable_symbols, dropped_symbols = partition_by_freshness(
+            symbols_to_analyze, pre_context,
+        )
+        if dropped_symbols and usable_symbols:
+            symbols_to_analyze = usable_symbols
+            result.errors.append(
+                f"Deep dive: dropped {len(dropped_symbols)} symbol(s) on stale or "
+                f"missing price data: "
+                f"{', '.join(sym for sym, _ in dropped_symbols)}"
+            )
+        elif dropped_symbols:
+            # Every candidate is unusable -- a data outage, not a stock pick.
+            # Analysing none of them beats recommending all of them off old
+            # prices; the pipeline continues and synthesises zero insights.
+            symbols_to_analyze = []
+            logger.error(
+                "[AUTO] Every deep-dive candidate has unusable price data "
+                "(%d symbols); skipping the deep dive entirely.",
+                len(dropped_symbols),
+            )
+            result.errors.append(
+                "Deep dive skipped: no candidate had a usable price snapshot "
+                f"({', '.join(sym for sym, _ in dropped_symbols)}). "
+                "Check that the price ETL has run."
+            )
 
         # Compute correlation matrix from price history and append to discovery context
         try:
@@ -2783,6 +2830,173 @@ class AutonomousDeepEngine:
             analyst_errors=None,
         )
 
+    async def _compute_factor_scores(self, heatmap_data: HeatmapData) -> dict[str, Any]:
+        """Score the heatmap universe with the six-factor model.
+
+        Fundamentals are fetched here rather than reused from the deep-dive
+        context: that context is not built until Phase 4 and covers only the
+        shortlist, whereas the model ranks the whole heatmap universe. Without
+        them ``value`` and ``quality`` are unmeasurable and every symbol is
+        capped at 0.60 coverage. The fetch is bounded by
+        ``FACTOR_FUNDAMENTALS_TIMEOUT_S`` and backed by the factor model's own
+        5-min TTL cache, and degrades to market-data-only on failure.
+
+        Args:
+            heatmap_data: Fetched heatmap for this run.
+
+        Returns:
+            Dict mapping symbol -> FactorScore; empty when scoring failed.
+        """
+        try:
+            from analysis.factor_model import get_factor_model  # type: ignore[import-not-found]
+
+            factor_model = get_factor_model()
+            heatmap_factor_data: dict[str, dict] = {
+                stock.symbol: stock.to_dict() for stock in heatmap_data.stocks
+            }
+            if not heatmap_factor_data:
+                return {}
+
+            fundamentals: dict[str, dict] = {}
+            try:
+                fundamentals = await asyncio.wait_for(
+                    factor_model.fetch_fundamental_data(list(heatmap_factor_data)),
+                    timeout=FACTOR_FUNDAMENTALS_TIMEOUT_S,
+                )
+            except Exception as fund_err:
+                logger.warning(
+                    "[AUTO] Fundamental fetch for factor model failed (%s); "
+                    "falling back to market-data-only factors", fund_err,
+                )
+
+            factor_scores = await factor_model.compute_factor_scores(
+                heatmap_factor_data, fundamentals or None
+            )
+            mean_coverage = (
+                sum(fs.coverage for fs in factor_scores.values()) / len(factor_scores)
+                if factor_scores else 0.0
+            )
+            logger.info(
+                "[AUTO] Factor scores computed for %d symbols "
+                "(fundamentals for %d/%d; mean coverage %.2f)",
+                len(factor_scores), len(fundamentals),
+                len(heatmap_factor_data), mean_coverage,
+            )
+            return factor_scores
+        except Exception as e:
+            logger.warning(f"[AUTO] Factor model computation failed (non-fatal): {e}")
+            return {}
+
+    async def _live_price_for_gate(
+        self,
+        symbol: str,
+        pre_context: dict[str, Any] | None,
+    ) -> tuple[float | None, str]:
+        """Resolve a price to sanity-check an entry zone against.
+
+        Prefers the freshness snapshot the pipeline already built (so the gate
+        judges against the same price the analysts saw) and falls back to a
+        direct Yahoo quote only when no usable snapshot exists.
+
+        Args:
+            symbol: Ticker to price.
+            pre_context: Pre-built market context, may carry price_freshness.
+
+        Returns:
+            ``(price, source)``. Price is None when nothing usable was found,
+            in which case source explains why.
+        """
+        if pre_context:
+            try:
+                from analysis.price_freshness import (  # type: ignore[import-not-found]
+                    is_usable,
+                    snapshot_price,
+                )
+
+                price, freshness = snapshot_price(pre_context, symbol.upper())
+                if price > 0 and is_usable(freshness):
+                    source = (freshness or {}).get("source", "unknown")
+                    return price, f"snapshot:{source}"
+            except Exception as e:
+                logger.debug("Freshness snapshot lookup failed for %s: %s", symbol, e)
+
+        try:
+            from data.adapters.yahoo import yahoo_adapter  # type: ignore[import-not-found]
+
+            quote = await yahoo_adapter.get_current_price(symbol)
+            price = float((quote or {}).get("price") or 0.0)
+            if price > 0:
+                return price, "yahoo_quote"
+        except Exception as e:
+            logger.debug("Yahoo quote failed for %s: %s", symbol, e)
+
+        return None, "unavailable"
+
+    async def _passes_entry_sanity_gate(
+        self,
+        symbol: str | None,
+        entry_zone: str | None,
+        pre_context: dict[str, Any] | None,
+    ) -> bool:
+        """True when *entry_zone* is close enough to the live price to be tradable.
+
+        An entry more than ``MAX_ENTRY_DEVIATION_PCT`` from the market is a
+        stale level, not a plan. When no price can be resolved at all the
+        insight fails the gate: an entry nobody can verify is exactly what this
+        gate exists to keep away from the user.
+
+        Args:
+            symbol: Primary symbol of the insight.
+            entry_zone: Entry level string, e.g. "$205-215".
+            pre_context: Pre-built market context for the freshness snapshot.
+
+        Returns:
+            True to keep the insight, False to drop it.
+        """
+        if not symbol or not entry_zone:
+            # No price claim to verify. Missing levels are a separate problem.
+            return True
+
+        parsed = InsightOutcomeTracker._parse_price_range(entry_zone)
+        if parsed is None:
+            logger.debug(
+                "Entry gate skipped for %s: no numeric level in %r", symbol, entry_zone
+            )
+            return True
+
+        midpoint = (parsed[0] + parsed[1]) / 2
+        if midpoint <= 0:
+            logger.warning(
+                "[GATE] Rejected %s: non-positive entry midpoint %.2f from %r",
+                symbol, midpoint, entry_zone,
+            )
+            return False
+
+        live_price, source = await self._live_price_for_gate(symbol, pre_context)
+        if live_price is None:
+            logger.warning(
+                "[GATE] Rejected %s: entry %r (midpoint $%.2f) could not be "
+                "checked against any usable price (%s)",
+                symbol, entry_zone, midpoint, source,
+            )
+            return False
+
+        deviation = abs(midpoint - live_price) / live_price * 100
+        if deviation > MAX_ENTRY_DEVIATION_PCT:
+            logger.warning(
+                "[GATE] Rejected %s: entry %r (midpoint $%.2f) is %.1f%% from "
+                "live price $%.2f (%s), limit %.0f%%",
+                symbol, entry_zone, midpoint, deviation, live_price, source,
+                MAX_ENTRY_DEVIATION_PCT,
+            )
+            return False
+
+        logger.debug(
+            "[GATE] %s passed: entry midpoint $%.2f is %.1f%% from $%.2f (%s)",
+            symbol, midpoint, deviation, live_price, source,
+        )
+        return True
+
     async def _store_insights_from_heatmap(
         self,
         session: Any,
@@ -2808,6 +3022,7 @@ class AutonomousDeepEngine:
             List of created DeepInsight objects.
         """
         stored: list[DeepInsight] = []
+        rejected = 0
 
         # Build a lookup for opportunity types from heatmap selections
         heatmap_opp_types: dict[str, str] = {
@@ -2841,6 +3056,20 @@ class AutonomousDeepEngine:
                     "analysis_type:autonomous_heatmap_discovery",
                 ])
 
+                # Trading levels emitted by the synthesis lead. Without these
+                # the insight is untradable and outcome tracking can never fire
+                # entry_triggered.
+                entry_zone = _level_text(data.get("entry_zone"), 50)
+                target_price = _level_text(data.get("target_price"), 50)
+                stop_loss = _level_text(data.get("stop_loss"), 50)
+                timeframe = _level_text(data.get("timeframe"), 30)
+
+                if not await self._passes_entry_sanity_gate(
+                    primary_symbol, entry_zone, pre_context
+                ):
+                    rejected += 1
+                    continue
+
                 insight = DeepInsight(
                     insight_type=insight_type,
                     action=action,
@@ -2857,6 +3086,10 @@ class AutonomousDeepEngine:
                     historical_precedent=data.get("historical_precedent"),
                     analysts_involved=data.get("analysts_involved", []),
                     data_sources=data_sources,
+                    entry_zone=entry_zone,
+                    target_price=target_price,
+                    stop_loss=stop_loss,
+                    timeframe=timeframe,
                     prediction_market_data=getattr(self, '_prediction_data', None) or None,
                     sentiment_data=getattr(self, '_sentiment_data', None) or None,
                     technical_analysis_data=self._extract_ta_for_symbol(primary_symbol, pre_context) if pre_context and primary_symbol else None,
@@ -2890,6 +3123,13 @@ class AutonomousDeepEngine:
             except Exception as e:
                 logger.error(f"Failed to create insight: {e}")
                 continue
+
+        if rejected:
+            logger.warning(
+                "[GATE] Dropped %d/%d insights whose entry zone failed the "
+                "price sanity gate",
+                rejected, len(insights_data),
+            )
 
         if stored:
             try:
@@ -3154,11 +3394,40 @@ class AutonomousDeepEngine:
                 macro_result, sector_result
             )
 
+            # Build the market context once for every candidate, as the heatmap
+            # pipeline does.  It carries the reconciled price_freshness records,
+            # so the entry-sanity gate in _store_insights can price against the
+            # same snapshot the analysts were shown instead of firing one serial
+            # live Yahoo quote per insight inside the DB store loop.  A failure
+            # here is non-fatal: the analysts fall back to their own per-symbol
+            # builds and the gate falls back to a live quote, which is exactly
+            # the previous behaviour.
+            # An empty symbol list would make build_context fetch the whole
+            # active universe, so only build when there is something to analyse.
+            legacy_context: dict[str, Any] | None = None
+            if symbols_to_analyze:
+                try:
+                    legacy_context = await self.context_builder.build_context(
+                        symbols=symbols_to_analyze,
+                        include_price_history=True,
+                        include_technical=True,
+                        include_economic=True,
+                        include_sectors=True,
+                        include_rich_technical=True,
+                        include_fundamentals=True,
+                    )
+                except Exception as ctx_err:
+                    logger.warning(
+                        f"[Legacy] Shared context build failed (non-fatal): {ctx_err}"
+                    )
+
             analyst_reports: dict[str, dict[str, Any]] = {}
 
             async def _analyze_one(sym: str) -> tuple[str, dict[str, Any] | None]:
                 try:
-                    reports = await self._run_analysts_for_symbol(sym, discovery_context)
+                    reports = await self._run_analysts_for_symbol(
+                        sym, discovery_context, pre_built_context=legacy_context
+                    )
                     return sym, reports
                 except Exception as e:
                     logger.error(f"Deep dive failed for {sym}: {e}")
@@ -3222,6 +3491,7 @@ class AutonomousDeepEngine:
                     session, insights_data, macro_result, sector_result, candidates,
                     analyst_reports=analyst_reports,
                     synthesis_raw_response=synthesis_raw_response,
+                    pre_context=legacy_context,
                 )
                 result.insights = saved_insights
 
@@ -3327,7 +3597,15 @@ class AutonomousDeepEngine:
                 from analysis.news_intelligence import get_macro_news_intelligence  # type: ignore[import-not-found]
 
                 macro_news = await get_macro_news_intelligence(days=3)
-                if macro_news and macro_news.get("article_count"):
+                # An unavailable feed reports article_count 0, so gating on the
+                # count alone gave the scanner silence during an outage instead
+                # of the "feed UNAVAILABLE" notice format_macro_news_context
+                # renders.  Mirror that formatter's own unavailable test.
+                macro_unavailable = bool(macro_news) and (
+                    macro_news.get("data_status") == STATUS_ERROR
+                    or macro_news.get("available") is False
+                )
+                if macro_news and (macro_news.get("article_count") or macro_unavailable):
                     macro_context = {"macro_news": macro_news}
                     # Stash on a dedicated attr — the Phase-1 gather reassigns
                     # self._news_data afterwards, so mutating it here would be
@@ -3635,9 +3913,9 @@ class AutonomousDeepEngine:
         """
         # Use pre-built context if available, otherwise build per-symbol
         if pre_built_context is not None:
-            agent_context = pre_built_context
+            shared_context = pre_built_context
         else:
-            agent_context = await self.context_builder.build_context(
+            shared_context = await self.context_builder.build_context(
                 symbols=[symbol],
                 include_price_history=True,
                 include_technical=True,
@@ -3646,6 +3924,13 @@ class AutonomousDeepEngine:
                 include_rich_technical=True,
                 include_fundamentals=True,
             )
+
+        # Narrow the shared context to this symbol.  The pre-built context
+        # covers every deep-dive candidate and build_context() serves it from a
+        # TTL cache, so this must copy rather than mutate: handing the whole
+        # thing to each symbol's analysts is what made every per-symbol prompt
+        # byte-identical.
+        agent_context = slice_context_for_symbol(shared_context, symbol)
 
         reports: dict[str, Any] = {}
 
@@ -3709,11 +3994,19 @@ class AutonomousDeepEngine:
         format_func = config["format_context"]
         parse_func = config["parse_response"]
 
-        # Format context for analyst
-        formatted_context = format_func(agent_context)
+        # Format context for analyst.  Formatters that understand a target
+        # render only that symbol's data; the rest (macro, correlation) are
+        # market-wide by nature and take the context as-is.
+        if "target_symbol" in inspect.signature(format_func).parameters:
+            formatted_context = format_func(agent_context, target_symbol=symbol)
+        else:
+            formatted_context = format_func(agent_context)
 
-        # Prepend discovery context
-        full_context = f"{discovery_context}\n\n{formatted_context}"
+        # State the target in-band, ahead of everything else.  It used to
+        # travel only as LLM call metadata, which the model never sees.
+        full_context = (
+            f"{target_banner(symbol)}\n\n{discovery_context}\n\n{formatted_context}"
+        )
 
         # Build a meaningful preview that distinguishes this entry from other
         # analysts analyzing the same symbol (the discovery context prefix is
@@ -4055,6 +4348,7 @@ class AutonomousDeepEngine:
         candidates: OpportunityList,
         analyst_reports: dict[str, dict[str, Any]] | None = None,
         synthesis_raw_response: str | None = None,
+        pre_context: dict[str, Any] | None = None,
     ) -> list[DeepInsight]:
         """Store insights in database (legacy pipeline).
 
@@ -4066,11 +4360,15 @@ class AutonomousDeepEngine:
             candidates: Opportunity candidates for context.
             analyst_reports: Per-symbol analyst reports for research context.
             synthesis_raw_response: Raw LLM synthesis response text.
+            pre_context: Market context built for the deep dive. Supplies the
+                reconciled price snapshot the entry gate checks against, so the
+                store loop does not fire a live quote per insight.
 
         Returns:
             List of created DeepInsight objects.
         """
         stored: list[DeepInsight] = []
+        rejected = 0
 
         for data in insights_data:
             try:
@@ -4097,6 +4395,20 @@ class AutonomousDeepEngine:
                     "analysis_type:autonomous_discovery",
                 ])
 
+                # Trading levels emitted by the synthesis lead. The gate prices
+                # against the deep dive's own freshness snapshot when the caller
+                # supplied one, and only falls back to a live quote otherwise.
+                entry_zone = _level_text(data.get("entry_zone"), 50)
+                target_price = _level_text(data.get("target_price"), 50)
+                stop_loss = _level_text(data.get("stop_loss"), 50)
+                timeframe = _level_text(data.get("timeframe"), 30)
+
+                if not await self._passes_entry_sanity_gate(
+                    data.get("primary_symbol"), entry_zone, pre_context
+                ):
+                    rejected += 1
+                    continue
+
                 insight = DeepInsight(
                     insight_type=insight_type,
                     action=action,
@@ -4113,9 +4425,15 @@ class AutonomousDeepEngine:
                     historical_precedent=data.get("historical_precedent"),
                     analysts_involved=data.get("analysts_involved", []),
                     data_sources=data_sources,
+                    entry_zone=entry_zone,
+                    target_price=target_price,
+                    stop_loss=stop_loss,
+                    timeframe=timeframe,
                     prediction_market_data=getattr(self, '_prediction_data', None) or None,
                     sentiment_data=getattr(self, '_sentiment_data', None) or None,
-                    technical_analysis_data=None,  # No pre_context in legacy pipeline
+                    # The legacy pipeline does not persist a TA payload; the
+                    # context is threaded in for the entry gate only.
+                    technical_analysis_data=None,
                 )
                 # Persist news sentiment slice (column added by a peer agent).
                 self._set_insight_news_data(insight, data.get("primary_symbol"))
@@ -4145,6 +4463,13 @@ class AutonomousDeepEngine:
             except Exception as e:
                 logger.error(f"Failed to create insight: {e}")
                 continue
+
+        if rejected:
+            logger.warning(
+                "[GATE] Dropped %d/%d legacy insights whose entry zone failed "
+                "the price sanity gate",
+                rejected, len(insights_data),
+            )
 
         if stored:
             try:

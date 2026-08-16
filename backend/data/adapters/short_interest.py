@@ -20,16 +20,43 @@ from typing import Any
 
 import yfinance as yf  # type: ignore[import-untyped]
 
+from data.adapters.evidence import (
+    STATUS_OK,
+    STATUS_PARTIAL,
+    STATUS_UNAVAILABLE,
+    utc_now_iso,
+)
+
 logger = logging.getLogger(__name__)
 
 _CACHE_TTL = 60 * 60
 _MAX_WORKERS = 4
 _NON_EQUITY_PATTERNS = ("=F", "^", "-USD", "=X")
 
+#: The fields that actually carry short-interest information. yfinance happily
+#: returns ``{'trailingPegRatio': None}`` for symbols it knows nothing about, so
+#: "the dict is non-empty" says nothing about whether we have data.
+_SHORT_INTEREST_FIELDS = ("sharesShort", "shortRatio", "shortPercentOfFloat", "floatShares")
+
 
 def _is_equity_symbol(symbol: str) -> bool:
     upper = symbol.upper()
     return not any(pat in upper for pat in _NON_EQUITY_PATTERNS)
+
+
+def _normalize_short_percent(raw: float | None) -> float | None:
+    """Return short interest as a percentage of float, in percentage points.
+
+    yfinance reports ``shortPercentOfFloat`` as a *fraction* (AAPL = 0.01 for
+    1%), but the scoring below has always treated it as percentage points and
+    subtracted a 5-point threshold, so real values silently scored zero. Values
+    at or below 1.0 are read as fractions and scaled once; anything above is
+    already in percentage points and is left alone. The ambiguity at exactly 1.0
+    resolves to 1% -- a 100%-of-float short position does not occur in practice.
+    """
+    if raw is None:
+        return None
+    return raw * 100.0 if raw <= 1.0 else raw
 
 
 class _CacheEntry:
@@ -51,17 +78,26 @@ class ShortInterestSignal:
     available: bool
     shares_short: int | None
     short_ratio: float | None
+    #: Percentage points of float sold short (1.0 == 1%), normalized from
+    #: yfinance's fractional ``shortPercentOfFloat``.
     short_percent_float: float | None
     float_shares: int | None
     squeeze_score: float
     sentiment: str
+    # Evidence contract (see data/adapters/evidence.py). `as_of` is kept as the
+    # legacy key; `fetched_at`/`status`/`coverage` are additive.
+    status: str = STATUS_UNAVAILABLE
+    coverage: float = 0.0
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "as_of": self.as_of,
+            "fetched_at": self.as_of,
             "available": self.available,
+            "status": self.status,
+            "coverage": self.coverage,
             "shares_short": self.shares_short,
             "short_ratio": self.short_ratio,
             "short_percent_float": self.short_percent_float,
@@ -101,18 +137,7 @@ class ShortInterestAdapter:
             return cached
 
         if not _is_equity_symbol(symbol):
-            signal = ShortInterestSignal(
-                symbol=symbol,
-                as_of=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                available=False,
-                shares_short=None,
-                short_ratio=None,
-                short_percent_float=None,
-                float_shares=None,
-                squeeze_score=0.0,
-                sentiment="neutral",
-                notes=["non_equity_symbol"],
-            )
+            signal = self._empty_signal(symbol, note="non_equity_symbol")
             self._set_cached(cache_key, signal)
             return signal
 
@@ -123,6 +148,16 @@ class ShortInterestAdapter:
             logger.debug("Short interest fetch failed for %s: %s", symbol, exc)
             info = {}
 
+        present_fields = [key for key in _SHORT_INTEREST_FIELDS if info.get(key) is not None]
+        if not present_fields:
+            # A response with no short-interest field is not "zero short
+            # interest" -- it is no data. Scoring it produced squeeze_score=0.0
+            # with sentiment 'low_short_interest' on symbols we know nothing
+            # about.
+            signal = self._empty_signal(symbol, note="no_short_interest_fields")
+            self._set_cached(cache_key, signal)
+            return signal
+
         shares_short = info.get("sharesShort")
         short_ratio = info.get("shortRatio")
         short_percent_float = info.get("shortPercentOfFloat")
@@ -131,7 +166,9 @@ class ShortInterestAdapter:
         shares_short_i = int(shares_short) if shares_short is not None else None
         float_shares_i = int(float_shares) if float_shares is not None else None
         short_ratio_f = float(short_ratio) if short_ratio is not None else None
-        short_percent_f = float(short_percent_float) if short_percent_float is not None else None
+        short_percent_f = _normalize_short_percent(
+            float(short_percent_float) if short_percent_float is not None else None
+        )
 
         notes: list[str] = []
         if short_ratio_f is not None:
@@ -157,19 +194,40 @@ class ShortInterestAdapter:
 
         signal = ShortInterestSignal(
             symbol=symbol,
-            as_of=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            available=bool(info),
+            as_of=utc_now_iso(),
+            available=True,
             shares_short=shares_short_i,
             short_ratio=short_ratio_f,
             short_percent_float=short_percent_f,
             float_shares=float_shares_i,
             squeeze_score=round(max(0.0, min(100.0, score)), 2),
             sentiment=sentiment,
+            status=STATUS_OK if len(present_fields) == len(_SHORT_INTEREST_FIELDS) else STATUS_PARTIAL,
+            coverage=round(len(present_fields) / len(_SHORT_INTEREST_FIELDS), 4),
             notes=notes,
         )
 
         self._set_cached(cache_key, signal)
         return signal
+
+    @staticmethod
+    def _empty_signal(symbol: str, *, note: str) -> ShortInterestSignal:
+        """No short-interest field came back: no score, and a sentiment that
+        cannot be mistaken for a measured 'low short interest'."""
+        return ShortInterestSignal(
+            symbol=symbol,
+            as_of=utc_now_iso(),
+            available=False,
+            shares_short=None,
+            short_ratio=None,
+            short_percent_float=None,
+            float_shares=None,
+            squeeze_score=0.0,
+            sentiment="unknown",
+            status=STATUS_UNAVAILABLE,
+            coverage=0.0,
+            notes=[note],
+        )
 
     async def get_symbol_short_interests(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
         if not symbols:
