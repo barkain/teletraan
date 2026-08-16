@@ -1,8 +1,8 @@
 {
-  "as_of": "2026-08-16T10:55:22.349673+00:00",
+  "as_of": "2026-08-16T11:08:14.044948+00:00",
   "harness_version": "1.0.0",
   "pipeline_version": "v5-evidence-layer",
-  "git_sha": "0344385",
+  "git_sha": "2dd5322",
   "params": {
     "benchmark": "SPY",
     "entry_lag_trading_days": 1,
@@ -22,7 +22,17 @@
       "6-12 months": 270
     },
     "horizon_source": "analysis.horizons (shared with outcome_tracker)",
-    "label_rule": "sign(symbol_return - benchmark_return) == predicted_direction",
+    "decision_rule": {
+      "name": "sign_of_alpha",
+      "label_rule": "sign(symbol_return - benchmark_return) == predicted_direction",
+      "alpha_threshold_pct": 0.0,
+      "benchmark_symbol": "SPY",
+      "window_basis": "trading_bars_from_created_at",
+      "entry_basis": "close of bar +1 strictly after created_at",
+      "models_stop_target": false,
+      "in_band_handling": "n/a (no band -- ties at exactly 0.0 count as misses)"
+    },
+    "not_comparable_to": "any rate computed under a different decision_rule. The outcome grader uses alpha_threshold_pct=2.0 and models stop/target, which scores ~10 and ~3 points lower respectively on identical data.",
     "allow_network": true,
     "last_benchmark_bar": "2026-08-14"
   },
@@ -183,6 +193,7 @@
   },
   "overall": {
     "n": 209,
+    "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
     "hit_rate": 0.4498,
     "raw_hit_rate": 0.4498,
     "mean_alpha_pct": 0.453,
@@ -272,6 +283,7 @@
   "by_pipeline_version": {
     "v1-discovery": {
       "n": 105,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.4381,
       "raw_hit_rate": 0.419,
       "mean_alpha_pct": 1.553,
@@ -330,6 +342,7 @@
     },
     "v2-signals": {
       "n": 6,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.5,
       "raw_hit_rate": 0.6667,
       "mean_alpha_pct": 18.369,
@@ -378,6 +391,7 @@
     },
     "v3-portfolio-quant": {
       "n": 38,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.2632,
       "raw_hit_rate": 0.2895,
       "mean_alpha_pct": -4.442,
@@ -466,6 +480,7 @@
     },
     "v4-news-sentiment": {
       "n": 60,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.5833,
       "raw_hit_rate": 0.5833,
       "mean_alpha_pct": -0.163,
@@ -556,6 +571,7 @@
   "by_month": {
     "2026-02": {
       "n": 105,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.4381,
       "raw_hit_rate": 0.419,
       "mean_alpha_pct": 1.553,
@@ -572,6 +588,7 @@
     },
     "2026-04": {
       "n": 6,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.5,
       "raw_hit_rate": 0.6667,
       "mean_alpha_pct": 18.369,
@@ -588,6 +605,7 @@
     },
     "2026-05": {
       "n": 38,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.2632,
       "raw_hit_rate": 0.2895,
       "mean_alpha_pct": -4.442,
@@ -604,6 +622,7 @@
     },
     "2026-06": {
       "n": 60,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.5833,
       "raw_hit_rate": 0.5833,
       "mean_alpha_pct": -0.163,
@@ -622,6 +641,7 @@
   "by_action": {
     "BUY": {
       "n": 122,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.541,
       "raw_hit_rate": 0.4836,
       "mean_alpha_pct": 2.145,
@@ -638,6 +658,7 @@
     },
     "BUY_MORE": {
       "n": 10,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.3,
       "raw_hit_rate": 0.4,
       "mean_alpha_pct": -3.86,
@@ -654,6 +675,7 @@
     },
     "SELL": {
       "n": 33,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.3333,
       "raw_hit_rate": 0.4848,
       "mean_alpha_pct": -1.845,
@@ -670,6 +692,7 @@
     },
     "STRONG_BUY": {
       "n": 31,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.3871,
       "raw_hit_rate": 0.3226,
       "mean_alpha_pct": -0.515,
@@ -686,6 +709,7 @@
     },
     "STRONG_SELL": {
       "n": 13,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.1538,
       "raw_hit_rate": 0.3846,
       "mean_alpha_pct": -3.965,
@@ -704,6 +728,7 @@
   "by_direction": {
     "long": {
       "n": 163,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.4969,
       "raw_hit_rate": 0.4479,
       "mean_alpha_pct": 1.271,
@@ -792,6 +817,7 @@
     },
     "short": {
       "n": 46,
+      "basis": "sign_of_alpha|thr=0.0%|bench=SPY|entry=+1bar|no_levels",
       "hit_rate": 0.2826,
       "raw_hit_rate": 0.4565,
       "mean_alpha_pct": -2.444,

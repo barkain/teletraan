@@ -418,7 +418,11 @@ def test_empty_cohort_metrics_are_none_not_zero():
     assert mean_alpha([]) is None
     assert brier_score([]) is None
     assert expected_calibration_error([]) is None
-    assert cohort_metrics([]) == {"n": 0}
+    # An empty cohort still declares its basis rather than emitting a bare n.
+    assert cohort_metrics([]) == {"n": 0, "basis": None}
+    assert cohort_metrics([], basis="sign_of_alpha|thr=0.0%") == {
+        "n": 0, "basis": "sign_of_alpha|thr=0.0%",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -734,6 +738,35 @@ async def test_run_insight_eval_end_to_end(db_session: AsyncSession, tmp_path, m
     history_lines = (tmp_path / "insight_eval_history.jsonl").read_text().splitlines()
     assert len(history_lines) == 1
     assert json.loads(history_lines[0])["hit_rate"] == overall["hit_rate"]
+
+
+@pytest.mark.asyncio
+async def test_every_cohort_carries_the_decision_rule_that_produced_it(
+    db_session: AsyncSession,
+):
+    """No hit rate may ship without the rule that produced it.
+
+    The decision rule is worth ~10 points on identical data -- more than the
+    horizon constant -- so a cohort block lifted out of context and quoted
+    against the outcome grader's rate would be a straight category error.
+    """
+    await _seed(db_session)
+    snapshot = await run_insight_eval(db_session, save=False)
+
+    rule = snapshot["params"]["decision_rule"]
+    assert rule["alpha_threshold_pct"] == 0.0
+    assert rule["models_stop_target"] is False
+    assert rule["benchmark_symbol"] == "SPY"
+    assert "created_at" in rule["entry_basis"]
+    assert "decision_rule" in snapshot["params"]["not_comparable_to"]
+
+    expected = snapshot["overall"]["basis"]
+    assert expected and "thr=0.0%" in expected and "no_levels" in expected
+
+    # Every cohort in every breakdown, not just the headline.
+    for group in ("by_pipeline_version", "by_month", "by_action", "by_direction"):
+        for name, block in snapshot[group].items():
+            assert block.get("basis") == expected, f"{group}.{name} lost its basis"
 
 
 @pytest.mark.asyncio

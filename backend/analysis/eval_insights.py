@@ -107,6 +107,41 @@ HORIZON_SENSITIVITY_VARIANTS: dict[str, dict[str, int]] = {
     "medium_term_63": {"medium_term": 63},
 }
 
+# The alpha a call must clear to count as a hit.  0.0 asks "was the direction
+# right?" -- the calibration question, and the only threshold under which Brier
+# and ECE are coherent, which is what this harness exists to measure.  The
+# outcome grader uses +2.0 ("was it right by enough to be skill"), which is the
+# better *track record* question and scores ~10 points lower on identical data.
+# Both are defensible; they answer different questions and must never be quoted
+# against one another.
+ALPHA_THRESHOLD_PCT = 0.0
+
+# Every rate this harness emits is meaningless without these.  Measured on the
+# same data, the decision rule is worth ~10 points, the horizon ~3.5 and the
+# entry basis ~1.6 -- so a bare hit rate is not an interpretable number.  This
+# block is stamped into `params` and a compact form into *every* cohort, so a
+# rate lifted out of context still carries the rule that produced it.
+def decision_rule(benchmark: str, entry_lag: int) -> dict[str, Any]:
+    """The full specification of what this harness counts as a hit."""
+    return {
+        "name": "sign_of_alpha",
+        "label_rule": "sign(symbol_return - benchmark_return) == predicted_direction",
+        "alpha_threshold_pct": ALPHA_THRESHOLD_PCT,
+        "benchmark_symbol": benchmark,
+        "window_basis": "trading_bars_from_created_at",
+        "entry_basis": f"close of bar +{entry_lag} strictly after created_at",
+        "models_stop_target": False,
+        "in_band_handling": "n/a (no band -- ties at exactly 0.0 count as misses)",
+    }
+
+
+def decision_rule_tag(benchmark: str, entry_lag: int) -> str:
+    """One-line form of the decision rule, embedded in every cohort block."""
+    return (
+        f"sign_of_alpha|thr={ALPHA_THRESHOLD_PCT}%|bench={benchmark}"
+        f"|entry=+{entry_lag}bar|no_levels"
+    )
+
 # Pseudo-symbols the synthesis emits for portfolio-level commentary.  They are
 # not tradeable instruments and must not be priced.
 NON_TRADEABLE_SYMBOLS = frozenset({"PORTFOLIO", "PORTFOLIO_RISK", "N/A", "NONE", "CASH"})
@@ -505,15 +540,23 @@ def cohort_metrics(
     records: Sequence[EvalRecord],
     n_bins: int = DEFAULT_RELIABILITY_BINS,
     with_curve: bool = True,
+    basis: str | None = None,
 ) -> dict[str, Any]:
-    """Full metric block for one cohort of graded calls."""
+    """Full metric block for one cohort of graded calls.
+
+    ``basis`` stamps the decision rule into the block itself.  A hit rate is
+    not interpretable without it -- the rule is worth ~10 points on identical
+    data -- and cohort blocks get lifted out of context, so the rule travels
+    with the number rather than living only in the enclosing ``params``.
+    """
     if not records:
-        return {"n": 0}
+        return {"n": 0, "basis": basis}
 
     alphas = [r.alpha_pct * r.direction for r in records]
     curve = reliability_curve(records, n_bins)
     metrics: dict[str, Any] = {
         "n": len(records),
+        "basis": basis,
         "hit_rate": round(hit_rate(records) or 0.0, 4),
         "raw_hit_rate": round(raw_hit_rate(records) or 0.0, 4),
         "mean_alpha_pct": round(mean_alpha(records) or 0.0, 3),
@@ -542,12 +585,13 @@ def _group(
     key: Any,
     n_bins: int,
     with_curve: bool = False,
+    basis: str | None = None,
 ) -> dict[str, Any]:
     buckets: dict[str, list[EvalRecord]] = defaultdict(list)
     for r in records:
         buckets[str(key(r))].append(r)
     return {
-        k: cohort_metrics(v, n_bins, with_curve=with_curve)
+        k: cohort_metrics(v, n_bins, with_curve=with_curve, basis=basis)
         for k, v in sorted(buckets.items())
     }
 
@@ -982,6 +1026,7 @@ async def run_insight_eval(
         candidates, series_map, benchmark_series, price_source, entry_lag,
         primary=records, n_bins=n_bins,
     )
+    basis = decision_rule_tag(benchmark, entry_lag)
 
     last_bar = max((d for d, _ in benchmark_series), default=None)
     snapshot: dict[str, Any] = {
@@ -995,7 +1040,12 @@ async def run_insight_eval(
             "reliability_bins": n_bins,
             "horizon_trading_days": HORIZON_TRADING_DAYS,
             "horizon_source": "analysis.horizons (shared with outcome_tracker)",
-            "label_rule": "sign(symbol_return - benchmark_return) == predicted_direction",
+            "decision_rule": decision_rule(benchmark, entry_lag),
+            "not_comparable_to": (
+                "any rate computed under a different decision_rule. The outcome "
+                "grader uses alpha_threshold_pct=2.0 and models stop/target, which "
+                "scores ~10 and ~3 points lower respectively on identical data."
+            ),
             "allow_network": allow_network,
             "last_benchmark_bar": last_bar.isoformat() if last_bar else None,
         },
@@ -1015,12 +1065,14 @@ async def run_insight_eval(
         },
         "exclusions": ledger.to_dict(),
         "horizon_sensitivity": sensitivity,
-        "overall": cohort_metrics(records, n_bins, with_curve=True),
-        "by_pipeline_version": _group(records, lambda r: r.pipeline_version, n_bins, True),
-        "by_month": _group(records, lambda r: r.month, n_bins),
-        "by_action": _group(records, lambda r: r.action, n_bins),
+        "overall": cohort_metrics(records, n_bins, with_curve=True, basis=basis),
+        "by_pipeline_version": _group(
+            records, lambda r: r.pipeline_version, n_bins, True, basis),
+        "by_month": _group(records, lambda r: r.month, n_bins, basis=basis),
+        "by_action": _group(records, lambda r: r.action, n_bins, basis=basis),
         "by_direction": _group(
-            records, lambda r: "long" if r.direction > 0 else "short", n_bins, True),
+            records, lambda r: "long" if r.direction > 0 else "short",
+            n_bins, True, basis),
     }
     if include_records:
         snapshot["records"] = [asdict(r) for r in records]
