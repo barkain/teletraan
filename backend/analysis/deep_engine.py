@@ -1096,11 +1096,11 @@ class DeepAnalysisEngine:
                     continue
 
                 # Start tracking
+                # Window is derived from the insight's own time_horizon
                 await outcome_tracker.start_tracking(
                     insight_id=insight.id,
                     symbol=insight.primary_symbol,
                     predicted_direction=predicted_direction,
-                    tracking_days=20,  # Default ~1 month tracking period
                 )
                 tracked_count += 1
 

@@ -3202,11 +3202,11 @@ class AutonomousDeepEngine:
                         if insight.action not in actionable_actions:
                             continue
                         predicted_direction = action_to_direction[insight.action]
+                        # Window is derived from the insight's own time_horizon
                         await outcome_tracker.start_tracking(
                             insight_id=insight.id,
                             symbol=insight.primary_symbol,
                             predicted_direction=predicted_direction,
-                            tracking_days=20,
                         )
                         tracked_count += 1
                         logger.info(
@@ -4538,11 +4538,11 @@ class AutonomousDeepEngine:
                         if insight.action not in actionable_actions:
                             continue
                         predicted_direction = action_to_direction[insight.action]
+                        # Window is derived from the insight's own time_horizon
                         await outcome_tracker.start_tracking(
                             insight_id=insight.id,
                             symbol=insight.primary_symbol,
                             predicted_direction=predicted_direction,
-                            tracking_days=20,
                         )
                         tracked_count += 1
                         logger.info(

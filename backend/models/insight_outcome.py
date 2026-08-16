@@ -5,8 +5,9 @@ import uuid
 from datetime import date
 from typing import Any
 
-from sqlalchemy import Boolean, Date, Float, ForeignKey, Index, JSON, String, Text
+from sqlalchemy import Boolean, Date, Float, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -118,16 +119,47 @@ class InsightOutcome(TimestampMixin, Base):
         nullable=True,
     )
 
+    # Benchmark-relative evaluation
+    #
+    # A raw return is not evidence of skill: a +3% call while the market ran
+    # +7% is a losing call. Every completed outcome therefore records the
+    # benchmark's move over the *same* window, and validation is decided on
+    # alpha (symbol return minus benchmark return), not on raw return.
+    benchmark_symbol: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default="SPY",
+    )
+    benchmark_initial_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    benchmark_final_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    benchmark_return_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alpha_pct: Mapped[float | None] = mapped_column(
+        Float, nullable=True,
+    )  # actual_return_pct - benchmark_return_pct
+
+    # Evaluation provenance
+    evaluated_price_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True,
+    )  # Trading date whose close produced final_price (<= tracking_end_date)
+    horizon_days: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )  # Trading days derived from the insight's own time_horizon
+    exit_reason: Mapped[str | None] = mapped_column(
+        String(20), nullable=True,
+    )  # "target" | "stop" | "window_end" | "no_data"
+
     # Price history during tracking period
+    #
+    # MutableList so that in-place ``.append(...)`` marks the attribute dirty.
+    # Without it SQLAlchemy never flushes the mutation and every row keeps
+    # exactly the one entry written at creation time.
     price_history: Mapped[list[dict[str, Any]] | None] = mapped_column(
-        JSON,
+        MutableList.as_mutable(JSON),
         default=list,
         nullable=True,
     )  # Daily prices: [{"date": "2026-01-15", "price": 150.25}, ...]
 
     # Intermediate tracking checkpoints
     intermediate_checkpoints: Mapped[dict | None] = mapped_column(
-        JSON, nullable=True, default=dict,
+        MutableDict.as_mutable(JSON), nullable=True, default=dict,
     )  # {"5d": {"price": 150.2, "return_pct": 2.1}, "10d": {...}, ...}
 
     # Price-level trigger flags

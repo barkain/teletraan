@@ -116,11 +116,16 @@ async def get_outcome_summary(
         if o.outcome_category:
             by_category[o.outcome_category] = by_category.get(o.outcome_category, 0) + 1
 
+    # The tracker returns rates as blocks carrying n, window basis, population
+    # and decision rule; unwrap explicitly rather than passing a bare float
+    # around. See InsightOutcomeTracker._rate_block.
+    hit_rate = summary["hit_rate"]
+
     return OutcomeSummaryResponse(
         total_tracked=sum(summary["status_counts"].values()),
         currently_tracking=summary["status_counts"].get(TrackingStatus.TRACKING.value, 0),
-        completed=summary["total_completed"],
-        success_rate=summary["success_rate"],
+        completed=hit_rate["n"],
+        success_rate=hit_rate["rate"],
         avg_return_when_correct=avg_return_correct,
         avg_return_when_wrong=avg_return_wrong,
         by_direction=summary["direction_stats"],

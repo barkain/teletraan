@@ -66,11 +66,14 @@ class StartTrackingRequest(BaseModel):
     predicted_direction: str = Field(
         description="Predicted price direction: 'bullish', 'bearish', or 'neutral'"
     )
-    tracking_days: int = Field(
-        default=20,
+    tracking_days: int | None = Field(
+        default=None,
         ge=1,
         le=252,
-        description="Number of trading days to track (default 20, max 252)",
+        description=(
+            "Number of trading days to track. Omit to derive the window from "
+            "the insight's own time_horizon (the normal case); max 252."
+        ),
     )
 
 
