@@ -349,6 +349,7 @@ async def test_summary_never_emits_a_bare_hit_rate(db_session):
         "decision_rule",
         "benchmark_symbol",
         "alpha_threshold_pct",
+        "in_band_treatment",
     ):
         assert key in block, f"rate block missing {key}"
     assert block["n"] == 1

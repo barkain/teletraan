@@ -797,10 +797,16 @@ class InsightOutcomeTracker:
             "window_basis": "stored_tracking_dates",
             "decision_rule": (
                 f"alpha vs {_BENCHMARK_SYMBOL} beyond "
-                f"{_ALPHA_THRESHOLD_PCT}pp, stop/target terminates"
+                f"{_ALPHA_THRESHOLD_PCT}pp, stop/target terminates, "
+                f"in-band counted as miss"
             ),
             "benchmark_symbol": _BENCHMARK_SYMBOL,
             "alpha_threshold_pct": _ALPHA_THRESHOLD_PCT,
+            # Directional calls landing inside the band are misses, not
+            # exclusions. Excluding them would drop ~21% of the book from the
+            # denominator — and precisely the calls that failed to deliver,
+            # which biases the rate in a fixed direction. Worth ~8 points.
+            "in_band_treatment": "counted_as_miss",
             "avg_return_pct": sum(returns) / len(returns) if returns else 0.0,
             "avg_alpha_pct": sum(alphas) / len(alphas) if alphas else None,
             "graded_n": len(alphas),
