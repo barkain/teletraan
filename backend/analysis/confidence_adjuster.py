@@ -4,10 +4,17 @@ This module provides the ConfidenceAdjuster class that adjusts analyst-generated
 confidence scores using historical performance data from InsightOutcome records
 and KnowledgePattern success rates.
 
-The adjustment formula combines:
-1. Base confidence (70% weight) - the analyst's original confidence
-2. Historical accuracy (30% weight) - track record from past predictions
-3. Pattern boost (0-20% bonus) - if matching patterns with >60% success rate
+The adjustment is a normalized weighted average over whichever evidence
+components have enough supporting data:
+1. Base confidence (raw weight 0.6) - the analyst's original confidence
+2. Historical accuracy (raw weight 0.2) - track record for this insight/action
+3. Thematic accuracy (raw weight 0.1) - completed-theme validation rate
+4. Symbol accuracy (raw weight 0.1) - track record for this specific symbol
+
+The raw weights are normalized over the components that are actually present,
+so the applied weights always sum to 1.0. A pattern boost (0-20%) is then added
+on top for matching patterns with >60% success rate, and the result is clamped
+to [0.1, 0.95].
 """
 
 from __future__ import annotations
@@ -56,10 +63,21 @@ class ConfidenceAdjuster:
         ```
     """
 
-    # Weight constants for confidence adjustment formula
+    # Raw weights for the confidence blend. These deliberately do NOT sum to 1.0
+    # on their own: the historical, thematic and symbol components only join the
+    # blend once they have enough supporting data, so `_weighted_average`
+    # normalizes over whichever components are actually present. The applied
+    # weights therefore always sum to 1.0 and the result is a true weighted
+    # average rather than a systematic haircut on the analyst's confidence.
     BASE_WEIGHT = 0.6  # Weight for analyst's original confidence
     HISTORICAL_WEIGHT = 0.2  # Weight for historical track record
     THEMATIC_WEIGHT = 0.1  # Weight for thematic track record (when available)
+    SYMBOL_WEIGHT = 0.1  # Weight for symbol-specific track record (when available)
+
+    # Minimum sample sizes before a component is allowed to join the blend
+    MIN_HISTORICAL_SAMPLE = 5
+    MIN_THEMATIC_SAMPLE = 3
+    MIN_SYMBOL_SAMPLE = 3
 
     # Pattern boost thresholds
     PATTERN_SUCCESS_THRESHOLD = 0.6  # Minimum pattern success rate for boost
@@ -97,8 +115,14 @@ class ConfidenceAdjuster:
         to produce a calibrated confidence score.
 
         Formula:
-            adjusted = (base * 0.7) + (historical * 0.3) + pattern_boost
-            Final confidence is clamped to [0.1, 0.95]
+            adjusted = sum(value_i * weight_i) / sum(weight_i) + pattern_boost
+
+            where the components are base confidence (0.6), historical accuracy
+            (0.2, needs >= 5 outcomes), thematic accuracy (0.1, needs >= 3
+            completed themes) and symbol accuracy (0.1, needs >= 3 outcomes).
+            Dividing by the total raw weight of the present components makes the
+            applied weights sum to 1.0 regardless of which evidence is
+            available. Final confidence is clamped to [0.1, 0.95].
 
         Args:
             base_confidence: Analyst's original confidence score (0.0-1.0)
@@ -113,6 +137,8 @@ class ConfidenceAdjuster:
             - base_confidence: Original analyst confidence
             - historical_accuracy: Historical track record accuracy
             - pattern_boost: Additional boost from pattern matching
+            - applied_weights: Normalized weight actually applied to each
+              component, summing to 1.0
             - reasoning: Human-readable explanation of adjustment
         """
         logger.info(
@@ -149,32 +175,35 @@ class ConfidenceAdjuster:
         # Build reasoning explanation
         reasoning_parts = []
 
-        # Calculate adjusted confidence
-        if total_insights < 5:
-            # Not enough historical data - use base confidence with minimal adjustment
-            adjusted = base_confidence
-            reasoning_parts.append(
-                f"Insufficient historical data ({total_insights} insights). "
-                f"Using analyst confidence of {base_confidence:.1%}."
-            )
-        else:
-            # Apply adjustment formula
-            adjusted = (
-                base_confidence * self.BASE_WEIGHT
-                + historical_accuracy * self.HISTORICAL_WEIGHT
+        # Assemble the blend. Each component contributes only when it has enough
+        # supporting data; the weights are normalized over the ones present.
+        components: list[tuple[str, float, float]] = [
+            ("base", base_confidence, self.BASE_WEIGHT),
+        ]
+
+        if total_insights >= self.MIN_HISTORICAL_SAMPLE:
+            components.append(
+                ("historical", historical_accuracy, self.HISTORICAL_WEIGHT)
             )
             reasoning_parts.append(
                 f"Historical accuracy of {historical_accuracy:.1%} "
                 f"from {total_insights} similar insights."
+            )
+        else:
+            reasoning_parts.append(
+                f"Insufficient historical data ({total_insights} insights). "
+                f"Using analyst confidence of {base_confidence:.1%}."
             )
 
         # Blend in thematic track record if available
         try:
             thematic_record = await self.get_thematic_accuracy()
             thematic_total = thematic_record.get("total", 0)
-            if thematic_total >= 3:
+            if thematic_total >= self.MIN_THEMATIC_SAMPLE:
                 thematic_accuracy = thematic_record.get("accuracy", 0.5)
-                adjusted += thematic_accuracy * self.THEMATIC_WEIGHT
+                components.append(
+                    ("thematic", thematic_accuracy, self.THEMATIC_WEIGHT)
+                )
                 reasoning_parts.append(
                     f"Thematic track record of {thematic_accuracy:.1%} "
                     f"from {thematic_total} completed themes."
@@ -182,15 +211,15 @@ class ConfidenceAdjuster:
         except Exception as thematic_err:
             logger.debug("Thematic track record unavailable: %s", thematic_err)
 
-        # Apply symbol-specific adjustment if available and significant
-        if symbol_accuracy is not None and symbol_total >= 3:
-            # Blend in symbol accuracy with small weight
-            symbol_weight = 0.1
-            adjusted = adjusted * (1 - symbol_weight) + symbol_accuracy * symbol_weight
+        # Blend in symbol-specific track record if available and significant
+        if symbol_accuracy is not None and symbol_total >= self.MIN_SYMBOL_SAMPLE:
+            components.append(("symbol", symbol_accuracy, self.SYMBOL_WEIGHT))
             reasoning_parts.append(
                 f"Symbol-specific accuracy of {symbol_accuracy:.1%} "
                 f"from {symbol_total} past predictions."
             )
+
+        adjusted, applied_weights = self._weighted_average(components)
 
         # Apply pattern boost
         if pattern_boost > 0:
@@ -220,6 +249,7 @@ class ConfidenceAdjuster:
             "base_confidence": round(base_confidence, 4),
             "historical_accuracy": round(historical_accuracy, 4),
             "pattern_boost": round(pattern_boost, 4),
+            "applied_weights": applied_weights,
             "reasoning": reasoning,
         }
 
@@ -595,16 +625,53 @@ class ConfidenceAdjuster:
                                          (avg - self.PATTERN_SUCCESS_THRESHOLD) * 0.5))
                     adjusted += boost
 
-        # Apply track-record blending if sufficient data
-        if track_record and track_record.get("total_insights", 0) >= 5:
+        # Apply track-record blending if sufficient data. Normalized over the two
+        # components so this stays a weighted average instead of a 20% haircut.
+        if track_record and track_record.get("total_insights", 0) >= self.MIN_HISTORICAL_SAMPLE:
             hist = track_record.get("success_rate", 0.5)
-            adjusted = adjusted * self.BASE_WEIGHT + hist * self.HISTORICAL_WEIGHT
+            adjusted, _ = self._weighted_average(
+                [
+                    ("base", adjusted, self.BASE_WEIGHT),
+                    ("historical", hist, self.HISTORICAL_WEIGHT),
+                ]
+            )
 
         # Apply time decay
         decay_multiplier = max(0.5, 1.0 - staleness_score * 0.3)
         adjusted = adjusted * decay_multiplier
 
         return round(self._ensure_bounds(adjusted), 4)
+
+    @staticmethod
+    def _weighted_average(
+        components: list[tuple[str, float, float]],
+    ) -> tuple[float, dict[str, float]]:
+        """Combine weighted components into a normalized weighted average.
+
+        The raw class weights are declared per component but do not sum to 1.0,
+        because the historical, thematic and symbol components only participate
+        once they have enough supporting data. Normalizing over the components
+        that are actually present keeps the result a true weighted average: a
+        unanimous set of high inputs can reach the top of the range, and a
+        mid-range input is not silently deflated toward zero.
+
+        Args:
+            components: List of (name, value, raw_weight) tuples.
+
+        Returns:
+            Tuple of (weighted average, {name: normalized_weight}). The
+            normalized weights sum to 1.0. An empty or zero-weight component
+            list yields (0.0, {}).
+        """
+        total_weight = sum(weight for _, _, weight in components)
+        if total_weight <= 0:
+            return 0.0, {}
+
+        normalized = {
+            name: weight / total_weight for name, _, weight in components
+        }
+        value = sum(val * normalized[name] for name, val, _ in components)
+        return value, {name: round(w, 6) for name, w in normalized.items()}
 
     def _ensure_bounds(self, confidence: float) -> float:
         """Clamp confidence to valid bounds.

@@ -2396,10 +2396,18 @@ def _format_duration(seconds: float | None) -> str:
 
 
 def _confidence_color(confidence: float) -> str:
-    """Return color for confidence gauge: green >0.8, yellow 0.6-0.8, red <0.6."""
-    if confidence >= 0.8:
+    """Return color for the confidence gauge, banded around the measured base rate.
+
+    Roughly 35% of directional calls have beaten SPY by more than 2% over their
+    stated horizon, and the synthesis prompt anchors confidence on that number.
+    So a well-calibrated insight typically lands at 0.30-0.55, and the old bands
+    (green >=0.8, red <0.6) would have rendered almost every honest insight red.
+    These bands read relative to the base rate instead: green means the thesis
+    claims a justified edge over it, red means it is below our own hit rate.
+    """
+    if confidence >= 0.55:
         return "#10B981"
-    elif confidence >= 0.6:
+    elif confidence >= 0.35:
         return "#F59E0B"
     return "#EF4444"
 

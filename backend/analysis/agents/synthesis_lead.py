@@ -228,13 +228,13 @@ Synthesize their findings to produce DeepInsight recommendations:
 1. **Identify Convergent Signals** - Where do multiple analysts agree?
 2. **Resolve Conflicts** - When analysts disagree, weigh evidence and explain resolution
 3. **Generate Actionable Insights** - Create specific, tradeable recommendations with concrete price levels
-4. **Assess Confidence** - Weight individual analyst confidence into aggregate scores
+4. **Assess Confidence** - Estimate the probability each thesis is validated within its horizon, anchored to our measured base rate (see Confidence Scoring) — not the count of agreeing analysts
 5. **Highlight Key Risks** - Aggregate and prioritize risk factors
 
 For each recommendation, explain WHY this specific stock/commodity over alternatives in the same sector. Reference specific catalysts, valuation metrics, or technical setups.
 
 ## Conflict Resolution Rules
-- Technical + Macro alignment = HIGH confidence
+- Technical + Macro alignment is corroboration only when each rests on its own observable data — it does not by itself raise confidence (see Confidence Scoring)
 - Technical conflicts with Macro = Favor Macro for >1 month horizons, Technical for <1 month
 - Risk warnings override bullish signals if tail risk probability >15%
 - Sector rotation signals should be expressed through the best individual stocks in favored sectors, not ETFs
@@ -347,11 +347,21 @@ For each insight with `related_symbols`, you MUST also provide a `secondary_play
 3. For non-held bearish stocks: use AVOID, never SELL.
 
 ## Confidence Scoring
-- 0.8-1.0: Multiple analysts agree with high individual confidence
-- 0.6-0.8: Majority agreement or strong single-analyst signal with corroboration
-- 0.4-0.6: Mixed signals, moderate conviction
-- 0.2-0.4: Conflicting signals, low conviction
-- 0.0-0.2: High uncertainty, insufficient data
+Confidence is the **probability that this specific thesis is validated within its stated time horizon** — it is NOT a measure of how many analysts agree.
+
+**Anchor on the measured base rate.** Across our tracked history, roughly **35% of directional calls beat SPY by more than 2% over their stated horizon** (n ~ 200). That is the number you start from. Every point above it is a claim that you have an edge on this particular idea.
+
+- **0.30-0.40** — the default. The idea is reasonable but you cannot name what makes it better than our own historical hit rate. Most insights belong here.
+- **0.40-0.55** — a real but modest edge. Name it in the thesis: a specific mispricing, a measured technical level with a defined invalidation, or a concrete flow/positioning asymmetry.
+- **0.55-0.70** — you must justify the number in one explicit clause inside the thesis: a dated catalyst inside the horizon, a quantified valuation gap, or a level-plus-invalidation setup where the risk/reward is at least 3:1. No such clause means the number is too high.
+- **Above 0.70** — reserved for a scheduled, near-term, high-magnitude catalyst with a tight invalidation. Use it rarely. Historically our calls above 0.70 have hit LESS often than our calls below 0.50, so treat this band as a warning sign rather than a reward.
+- **Below 0.30** — the thesis is weaker than our own base rate. Prefer WATCH over an actionable BUY/SELL at this level.
+
+**Analyst agreement is NOT a justification for higher confidence.** Every specialist analyst receives the same discovery context — the market regime call and the selection rationale — before seeing any data, so they share a prior. Their agreement measures common priming, not independent confirmation. Corroboration only counts as evidence when analysts reach the same conclusion from *different observable data*, and in that case name the differing data in the thesis.
+
+**Spread your numbers.** If every insight in this synthesis lands within 0.10 of every other, you have not discriminated between them — rank them and let the confidence values reflect the ranking.
+
+**Conviction must match confidence.** STRONG_BUY / STRONG_SELL require a confidence above 0.55 with the justifying clause present. Escalating the action word without escalating the evidence is the single most common calibration failure.
 
 ## Alternative Data Alignment Check
 When prediction market and/or sentiment data is available, include an alignment assessment:
@@ -417,9 +427,9 @@ Our previous insights have shown the following accuracy:
 
 {track_record_context}
 
-Adjust your confidence levels accordingly:
-- If we've been accurate on similar calls, be more confident
-- If track record is weak for this type, be more conservative
+Use this to move your starting point off the ~35% base rate:
+- If our measured hit rate on this insight/action type is above the base rate, you may start higher for similar calls
+- If it is below the base rate, start lower — and note that a weak track record for a call type is itself a reason to downgrade an actionable recommendation to WATCH
 
 ## Pattern Identification
 If you identify any NEW repeatable patterns in this analysis:
@@ -1550,7 +1560,7 @@ Produce {max_insights} HIGH-CONVICTION investment insights. For each:
 6. **TARGET PRICE**: Price target with timeframe (e.g., "$180 within 3 months")
 7. **STOP LOSS**: Risk management level (e.g., "$142 (-5%)")
 8. **TIMEFRAME**: swing (1-4 weeks) / position (1-3 months) / long-term (3+ months)
-9. **CONFIDENCE**: 0.0-1.0 (be calibrated, not overconfident)
+9. **CONFIDENCE**: 0.0-1.0 — the probability this thesis is validated within the stated timeframe, NOT how many analysts agree (see Confidence Scoring below)
 10. **KEY RISKS**: Top 2 risks to this thesis
 11. **ALIGNMENT SCORE**: How well does this align with macro/sector themes? (1-10)
 12. **RELATED SYMBOLS**: Other tickers related to this play (peers, ETFs, beneficiaries)
@@ -1571,6 +1581,15 @@ When a News Sentiment block (professional financial-headline sentiment + momentu
 - Flag risk and trim confidence when news is DETERIORATING, or when a regulatory/legal/M&A event is present for the symbol.
 - Treat a news vacuum (symbol with little/no coverage) as elevated surprise risk and lower confidence slightly.
 - Note any divergence between news sentiment and the technical/macro picture in the thesis or key_risks.
+
+### Confidence Scoring:
+Confidence is the probability this thesis is validated within its timeframe. Anchor on the measured base rate: roughly 35% of our directional calls beat SPY by more than 2% over their stated horizon (n ~ 200).
+- 0.30-0.40 is the default when you cannot name a specific edge.
+- Above 0.55 requires an explicit justifying clause in the thesis: a dated catalyst inside the timeframe, a quantified mispricing, or a level-plus-invalidation setup with at least 3:1 risk/reward.
+- Above 0.70 is reserved for a scheduled, near-term, high-magnitude catalyst with a tight invalidation — historically our calls above 0.70 hit LESS often than our calls below 0.50.
+- Below 0.30 means the thesis is weaker than our base rate; prefer WATCH over an actionable call.
+- Analyst agreement is NOT a justification. All analysts receive the same discovery context before seeing data, so they share a prior — their agreement measures common priming, not independent confirmation. Corroboration counts only when analysts reach the same conclusion from different observable data.
+- Spread your confidence values across the range; insights all landing within 0.10 of each other means you have not discriminated between them.
 
 ### Quality Requirements:
 - Entry zone should be specific, not vague
