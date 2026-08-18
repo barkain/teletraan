@@ -19,10 +19,7 @@ import math
 
 import pytest
 
-from analysis.agents.synthesis_lead import (
-    AUTONOMOUS_SYNTHESIS_PROMPT,
-    SYNTHESIS_LEAD_PROMPT,
-)
+from analysis.agents.synthesis_lead import SYNTHESIS_LEAD_PROMPT
 from analysis.confidence_adjuster import ConfidenceAdjuster
 
 
@@ -294,11 +291,3 @@ class TestConfidencePromptGuidance:
 
     def test_synthesis_prompt_warns_about_high_confidence_band(self):
         assert "above 0.70 have hit LESS often" in SYNTHESIS_LEAD_PROMPT
-
-    def test_autonomous_prompt_states_base_rate_anchor(self):
-        assert "35%" in AUTONOMOUS_SYNTHESIS_PROMPT
-        assert "beat SPY by more than 2%" in AUTONOMOUS_SYNTHESIS_PROMPT
-        assert "Analyst agreement is NOT a justification" in AUTONOMOUS_SYNTHESIS_PROMPT
-
-    def test_autonomous_prompt_confidence_field_is_probability(self):
-        assert "NOT how many analysts agree" in AUTONOMOUS_SYNTHESIS_PROMPT

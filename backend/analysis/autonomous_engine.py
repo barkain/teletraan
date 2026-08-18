@@ -251,6 +251,78 @@ def _log_statistical_coverage(calculator: Any, symbols: list[str], path: str) ->
 
 
 @dataclass
+class InsightStoreOutcome:
+    """What became of the synthesised insights on the way to the database.
+
+    The store loop drops insights the caller never sees: the entry sanity gate
+    rejects levels that cannot be verified against a live price, a malformed
+    payload can fail to build, and a failed commit discards the whole batch.
+    Recording the counts here is what lets a run state "generated 5, stored 0"
+    rather than leaving that difference in the log file, where the difference
+    between "no opportunities found" and "every opportunity was unverifiable"
+    is invisible to any caller.
+
+    Reporting only: nothing here decides whether an insight is kept.
+    """
+
+    generated: int = 0
+    stored: int = 0
+    gate_rejected: list[str] = field(default_factory=list)
+    build_failures: int = 0
+    commit_failed: bool = False
+
+    def error_entries(self) -> list[str]:
+        """Run-level error strings naming every drop and its reason.
+
+        Empty when everything generated was stored.
+        """
+        entries: list[str] = []
+        if self.commit_failed:
+            entries.append(
+                f"REJECTED: database commit failed -- none of the {self.generated} "
+                "synthesised insight(s) were stored."
+            )
+        if self.gate_rejected:
+            entries.append(
+                f"REJECTED: {len(self.gate_rejected)} of {self.generated} synthesised "
+                "insight(s) dropped by the entry sanity gate (entry zone more than "
+                f"{MAX_ENTRY_DEVIATION_PCT:.0f}% from the live price, or no usable "
+                f"price to check it against): {', '.join(self.gate_rejected)}"
+            )
+        if self.build_failures:
+            entries.append(
+                f"REJECTED: {self.build_failures} of {self.generated} synthesised "
+                "insight(s) could not be built and were discarded."
+            )
+        if self.generated and not self.stored:
+            entries.append(
+                f"NO INSIGHTS STORED: synthesis generated {self.generated} insight(s) "
+                "and every one was rejected before storage. This run produced no "
+                "recommendations, which is not the same as finding no opportunities."
+            )
+        return entries
+
+    def summary_parts(self) -> list[str]:
+        """Phase-summary fragments describing what was dropped, if anything."""
+        parts: list[str] = []
+        if self.gate_rejected:
+            parts.append(
+                f"Dropped {len(self.gate_rejected)} at the entry sanity gate: "
+                f"{', '.join(self.gate_rejected)}."
+            )
+        if self.build_failures:
+            parts.append(f"Dropped {self.build_failures} that failed to build.")
+        if self.commit_failed:
+            parts.append("Database commit failed -- nothing was stored.")
+        if self.generated and not self.stored:
+            parts.append(
+                "NO INSIGHTS STORED -- every synthesised insight was rejected "
+                "before storage."
+            )
+        return parts
+
+
+@dataclass
 class AutonomousAnalysisResult:
     """Complete result from autonomous analysis pipeline."""
 
@@ -477,6 +549,11 @@ class AutonomousDeepEngine:
 
         # Per-run metrics accumulator (set at the start of each analysis run)
         self._run_metrics: RunMetrics | None = None
+
+        # What the last store call did with the insights handed to it. The
+        # store methods return only what they kept, so the pipeline reads the
+        # drops from here to report them.
+        self._last_store_outcome: InsightStoreOutcome | None = None
 
         # Activity log for live LLM tracking (scoped per task_id)
         self._activity_log: list[LLMActivityEntry] = []
@@ -1005,6 +1082,9 @@ class AutonomousDeepEngine:
         # Initialise per-run metrics accumulator
         metrics = RunMetrics()
         self._run_metrics = metrics
+
+        # Drop any store accounting left over from a previous run.
+        self._last_store_outcome = None
         try:
             from config import get_settings  # type: ignore[import-not-found]
             cfg = get_settings()
@@ -1668,6 +1748,16 @@ class AutonomousDeepEngine:
             )
             result.insights = saved_insights
 
+        # What the store call actually kept. Reporting the generated count
+        # alone lets a run claim "Generated 3 insights" while result.insights is
+        # empty, so the drops are surfaced in both result.errors and the phase
+        # summary -- same treatment the freshness partition and the heatmap
+        # fallback already get.
+        store_outcome = self._last_store_outcome or InsightStoreOutcome(
+            generated=len(insights_data), stored=len(saved_insights)
+        )
+        result.errors.extend(store_outcome.error_entries())
+
         # Capture synthesis summary
         actions = [i.get("action", "HOLD") for i in insights_data]
         avg_conf = (
@@ -1676,7 +1766,9 @@ class AutonomousDeepEngine:
         )
         titles = [i.get("title", "")[:40] for i in insights_data[:3]]
         synth_parts = [
-            f"Generated {len(insights_data)} insights (avg confidence: {avg_conf:.0%}).",
+            f"Generated {len(insights_data)} insights, stored {store_outcome.stored} "
+            f"(avg confidence: {avg_conf:.0%}).",
+            *store_outcome.summary_parts(),
         ]
         if actions:
             from collections import Counter
@@ -3097,7 +3189,8 @@ class AutonomousDeepEngine:
             List of created DeepInsight objects.
         """
         stored: list[DeepInsight] = []
-        rejected = 0
+        outcome = InsightStoreOutcome(generated=len(insights_data))
+        self._last_store_outcome = outcome
 
         # Build a lookup for opportunity types from heatmap selections
         heatmap_opp_types: dict[str, str] = {
@@ -3144,7 +3237,7 @@ class AutonomousDeepEngine:
                 if not await self._passes_entry_sanity_gate(
                     primary_symbol, entry_zone, pre_context
                 ):
-                    rejected += 1
+                    outcome.gate_rejected.append(primary_symbol or "<no symbol>")
                     continue
 
                 insight = DeepInsight(
@@ -3199,21 +3292,24 @@ class AutonomousDeepEngine:
 
             except Exception as e:
                 logger.error(f"Failed to create insight: {e}")
+                outcome.build_failures += 1
                 continue
 
-        if rejected:
+        if outcome.gate_rejected:
             logger.warning(
                 "[GATE] Dropped %d/%d insights whose entry zone failed the "
                 "price sanity gate",
-                rejected, len(insights_data),
+                len(outcome.gate_rejected), len(insights_data),
             )
 
         if stored:
             try:
                 await session.commit()
+                outcome.stored = len(stored)
                 logger.info(f"Stored {len(stored)} insights to database")
             except Exception as commit_err:
                 logger.error(f"DB commit failed for {len(stored)} insights: {commit_err}")
+                outcome.commit_failed = True
                 await session.rollback()
                 self._dump_synthesis_debug(
                     f"COMMIT_ERROR: {commit_err}\n\nInsights data:\n{json.dumps(insights_data, indent=2, default=str)}"
@@ -3572,6 +3668,12 @@ class AutonomousDeepEngine:
                 )
                 result.insights = saved_insights
 
+            # Same store-time accounting as the heatmap path (see above).
+            l_store_outcome = self._last_store_outcome or InsightStoreOutcome(
+                generated=len(insights_data), stored=len(saved_insights)
+            )
+            result.errors.extend(l_store_outcome.error_entries())
+
             # Capture legacy synthesis summary
             l_actions = [i.get("action", "HOLD") for i in insights_data]
             l_avg_conf = (
@@ -3580,7 +3682,9 @@ class AutonomousDeepEngine:
             )
             l_titles = [i.get("title", "")[:40] for i in insights_data[:3]]
             ls_parts = [
-                f"Generated {len(insights_data)} insights (avg confidence: {l_avg_conf:.0%}).",
+                f"Generated {len(insights_data)} insights, stored "
+                f"{l_store_outcome.stored} (avg confidence: {l_avg_conf:.0%}).",
+                *l_store_outcome.summary_parts(),
             ]
             if l_actions:
                 from collections import Counter
@@ -4445,7 +4549,8 @@ class AutonomousDeepEngine:
             List of created DeepInsight objects.
         """
         stored: list[DeepInsight] = []
-        rejected = 0
+        outcome = InsightStoreOutcome(generated=len(insights_data))
+        self._last_store_outcome = outcome
 
         for data in insights_data:
             try:
@@ -4485,7 +4590,9 @@ class AutonomousDeepEngine:
                 if not await self._passes_entry_sanity_gate(
                     data.get("primary_symbol"), entry_zone, pre_context
                 ):
-                    rejected += 1
+                    outcome.gate_rejected.append(
+                        data.get("primary_symbol") or "<no symbol>"
+                    )
                     continue
 
                 insight = DeepInsight(
@@ -4541,21 +4648,24 @@ class AutonomousDeepEngine:
 
             except Exception as e:
                 logger.error(f"Failed to create insight: {e}")
+                outcome.build_failures += 1
                 continue
 
-        if rejected:
+        if outcome.gate_rejected:
             logger.warning(
                 "[GATE] Dropped %d/%d legacy insights whose entry zone failed "
                 "the price sanity gate",
-                rejected, len(insights_data),
+                len(outcome.gate_rejected), len(insights_data),
             )
 
         if stored:
             try:
                 await session.commit()
+                outcome.stored = len(stored)
                 logger.info(f"Stored {len(stored)} insights to database")
             except Exception as commit_err:
                 logger.error(f"DB commit failed for {len(stored)} insights (legacy): {commit_err}")
+                outcome.commit_failed = True
                 await session.rollback()
                 self._dump_synthesis_debug(
                     f"COMMIT_ERROR_LEGACY: {commit_err}\n\nInsights data:\n{json.dumps(insights_data, indent=2, default=str)}"
