@@ -178,6 +178,27 @@ class LLMActivityEntry:
 VALID_INSIGHT_TYPES = {t.value for t in InsightType}
 VALID_ACTIONS = {a.value for a in InsightAction}
 
+# Long-only enforcement. The owner's decision: this system takes long
+# positions in stocks and never shorts. Measured on 209 graded directional
+# calls, the system's own BUY/SELL direction hit 44.98% for +0.40% mean alpha,
+# while going long the same selected names hit 54.55% for +1.47%. The long
+# calls are identical between the two rules; the entire gap is the short book,
+# which was right 13 times out of 46 (28.3%).
+#
+# SELL and STRONG_SELL were always meant to mean "exit a position you hold" --
+# a long-only action -- and the synthesis prompt has said so since it was
+# written. Nothing checked it, so every one of the 60 portfolio-only calls in
+# the database was issued on a symbol the (empty) portfolio never held: naked
+# shorts by accident. This map is the correction applied when that happens.
+#
+# BUY_MORE is not a short, but it claims a position that does not exist, so it
+# becomes the new long it actually describes.
+LONG_ONLY_ACTION_FALLBACK = {
+    "SELL": "WATCH",
+    "STRONG_SELL": "WATCH",
+    "BUY_MORE": "BUY",
+}
+
 # Entry-price sanity gate: an insight whose entry midpoint sits further than
 # this from the live price is quoting a stale chart rather than a tradable
 # level, so it is dropped instead of shown. Measured failure: a STRONG_BUY on
@@ -254,20 +275,24 @@ def _log_statistical_coverage(calculator: Any, symbols: list[str], path: str) ->
 class InsightStoreOutcome:
     """What became of the synthesised insights on the way to the database.
 
-    The store loop drops insights the caller never sees: the entry sanity gate
-    rejects levels that cannot be verified against a live price, a malformed
-    payload can fail to build, and a failed commit discards the whole batch.
+    The store loop drops or rewrites insights the caller never sees: the entry
+    sanity gate rejects levels that cannot be verified against a live price,
+    the long-only guard downgrades a short on a symbol the portfolio does not
+    hold, a malformed payload can fail to build, and a failed commit discards
+    the whole batch.
     Recording the counts here is what lets a run state "generated 5, stored 0"
     rather than leaving that difference in the log file, where the difference
     between "no opportunities found" and "every opportunity was unverifiable"
     is invisible to any caller.
 
-    Reporting only: nothing here decides whether an insight is kept.
+    Reporting only: nothing here decides whether an insight is kept or
+    rewritten; it records what the gates already did.
     """
 
     generated: int = 0
     stored: int = 0
     gate_rejected: list[str] = field(default_factory=list)
+    long_only_downgraded: list[str] = field(default_factory=list)
     build_failures: int = 0
     commit_failed: bool = False
 
@@ -289,6 +314,14 @@ class InsightStoreOutcome:
                 f"{MAX_ENTRY_DEVIATION_PCT:.0f}% from the live price, or no usable "
                 f"price to check it against): {', '.join(self.gate_rejected)}"
             )
+        if self.long_only_downgraded:
+            entries.append(
+                f"LONG-ONLY: {len(self.long_only_downgraded)} of {self.generated} "
+                "synthesised insight(s) named a portfolio-only action on a symbol "
+                "the portfolio does not hold. This is a long-only system -- it "
+                "does not short -- so the action was downgraded and the analysis "
+                f"kept: {', '.join(self.long_only_downgraded)}"
+            )
         if self.build_failures:
             entries.append(
                 f"REJECTED: {self.build_failures} of {self.generated} synthesised "
@@ -309,6 +342,11 @@ class InsightStoreOutcome:
             parts.append(
                 f"Dropped {len(self.gate_rejected)} at the entry sanity gate: "
                 f"{', '.join(self.gate_rejected)}."
+            )
+        if self.long_only_downgraded:
+            parts.append(
+                f"Downgraded {len(self.long_only_downgraded)} to a long-only "
+                f"action: {', '.join(self.long_only_downgraded)}."
             )
         if self.build_failures:
             parts.append(f"Dropped {self.build_failures} that failed to build.")
@@ -2412,14 +2450,54 @@ class AutonomousDeepEngine:
         return lines
 
     @staticmethod
+    def _coerce_long_only_action(
+        action: str,
+        symbol: str | None,
+        held_symbols: set[str],
+    ) -> tuple[str, str | None]:
+        """Apply the long-only rule to one action, returning what may be stored.
+
+        This is the single statement of the rule; both the synthesis-time
+        normaliser and the store-path guard call it so the two cannot drift.
+
+        SELL, STRONG_SELL and BUY_MORE all presuppose an existing position.
+        On a symbol the portfolio does not hold, SELL/STRONG_SELL is a naked
+        short -- which this system does not take -- and BUY_MORE is a new long
+        wearing the wrong label. The observation behind the call may still be
+        worth keeping, so a bearish call is downgraded to WATCH rather than
+        discarded: WATCH is non-directional, so it starts no outcome tracking
+        and is never graded as a trade.
+
+        Args:
+            action: Proposed action, already upper-cased.
+            symbol: Primary symbol of the insight, or None for basket insights.
+            held_symbols: Upper-cased symbols the portfolio currently holds.
+
+        Returns:
+            ``(action, violation)`` where *action* is what may be stored and
+            *violation* is a short "SYMBOL SELL->WATCH" note when the action
+            was changed, or None when it was already permitted.
+        """
+        replacement = LONG_ONLY_ACTION_FALLBACK.get(action)
+        if replacement is None:
+            return action, None
+        if symbol and symbol.upper() in held_symbols:
+            # A genuine exit (or add) on a position that actually exists.
+            return action, None
+        return replacement, f"{symbol or '<no symbol>'} {action}->{replacement}"
+
+    @staticmethod
     def _enforce_portfolio_action_rules(
         insights: list[dict[str, Any]],
         portfolio_holdings: dict[str, dict[str, float]] | None,
     ) -> list[dict[str, Any]]:
-        """Enforce portfolio-aware action rules.
+        """Enforce portfolio-aware action rules on freshly parsed insights.
 
-        - SELL/STRONG_SELL on non-held stocks → AVOID
-        - HOLD/BUY_MORE on non-held stocks → WATCH/BUY respectively
+        Long-only coercion (SELL/STRONG_SELL/BUY_MORE on a non-held symbol) is
+        delegated to :meth:`_coerce_long_only_action`. HOLD on a non-held
+        symbol is not a long-only violation -- it is untracked and
+        non-directional -- but it is still meaningless, so it is normalised to
+        WATCH here.
 
         Args:
             insights: Parsed insight dicts from synthesis.
@@ -2430,27 +2508,26 @@ class AutonomousDeepEngine:
         """
         if not insights:
             return insights
-        held_symbols = set((portfolio_holdings or {}).keys())
+        held_symbols = {s.upper() for s in (portfolio_holdings or {})}
         for insight in insights:
             action = insight.get("action", "")
             symbol = insight.get("primary_symbol", "")
             if not symbol or symbol.upper() in held_symbols:
                 continue
-            if action in ("SELL", "STRONG_SELL"):
+            corrected, violation = AutonomousDeepEngine._coerce_long_only_action(
+                action, symbol, held_symbols
+            )
+            if violation:
                 logger.info(
-                    f"[AUTO] Converting {action} → AVOID for {symbol} (not in portfolio)"
+                    "[AUTO] Long-only: converting %s → %s for %s (not in portfolio)",
+                    action, corrected, symbol,
                 )
-                insight["action"] = "AVOID"
+                insight["action"] = corrected
             elif action == "HOLD":
                 logger.info(
                     f"[AUTO] Converting HOLD → WATCH for {symbol} (not in portfolio)"
                 )
                 insight["action"] = "WATCH"
-            elif action == "BUY_MORE":
-                logger.info(
-                    f"[AUTO] Converting BUY_MORE → BUY for {symbol} (not in portfolio)"
-                )
-                insight["action"] = "BUY"
         return insights
 
     @staticmethod
@@ -3164,6 +3241,29 @@ class AutonomousDeepEngine:
         )
         return True
 
+    async def _held_symbols_for_guard(
+        self, insights_data: list[dict[str, Any]]
+    ) -> set[str]:
+        """Portfolio symbols the long-only guard checks against.
+
+        Loaded only when the batch actually contains an action that needs a
+        position to be legal, so a run of ordinary BUY/WATCH insights costs no
+        extra query. An unreadable portfolio yields the empty set, which is the
+        strict reading: nothing is held, so no exit is permitted.
+
+        Args:
+            insights_data: The synthesised insight dicts about to be stored.
+
+        Returns:
+            Upper-cased held symbols, empty when none are needed or held.
+        """
+        if not any(
+            (d.get("action") or "").upper() in LONG_ONLY_ACTION_FALLBACK
+            for d in insights_data
+        ):
+            return set()
+        return {s.upper() for s in await self._get_portfolio_holdings()}
+
     async def _store_insights_from_heatmap(
         self,
         session: Any,
@@ -3191,6 +3291,7 @@ class AutonomousDeepEngine:
         stored: list[DeepInsight] = []
         outcome = InsightStoreOutcome(generated=len(insights_data))
         self._last_store_outcome = outcome
+        held_symbols = await self._held_symbols_for_guard(insights_data)
 
         # Build a lookup for opportunity types from heatmap selections
         heatmap_opp_types: dict[str, str] = {
@@ -3210,8 +3311,22 @@ class AutonomousDeepEngine:
                 if action not in VALID_ACTIONS:
                     action = "HOLD"
 
-                # Get opportunity type from heatmap selections
                 primary_symbol = data.get("primary_symbol")
+
+                # Long-only guard: the last check before the database. The
+                # prompt states the rule; this is what makes it true.
+                action, long_only_violation = self._coerce_long_only_action(
+                    action, primary_symbol, held_symbols
+                )
+                if long_only_violation:
+                    outcome.long_only_downgraded.append(long_only_violation)
+                    logger.warning(
+                        "[LONG-ONLY] %s: %s is not a held position, so the "
+                        "action is not available to a long-only system",
+                        long_only_violation, primary_symbol or "<no symbol>",
+                    )
+
+                # Get opportunity type from heatmap selections
                 opportunity_type = heatmap_opp_types.get(
                     primary_symbol, "unknown"
                 ) if primary_symbol else "unknown"
@@ -4551,6 +4666,7 @@ class AutonomousDeepEngine:
         stored: list[DeepInsight] = []
         outcome = InsightStoreOutcome(generated=len(insights_data))
         self._last_store_outcome = outcome
+        held_symbols = await self._held_symbols_for_guard(insights_data)
 
         for data in insights_data:
             try:
@@ -4564,9 +4680,24 @@ class AutonomousDeepEngine:
                 if action not in VALID_ACTIONS:
                     action = "HOLD"
 
+                primary_symbol = data.get("primary_symbol")
+
+                # Long-only guard: the last check before the database. The
+                # prompt states the rule; this is what makes it true.
+                action, long_only_violation = self._coerce_long_only_action(
+                    action, primary_symbol, held_symbols
+                )
+                if long_only_violation:
+                    outcome.long_only_downgraded.append(long_only_violation)
+                    logger.warning(
+                        "[LONG-ONLY] %s: %s is not a held position, so the "
+                        "action is not available to a long-only system",
+                        long_only_violation, primary_symbol or "<no symbol>",
+                    )
+
                 # Get opportunity type for data_sources
                 opportunity_type = self._get_opportunity_type(
-                    data.get("primary_symbol"), candidates
+                    primary_symbol, candidates
                 )
 
                 # Build data sources list with discovery metadata

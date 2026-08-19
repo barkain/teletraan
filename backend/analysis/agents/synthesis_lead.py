@@ -60,7 +60,7 @@ class DeepInsightData:
     """Structured data for a single deep insight."""
 
     insight_type: str  # opportunity, risk, rotation, macro, divergence, correlation
-    action: str  # STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL, WATCH, AVOID
+    action: str  # STRONG_BUY, BUY, BUY_MORE, HOLD, SELL, STRONG_SELL, WATCH
     title: str
     thesis: str
     primary_symbol: str | None = None
@@ -332,19 +332,40 @@ For each insight with `related_symbols`, you MUST also provide a `secondary_play
 - Keep it concise: one sentence per related symbol, separated by semicolons.
 
 ## Action Levels
-- **STRONG_BUY**: High conviction new position, multiple confirming signals, favorable risk/reward
-- **BUY**: Open a new position with moderate confidence
-- **BUY_MORE**: Add to an existing portfolio position — **ONLY for stocks listed in Portfolio Holdings** where thesis remains bullish
-- **HOLD**: Maintain current position, no clear add or exit signal — **ONLY for stocks listed in Portfolio Holdings**
-- **SELL**: Exit or reduce position — **ONLY for stocks listed in Portfolio Holdings**
-- **STRONG_SELL**: High conviction bearish, urgent exit recommended — **ONLY for stocks listed in Portfolio Holdings**
-- **WATCH**: Interesting setup but needs confirmation (non-held stocks)
-- **AVOID**: Bearish view on a stock NOT in the portfolio — use instead of SELL/STRONG_SELL for non-held stocks
+
+**THIS IS A LONG-ONLY SYSTEM. IT DOES NOT SHORT.** The only position it can take
+in a stock is a long one. There is no action in this vocabulary that opens a
+bearish position, and none may be invented. SELL and STRONG_SELL mean **exit or
+reduce a long position that is currently held** — they are portfolio actions, not
+bets against a stock.
+
+The five actions available for a stock **NOT** in Portfolio Holdings:
+- **STRONG_BUY**: High conviction new long, multiple confirming signals, favorable risk/reward
+- **BUY**: Open a new long with moderate confidence
+- **WATCH**: Interesting setup but needs confirmation — also the correct action for a
+  stock you are bearish on. "Do not buy this" is fully expressed by not buying it.
+
+The three actions available **ONLY** for a stock listed in Portfolio Holdings:
+- **BUY_MORE**: Add to the existing position where the thesis remains bullish
+- **HOLD**: Keep the position, no clear add or exit signal
+- **SELL**: Exit or reduce the position
+- **STRONG_SELL**: High conviction that the position should be exited urgently
 
 **CRITICAL RULES**:
-1. For stocks in Portfolio Holdings: use BUY_MORE (add), HOLD (keep), SELL (reduce/exit), or STRONG_SELL (urgent exit). Do NOT use BUY for a stock you already own — use BUY_MORE.
-2. SELL, STRONG_SELL, BUY_MORE, and HOLD are EXCLUSIVELY for stocks listed in Portfolio Holdings.
-3. For non-held bearish stocks: use AVOID, never SELL.
+1. BUY_MORE, HOLD, SELL and STRONG_SELL are EXCLUSIVELY for stocks listed in
+   Portfolio Holdings. Each of them presupposes a position that already exists.
+   Using one on a stock that is not held is a short, and shorting is not permitted.
+2. **If the Portfolio Holdings section below is empty or absent, those four actions
+   are unavailable entirely.** Every insight in this synthesis must then be
+   STRONG_BUY, BUY or WATCH. There is no exception to this.
+3. Do NOT use BUY or STRONG_BUY for a stock you already own — use BUY_MORE.
+4. A bearish view on a stock that is not held is expressed as **WATCH**, with the
+   bearish reasoning stated in the thesis. Never as SELL or STRONG_SELL.
+
+These rules are enforced after you respond: a portfolio-only action on a stock that
+is not held is downgraded automatically (SELL/STRONG_SELL to WATCH, BUY_MORE to
+BUY) and the violation is reported against this run. Emitting one does not produce
+the recommendation you wrote — it produces a downgraded one and an error line.
 
 ## Confidence Scoring
 Confidence is the **probability that this specific thesis is validated within its stated time horizon** — it is NOT a measure of how many analysts agree.
