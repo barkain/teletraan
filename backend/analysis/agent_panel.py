@@ -154,18 +154,60 @@ def _mentions(text: Any, symbol: str) -> bool:
     return re.search(pattern, text) is not None
 
 
-def _evidence(symbol: str, analyst: str, claims: list[str], counter: bool = False) -> list[dict[str, str]]:
+# Evidence buckets.  These name the *direction of the claim itself*, never its
+# agreement with the stance this module derived for the report.  Filing by
+# agreement is what put an AMD ``oversold`` finding -- whose own description
+# said the selloff was overdone and the recovery may continue -- under a
+# heading reading "evidence against", and what printed a neutral sector
+# paragraph under "evidence for".  A HOLD/NEUTRAL claim is neither.
+EVIDENCE_BUCKETS = ("bullish", "bearish", "neutral_or_mixed", "conflicting")
+
+# The bucket key each one carries in a decision dict.  ``conflicting`` keeps the
+# technical analyst's own field name rather than being sorted into a direction:
+# ``conflicting_signals`` means "signals that conflict with my read", which is
+# the analyst's statement, not the orchestrator's inference.
+EVIDENCE_KEYS = {
+    "bullish": "bullish_evidence",
+    "bearish": "bearish_evidence",
+    "neutral_or_mixed": "neutral_or_mixed_evidence",
+    "conflicting": "conflicting_signals",
+}
+
+_ID_MARKER = {
+    "bullish": "bull",
+    "bearish": "bear",
+    "neutral_or_mixed": "mixed",
+    "conflicting": "conflict",
+}
+
+
+def _evidence(symbol: str, analyst: str, claims: list[str], kind: str = "bullish") -> list[dict[str, str]]:
     """Attach stable IDs to claims.
 
-    The orchestrator assigns IDs after parsing, never the model, so a synthesis
-    citation can be checked mechanically against the panel it was given.
+    The ID names the bucket the claim was filed in, so a later citation check
+    can verify not merely that an ID exists but that it was cited on the side it
+    was actually filed on.  The orchestrator assigns IDs after parsing, never
+    the model, so a synthesis citation can be checked mechanically against the
+    panel it was given.
     """
-    marker = "c" if counter else ""
+    marker = _ID_MARKER[kind]
     return [
         {"id": f"{symbol}:{analyst}:{marker}{index}", "claim": claim}
         for index, claim in enumerate(claims, start=1)
         if claim
     ]
+
+
+def _buckets(
+    symbol: str,
+    analyst: str,
+    claims: dict[str, list[str]],
+) -> dict[str, list[dict[str, str]]]:
+    """Render every bucket for one analyst, in the module's canonical order."""
+    return {
+        EVIDENCE_KEYS[kind]: _evidence(symbol, analyst, claims.get(kind) or [], kind)
+        for kind in EVIDENCE_BUCKETS
+    }
 
 
 # =============================================================================
@@ -208,6 +250,21 @@ def _technical_stance(findings: list[dict[str, Any]]) -> tuple[str | None, str]:
     return "MIXED", basis
 
 
+def _finding_direction(finding: dict[str, Any]) -> str:
+    """Which bucket a finding belongs in, read from its own ``action_bias``.
+
+    ``BUY``/``SELL`` are directional claims; ``HOLD``/``NEUTRAL``, and any
+    finding that states no bias at all, are neither for nor against and go to
+    ``neutral_or_mixed``.  Nothing here consults the report's derived stance.
+    """
+    bias = str(finding.get("action_bias", "")).upper()
+    if bias in _BULLISH_BIAS:
+        return "bullish"
+    if bias in _BEARISH_BIAS:
+        return "bearish"
+    return "neutral_or_mixed"
+
+
 def _finding_claim(finding: dict[str, Any]) -> str:
     """One technical finding as a single citable claim."""
     signal = _opt_str(finding.get("signal")) or "finding"
@@ -244,25 +301,31 @@ def build_technical_view(symbol: str, raw: Any) -> dict[str, Any]:
     findings = [f for f in (report.get("findings") or []) if isinstance(f, dict)]
     stance, basis = _technical_stance(findings)
 
-    bullish_first = stance != "UNFAVORABLE"
+    # Bucket by each finding's own action_bias.  The previous rule was
+    # "aligned with the stance we derived / not aligned with it", with
+    # ``bullish_first = stance != "UNFAVORABLE"`` silently making bullish the
+    # default side for a MIXED report.  That filed HOLD/NEUTRAL findings as
+    # "evidence against" a stance their own text did not oppose.
+    bucketed: dict[str, list[dict[str, Any]]] = {
+        "bullish": [],
+        "bearish": [],
+        "neutral_or_mixed": [],
+    }
+    for finding in findings:
+        bucketed[_finding_direction(finding)].append(finding)
 
-    def aligned(finding: dict[str, Any]) -> bool:
-        bias = str(finding.get("action_bias", "")).upper()
-        return bias in (_BULLISH_BIAS if bullish_first else _BEARISH_BIAS)
+    kept = {kind: items[:MAX_TECHNICAL_FINDINGS] for kind, items in bucketed.items()}
+    shown = sum(len(items) for items in kept.values())
 
-    supporting = [f for f in findings if aligned(f)] or findings
-    opposing = [f for f in findings if not aligned(f) and f not in supporting]
-
-    evidence_claims = [_finding_claim(f) for f in supporting[:MAX_TECHNICAL_FINDINGS]]
-    counter_claims = [_finding_claim(f) for f in opposing[:MAX_TECHNICAL_FINDINGS]]
-    # Every conflicting signal survives: they are the analyst's own statement of
-    # what argues against its read, and they are cheap.
-    counter_claims += [
+    claims = {kind: [_finding_claim(f) for f in items] for kind, items in kept.items()}
+    # Every conflicting signal survives, under the analyst's own field name:
+    # they are its statement of what argues against its read, and they are cheap.
+    claims["conflicting"] = [
         text for text in (_opt_str(c) for c in (report.get("conflicting_signals") or [])) if text
     ]
 
     invalidation = []
-    for finding in supporting:
+    for finding in findings:
         stop = _opt_float(finding.get("stop_loss"))
         if stop is not None:
             signal = _opt_str(finding.get("signal")) or "setup"
@@ -278,8 +341,7 @@ def build_technical_view(symbol: str, raw: Any) -> dict[str, Any]:
             "stance_basis": basis,
             "confidence": _opt_float(report.get("confidence")),
             "thesis": _opt_str(report.get("market_structure")),
-            "evidence": _evidence(symbol, "technical", evidence_claims),
-            "counter_evidence": _evidence(symbol, "technical", counter_claims, counter=True),
+            **_buckets(symbol, "technical", claims),
             "invalidation": invalidation,
         },
         "details": {
@@ -289,9 +351,9 @@ def build_technical_view(symbol: str, raw: Any) -> dict[str, Any]:
             "timeframes_analyzed": [
                 t for t in (_opt_str(x) for x in (report.get("timeframes_analyzed") or [])) if t
             ],
-            "findings_shown": len(evidence_claims),
+            "findings_shown": shown,
             "findings_total": len(findings),
-            "truncated": len(evidence_claims) < len(supporting),
+            "truncated": shown < len(findings),
         },
     }
 
@@ -338,20 +400,32 @@ def build_sector_view(symbol: str, raw: Any) -> dict[str, Any]:
     report = clean_report(raw) or {}
     stance, basis = _sector_stance(report, symbol)
 
-    target_claims: list[str] = []
+    # A rotation signal or an observation that merely names the target states no
+    # direction on it, so it is neither for nor against: it goes to
+    # neutral_or_mixed rather than being printed under a "for" heading.  A
+    # recommendation is filed by its own action word.
+    claims: dict[str, list[str]] = {"bullish": [], "bearish": [], "neutral_or_mixed": []}
     for signal in report.get("rotation_signals") or []:
         text = _opt_str(signal)
         if text and _mentions(text, symbol):
-            target_claims.append(f"rotation: {text}")
+            claims["neutral_or_mixed"].append(f"rotation: {text}")
     for observation in report.get("key_observations") or []:
         text = _opt_str(observation)
         if text and _mentions(text, symbol):
-            target_claims.append(text)
+            claims["neutral_or_mixed"].append(text)
     for rec in report.get("recommendations") or []:
         if isinstance(rec, dict) and _mentions(rec.get("rationale"), symbol):
             sector = _opt_str(rec.get("sector")) or "sector"
             action = _opt_str(rec.get("action")) or "NEUTRAL"
-            target_claims.append(f"{sector} {action}: {rec.get('rationale')}")
+            upper = action.upper()
+            kind = (
+                "bullish" if upper.startswith("OVER")
+                else "bearish" if upper.startswith("UNDER")
+                else "neutral_or_mixed"
+            )
+            claims[kind].append(f"{sector} {action}: {rec.get('rationale')}")
+    target_mentions = sum(len(items) for items in claims.values())
+    claims = {kind: items[:MAX_EVIDENCE_ITEMS] for kind, items in claims.items()}
 
     phase = _opt_str(report.get("market_phase"))
     phase_confidence = _opt_float(report.get("phase_confidence"))
@@ -371,9 +445,7 @@ def build_sector_view(symbol: str, raw: Any) -> dict[str, Any]:
             )
             if phase
             else None,
-            "evidence": _evidence(symbol, "sector", target_claims[:MAX_EVIDENCE_ITEMS]),
-            # Not elicited: the sector contract has no counter-evidence field.
-            "counter_evidence": [],
+            **_buckets(symbol, "sector", claims),
             "invalidation": [],
         },
         "details": {
@@ -381,8 +453,10 @@ def build_sector_view(symbol: str, raw: Any) -> dict[str, Any]:
             "phase_confidence": phase_confidence,
             "rankings_reported": len(report.get("sector_rankings") or []),
             "recommendations_reported": len(report.get("recommendations") or []),
-            "target_mentions": len(target_claims),
-            "counter_evidence_elicited": False,
+            "target_mentions": target_mentions,
+            # The sector contract has no for/against field at all, so an empty
+            # bearish bucket here is "never asked", not "nothing found".
+            "directional_evidence_elicited": False,
         },
     }
 
@@ -441,10 +515,10 @@ def build_risk_view(symbol: str, raw: Any) -> dict[str, Any]:
     assessment = _select_assessment(normalized.get("risk_assessments") or [], symbol) or {}
     stance, basis = _risk_stance(assessment)
 
-    evidence_claims: list[str] = []
+    bullish_claims: list[str] = []
     ratio = assessment.get("risk_reward")
     if ratio is not None and ratio >= 1.5:
-        evidence_claims.append(
+        bullish_claims.append(
             f"reward/risk {ratio:.2f} to the analyst's own upside target"
             + (f" -- {assessment['risk_reward_note']}" if assessment.get("risk_reward_note") else "")
         )
@@ -494,9 +568,15 @@ def build_risk_view(symbol: str, raw: Any) -> dict[str, Any]:
             "stance_basis": basis,
             "confidence": normalized.get("confidence"),
             "thesis": _opt_str(assessment.get("risk_reward_note")),
-            "evidence": _evidence(symbol, "risk", evidence_claims),
-            "counter_evidence": _evidence(
-                symbol, "risk", counter_claims[:MAX_COUNTER_EVIDENCE_ITEMS + 3], counter=True
+            # Downside scenarios, tail risks and portfolio risks are bearish
+            # claims in their own right -- not "against" some derived stance.
+            **_buckets(
+                symbol,
+                "risk",
+                {
+                    "bullish": bullish_claims,
+                    "bearish": counter_claims[: MAX_COUNTER_EVIDENCE_ITEMS + 3],
+                },
             ),
             "invalidation": list(assessment.get("invalidation") or []),
         },
@@ -529,6 +609,24 @@ _VIEW_BUILDERS = {
 # =============================================================================
 
 
+def _median(values: list[float]) -> float | None:
+    """Median of what was actually reported, or ``None`` if nothing was."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2.0
+
+
+def _rank_disagreement(values: list[float]) -> bool:
+    """Did the analysts report materially different numbers for this sector?"""
+    if len(values) < 2:
+        return False
+    return (max(values) - min(values)) > 1e-9
+
+
 def build_market_wide_sector(analyst_reports: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """Collapse the near-identical per-symbol sector answers into one block.
 
@@ -537,14 +635,27 @@ def build_market_wide_sector(analyst_reports: dict[str, dict[str, Any]]) -> dict
     five sector reports carrying the same eleven-row table.  Rendering that
     table five times would spend the per-symbol budget on duplication; dropping
     it (what the old flatten did) discarded 55 rankings and 27 recommendations
-    per run.  This keeps the table once, records how many runs reported it, and
-    names every distinct market phase with the symbols that reported it — so a
-    disagreement between the per-symbol runs stays visible instead of being
-    averaged away.
+    per run.
+
+    Hoisting it once is right; the first version's *merge* was not.  It kept
+    whichever report had the longest ranking list -- effectively the first, all
+    lengths being equal -- and rendered one number with no provenance.  The five
+    real 2026-08-18 reports did not agree: Energy relative strength was 1.35
+    (AMD), 1.165 (DVN), 4.59 (CL=F), 1.47 (AVGO) and 1.165 (NU).  Presenting one
+    of those as *the* table converts stochastic disagreement into an apparent
+    shared observation, which is exactly the summary the panel exists to remove,
+    and the 4.59 outlier shows the spread is not noise-level.
+
+    So each sector now carries the median, the range, the trend words and the
+    symbols whose run reported them, and each recommendation carries
+    ``reported_by`` instead of first-rationale-wins.  Where the analysts
+    disagree, the block says so in band.
     """
     phases: dict[tuple[str | None, float | None], list[str]] = {}
-    rankings: list[dict[str, Any]] = []
-    recommendations: list[dict[str, Any]] = []
+    # sector -> [{symbol, relative_strength, trend}]
+    ranking_reports: dict[str, list[dict[str, Any]]] = {}
+    # (sector, action) -> {"reported_by": [...], "rationales": [(symbol, text)]}
+    rec_reports: dict[tuple[str, str], dict[str, Any]] = {}
     rotation: list[str] = []
     reporting = 0
 
@@ -556,17 +667,32 @@ def build_market_wide_sector(analyst_reports: dict[str, dict[str, Any]]) -> dict
         key = (_opt_str(report.get("market_phase")), _opt_float(report.get("phase_confidence")))
         phases.setdefault(key, []).append(symbol)
 
-        current = [r for r in (report.get("sector_rankings") or []) if isinstance(r, dict)]
-        if len(current) > len(rankings):
-            rankings = current
+        for ranking in report.get("sector_rankings") or []:
+            if not isinstance(ranking, dict):
+                continue
+            sector = _opt_str(ranking.get("sector"))
+            if not sector:
+                continue
+            ranking_reports.setdefault(sector, []).append(
+                {
+                    "symbol": symbol,
+                    "relative_strength": _opt_float(ranking.get("relative_strength")),
+                    "trend": _opt_str(ranking.get("trend")),
+                }
+            )
         for rec in report.get("recommendations") or []:
             if not isinstance(rec, dict):
                 continue
-            signature = (_opt_str(rec.get("sector")), _opt_str(rec.get("action")))
-            if signature not in {
-                (_opt_str(r.get("sector")), _opt_str(r.get("action"))) for r in recommendations
-            }:
-                recommendations.append(rec)
+            sector = _opt_str(rec.get("sector")) or "unnamed sector"
+            action = _opt_str(rec.get("action")) or "NOT STATED"
+            entry = rec_reports.setdefault(
+                (sector, action), {"reported_by": [], "rationales": []}
+            )
+            if symbol not in entry["reported_by"]:
+                entry["reported_by"].append(symbol)
+            rationale = _opt_str(rec.get("rationale"))
+            if rationale:
+                entry["rationales"].append((symbol, rationale))
         for signal in report.get("rotation_signals") or []:
             text = _opt_str(signal)
             # Symbol-specific signals live in that symbol's own block.
@@ -574,6 +700,61 @@ def build_market_wide_sector(analyst_reports: dict[str, dict[str, Any]]) -> dict
                 _mentions(text, sym) for sym in analyst_reports
             ):
                 rotation.append(text)
+
+    rankings: list[dict[str, Any]] = []
+    for sector, entries in ranking_reports.items():
+        strengths = [e["relative_strength"] for e in entries if e["relative_strength"] is not None]
+        trends: dict[str, list[str]] = {}
+        for entry in entries:
+            if entry["trend"]:
+                trends.setdefault(entry["trend"], []).append(entry["symbol"])
+        rankings.append(
+            {
+                "sector": sector,
+                "relative_strength_median": _median(strengths),
+                "relative_strength_min": min(strengths) if strengths else None,
+                "relative_strength_max": max(strengths) if strengths else None,
+                "reported_by": [e["symbol"] for e in entries],
+                "reporting_count": len(entries),
+                "disagreement": _rank_disagreement(strengths),
+                "trends": [
+                    {"trend": trend, "reported_by": symbols} for trend, symbols in trends.items()
+                ],
+                "values": entries,
+            }
+        )
+    # Highest median relative strength first; a sector nobody put a number on
+    # sorts last rather than being read as zero.
+    rankings.sort(
+        key=lambda r: (r["relative_strength_median"] is not None, r["relative_strength_median"] or 0.0),
+        reverse=True,
+    )
+    ranked = [r for r in rankings if r["relative_strength_median"] is not None]
+
+    # Group recommendations by sector so a split vote is visible as a split.
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for (sector, action), entry in rec_reports.items():
+        grouped.setdefault(sector, []).append(
+            {
+                "action": action,
+                "reported_by": entry["reported_by"],
+                "rationale": entry["rationales"][0][1] if entry["rationales"] else None,
+                "rationale_reported_by": entry["rationales"][0][0] if entry["rationales"] else None,
+                "rationales_reported": len(entry["rationales"]),
+            }
+        )
+    recommendations: list[dict[str, Any]] = []
+    for sector, actions in grouped.items():
+        actions.sort(key=lambda a: len(a["reported_by"]), reverse=True)
+        recommendations.append(
+            {
+                "sector": sector,
+                "actions": actions,
+                "reporting_count": sum(len(a["reported_by"]) for a in actions),
+                "disagreement": len(actions) > 1,
+            }
+        )
+    recommendations.sort(key=lambda r: (not r["disagreement"], -r["reporting_count"]))
 
     return {
         "reporting_runs": reporting,
@@ -583,7 +764,18 @@ def build_market_wide_sector(analyst_reports: dict[str, dict[str, Any]]) -> dict
             for (phase, confidence), symbols in phases.items()
         ],
         "sector_rankings": rankings,
+        "top_sectors": [
+            {"sector": r["sector"], "relative_strength_median": r["relative_strength_median"]}
+            for r in ranked[:3]
+        ],
+        # Never the same rows as ``top_sectors``: a three-sector table has no
+        # bottom, and saying it does would invent a spread.
+        "bottom_sectors": [
+            {"sector": r["sector"], "relative_strength_median": r["relative_strength_median"]}
+            for r in ranked[max(3, len(ranked) - 3) :]
+        ],
         "recommendations": recommendations,
+        "recommendation_disagreements": [r["sector"] for r in recommendations if r["disagreement"]],
         "rotation_signals": rotation,
     }
 

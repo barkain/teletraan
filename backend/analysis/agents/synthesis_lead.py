@@ -236,7 +236,7 @@ For each recommendation, explain WHY this specific stock/commodity over alternat
 ## Conflict Resolution Rules
 - Technical + Macro alignment is corroboration only when each rests on its own observable data — it does not by itself raise confidence (see Confidence Scoring)
 - Technical conflicts with Macro = Favor Macro for >1 month horizons, Technical for <1 month
-- Risk warnings override bullish signals if tail risk probability >15%
+- Tail-risk probability is the risk analyst's own estimate, not a measurement the engine can verify: a high figure is evidence you must weigh and answer explicitly in the thesis and risk_factors, never an automatic override of bullish evidence. Say what would have to be true for it to bind, and set confidence and stop accordingly
 - Sector rotation signals should be expressed through the best individual stocks in favored sectors, not ETFs
 - Correlation breakdowns require investigation before acting
 
@@ -623,20 +623,111 @@ def _panel_money(value: Any) -> str:
         return str(value)
 
 
+# --------------------------------------------------------------------------
+# Panel rendering priorities.  Lower survives longer; 0 never goes.
+# --------------------------------------------------------------------------
+_PRIORITY_MUST_KEEP = 0
+_PRIORITY_HEADLINE = 1
+# Evidence is reserved *by depth, across the sides at once*: the strongest claim
+# on every side is kept before the second claim on any side.  The previous rule
+# gave supporting evidence priority 1 and counter-evidence priority 2, so a
+# symbol over budget lost its dissent first -- backwards for a panel whose whole
+# purpose is letting synthesis adjudicate disagreement, and live in practice
+# (three of five real symbols emit truncation markers).
+_EVIDENCE_PRIORITY_BASE = 10
+# Within one depth, the order in which the sides give way.  Bearish material is
+# the last to go: a block that keeps the bull case and drops the bear case has
+# stopped being an adjudication panel.
+_EVIDENCE_SIDE_ORDER = (
+    "bearish_evidence",
+    "conflicting_signals",
+    "neutral_or_mixed_evidence",
+    "bullish_evidence",
+)
+_PRIORITY_INVALIDATION = 900
+_PRIORITY_EXTRA = 1000
+
+# Buckets, in reading order, with the heading each one is rendered under.  The
+# headings name the direction of the claim itself.  "evidence for"/"evidence
+# against" named agreement with a stance this module derived, which misfiled a
+# HOLD finding as "against" and a neutral sector paragraph as "for".
+_EVIDENCE_HEADINGS = (
+    ("bullish_evidence", "bullish evidence"),
+    ("bearish_evidence", "bearish evidence"),
+    ("neutral_or_mixed_evidence", "neutral or mixed evidence (no direction stated)"),
+    ("conflicting_signals", "conflicting signals -- the analyst's own caveats against its read"),
+)
+
+# A line that only means something if an item survives beneath it.
+_HEADING = "heading"
+
+_TRUNCATION_MARKER = (
+    "  [truncated: {dropped} detail line(s) omitted to stay inside the "
+    "{budget}-character {scope} budget]"
+)
+
+
+def _evidence_priority(bucket: str, depth: int) -> int:
+    """Priority of the ``depth``-th claim in ``bucket`` (depth is 1-based).
+
+    Depth dominates side: every side's first claim outranks every side's
+    second.  That is the "reserve equal space for the strongest evidence on
+    both sides, then spend any remainder on additional support" rule, made
+    arithmetic.
+    """
+    side = _EVIDENCE_SIDE_ORDER.index(bucket) if bucket in _EVIDENCE_SIDE_ORDER else 0
+    return _EVIDENCE_PRIORITY_BASE + (depth - 1) * len(_EVIDENCE_SIDE_ORDER) + side
+
+
+def _indent_of(text: str) -> int:
+    return len(text) - len(text.lstrip())
+
+
+def _drop_orphan_headings(
+    kept: list[tuple[int, str, str]]
+) -> list[tuple[int, str, str]]:
+    """Remove a heading whose items were all trimmed away.
+
+    ``bullish evidence:`` with nothing under it reads as "the analyst had
+    none", which is a different claim from "the budget dropped them".
+    """
+    result: list[tuple[int, str, str]] = []
+    for index, (priority, text, kind) in enumerate(kept):
+        if kind == _HEADING:
+            following = next((t for _, t, _ in kept[index + 1 :] if t.strip()), None)
+            if following is None or _indent_of(following) <= _indent_of(text):
+                continue
+        result.append((priority, text, kind))
+    return result
+
+
 def _fit_to_budget(
-    lines: list[tuple[int, str]],
+    lines: list[tuple[int, str] | tuple[int, str, str]],
     budget: int,
+    scope: str = "per-symbol",
 ) -> list[str]:
     """Trim one symbol's block to its budget, lowest-priority material first.
 
-    ``lines`` is ``(priority, text)`` with 0 = must keep.  Whatever is dropped
-    is counted in an in-band marker: a panel that truncates silently is the
-    defect this module replaces, only smaller.
+    ``lines`` is ``(priority, text)``, or ``(priority, text, _HEADING)`` for a
+    heading, with 0 = must keep.  Whatever is dropped is counted in an in-band
+    marker: a panel that truncates silently is the defect this module replaces,
+    only smaller.
+
+    The marker's own length is reserved before anything is measured, so the
+    budget is the ceiling of the *rendered* block.  Previously the block was fit
+    to 6000 characters and the marker appended afterwards, which is how a real
+    run recorded a 6,151-character symbol under a 6,000-character maximum.
     """
-    kept = list(lines)
+    kept: list[tuple[int, str, str]] = [
+        (item[0], item[1], item[2] if len(item) > 2 else "") for item in lines
+    ]
+    reserve = len(_TRUNCATION_MARKER.format(dropped=999, budget=budget, scope=scope)) + 1
     dropped = 0
-    while kept and sum(len(text) + 1 for _, text in kept) > budget:
-        worst = max(priority for priority, _ in kept)
+    while kept:
+        used = sum(len(text) + 1 for _, text, _ in kept)
+        if used <= budget - (reserve if dropped else 0):
+            break
+        worst = max(priority for priority, _, _ in kept)
         if worst == 0:
             break
         for index in range(len(kept) - 1, -1, -1):
@@ -644,27 +735,26 @@ def _fit_to_budget(
                 del kept[index]
                 dropped += 1
                 break
-    rendered = [text for _, text in kept]
+    rendered = [text for _, text, _ in _drop_orphan_headings(kept)]
     if dropped:
         rendered.append(
-            f"  [truncated: {dropped} detail line(s) omitted to stay inside the "
-            f"{budget}-character per-symbol budget]"
+            _TRUNCATION_MARKER.format(dropped=dropped, budget=budget, scope=scope)
         )
     return rendered
 
 
-def _format_panel_decision(analyst: str, view: dict[str, Any]) -> list[tuple[int, str]]:
+def _format_panel_decision(analyst: str, view: dict[str, Any]) -> list[tuple[int, str, str]]:
     """Render one analyst's entry inside one symbol's block.
 
-    Priorities drive what a per-symbol budget gives up first: 0 never goes,
-    then the analyst's headline numbers and supporting evidence, then opposing
-    evidence, then invalidation, and only last the colour commentary.
+    Priorities drive what a per-symbol budget gives up first: 0 never goes, then
+    the analyst's own headline numbers, then evidence reserved equally across
+    the sides by depth, then invalidation, and only last the colour commentary.
     """
     label = analyst.upper()
     status = view.get("status", "missing")
     if status != "ok":
         reason = view.get("error") or "no report returned"
-        return [(0, f"\n[{label}] status: {status.upper()} -- {reason}")]
+        return [(_PRIORITY_MUST_KEEP, f"\n[{label}] status: {status.upper()} -- {reason}", "")]
 
     decision = view.get("decision") or {}
     details = view.get("details") or {}
@@ -674,34 +764,46 @@ def _format_panel_decision(analyst: str, view: dict[str, Any]) -> list[tuple[int
         f"\n[{label}] stance: {_panel_value(stance, missing='NOT STATED')}"
         f" | this analyst's confidence: {_panel_value(confidence, '.0%')}"
     )
-    lines: list[tuple[int, str]] = [(0, head)]
+    lines: list[tuple[int, str, str]] = [(_PRIORITY_MUST_KEEP, head, "")]
     basis = decision.get("stance_basis")
     if basis:
-        lines.append((0, f"  stance basis: {basis}"))
-    lines.append((0, f"  thesis: {_panel_value(decision.get('thesis'))}"))
+        lines.append((_PRIORITY_MUST_KEEP, f"  stance basis: {basis}", ""))
+    lines.append((_PRIORITY_MUST_KEEP, f"  thesis: {_panel_value(decision.get('thesis'))}", ""))
 
     headline, extras = _format_panel_details(analyst, details)
-    lines.extend((1, text) for text in headline)
+    lines.extend((_PRIORITY_HEADLINE, text, "") for text in headline)
 
-    evidence = decision.get("evidence") or []
-    if evidence:
-        lines.append((1, "  evidence for:"))
-        lines.extend((1, f"    [{item['id']}] {item['claim']}") for item in evidence)
-    counter = decision.get("counter_evidence") or []
-    if counter:
-        lines.append((2, "  evidence against:"))
-        lines.extend((2, f"    [{item['id']}] {item['claim']}") for item in counter)
-    elif details.get("counter_evidence_elicited") is False:
+    for bucket, heading in _EVIDENCE_HEADINGS:
+        items = decision.get(bucket) or []
+        if not items:
+            continue
+        lines.append((_evidence_priority(bucket, 1), f"  {heading}:", _HEADING))
+        for depth, item in enumerate(items, start=1):
+            lines.append(
+                (
+                    _evidence_priority(bucket, depth),
+                    f"    [{item['id']}] {item['claim']}",
+                    "",
+                )
+            )
+    if not (decision.get("bearish_evidence") or decision.get("conflicting_signals")) and (
+        details.get("directional_evidence_elicited") is False
+    ):
         lines.append(
-            (2, "  evidence against: not elicited -- this analyst's output contract has no such field")
+            (
+                _evidence_priority("bearish_evidence", 1),
+                "  bearish evidence: not elicited -- this analyst's output contract has no "
+                "such field, so absence here is not a finding of none",
+                "",
+            )
         )
 
     invalidation = decision.get("invalidation") or []
     if invalidation:
-        lines.append((3, "  invalidation:"))
-        lines.extend((3, f"    - {item}") for item in invalidation)
+        lines.append((_PRIORITY_INVALIDATION, "  invalidation:", _HEADING))
+        lines.extend((_PRIORITY_INVALIDATION, f"    - {item}", "") for item in invalidation)
 
-    lines.extend((4, text) for text in extras)
+    lines.extend((_PRIORITY_EXTRA, text, "") for text in extras)
     return lines
 
 
@@ -766,12 +868,70 @@ def _format_panel_details(
     return headline, extras
 
 
+def _format_ranking_row(ranking: dict[str, Any]) -> str:
+    """One sector's row, with the provenance of the number.
+
+    The first version of this block kept whichever per-symbol report had the
+    longest ranking list and printed its numbers unattributed.  The five real
+    2026-08-18 reports did not agree -- Energy relative strength was 1.35, 1.165,
+    4.59, 1.47 and 1.165 -- so that rendered one analyst's draw as the run's
+    shared observation.  A median, a range and a reporting count say what was
+    actually seen; a 4.59 against a 1.165 is not noise the reader should be
+    spared.
+    """
+    sector = _panel_value(ranking.get("sector"))
+    count = ranking.get("reporting_count") or 0
+    reported_by = ranking.get("reported_by") or []
+    trends = ranking.get("trends") or []
+    if len(trends) == 1:
+        trend_text = _panel_value(trends[0].get("trend"))
+    elif trends:
+        trend_text = ", ".join(
+            f"{t.get('trend')} x{len(t.get('reported_by') or [])}" for t in trends
+        )
+    else:
+        trend_text = "trend not reported"
+
+    median = ranking.get("relative_strength_median")
+    if not ranking.get("disagreement"):
+        if count == 1:
+            provenance = f" -- reported only by {reported_by[0]}" if reported_by else ""
+        else:
+            provenance = f" -- all {count} reporting analysts agree"
+        return f"{sector}: RS={_panel_value(median, '.3f')} ({trend_text}){provenance}"
+    return (
+        f"{sector}: RS median={_panel_value(median, '.3f')}, range "
+        f"{_panel_value(ranking.get('relative_strength_min'), '.3f')}-"
+        f"{_panel_value(ranking.get('relative_strength_max'), '.3f')} "
+        f"across {count} reporting analysts ({trend_text}) -- ANALYSTS DISAGREE"
+    )
+
+
+def _format_sector_summary(data: dict[str, Any]) -> str | None:
+    """Top and bottom of the table by median relative strength, in one line."""
+
+    def render(entries: list[dict[str, Any]]) -> str:
+        return ", ".join(
+            f"{e.get('sector')} ({_panel_value(e.get('relative_strength_median'), '.3f')})"
+            for e in entries
+        )
+
+    top = data.get("top_sectors") or []
+    bottom = data.get("bottom_sectors") or []
+    if not top:
+        return None
+    line = f"Strongest sectors by median relative strength: {render(top)}"
+    if bottom:
+        line += f" | weakest: {render(bottom)}"
+    return line
+
+
 def _format_market_wide_sector(data: dict[str, Any], budget: int) -> list[str]:
-    """The shared sector table, rendered once for the run."""
+    """The shared sector table, rendered once for the run, with its provenance."""
     reporting = data.get("reporting_runs", 0)
     if not reporting:
         return []
-    lines: list[tuple[int, str]] = [
+    lines: list[tuple[int, str] | tuple[int, str, str]] = [
         (0, ""),
         (0, "-" * 60),
         (
@@ -779,6 +939,11 @@ def _format_market_wide_sector(data: dict[str, Any], budget: int) -> list[str]:
             "MARKET-WIDE SECTOR VIEW "
             f"(reported by {reporting} of {data.get('total_runs', reporting)} per-symbol "
             "sector runs; the strategist's table is market-wide by design)",
+        ),
+        (
+            0,
+            "These are separate runs of the same analyst, not one shared table: where "
+            "they disagree the row says so, and no number here is a consensus.",
         ),
         (0, "-" * 60),
     ]
@@ -792,33 +957,61 @@ def _format_market_wide_sector(data: dict[str, Any], budget: int) -> list[str]:
                 f" -- reported for {', '.join(entry.get('reported_by') or [])}",
             )
         )
+    summary = _format_sector_summary(data)
+    if summary:
+        lines.append((1, summary))
     rankings = data.get("sector_rankings") or []
     if rankings:
-        lines.append((1, "Sector Rankings (by relative strength):"))
-        for ranking in rankings:
-            strength = ranking.get("relative_strength")
-            lines.append(
-                (
-                    1,
-                    f"  - {_panel_value(ranking.get('sector'))}: "
-                    f"RS={_panel_value(strength, '.3f')} ({_panel_value(ranking.get('trend'))})",
-                )
+        disagreeing = sum(1 for r in rankings if r.get("disagreement"))
+        lines.append(
+            (
+                2,
+                "Sector Rankings (relative strength; median, range and reporting count "
+                f"across the per-symbol runs -- {disagreeing} of {len(rankings)} sectors "
+                "drew different numbers from different runs):",
+                _HEADING,
             )
+        )
+        for ranking in rankings:
+            lines.append((2, f"  - {_format_ranking_row(ranking)}"))
     recommendations = data.get("recommendations") or []
     if recommendations:
-        lines.append((2, "Recommendations:"))
-        for rec in recommendations:
-            lines.append(
-                (2, f"  - {_panel_value(rec.get('sector'))}: {_panel_value(rec.get('action'))}")
-            )
-            rationale = _opt_text(rec.get("rationale"), 260)
-            if rationale:
-                lines.append((3, f"    {rationale}"))
+        disputed = data.get("recommendation_disagreements") or []
+        heading = "Recommendations (each with the per-symbol runs that reported it"
+        heading += (
+            f"; the runs split on {', '.join(disputed)}):" if disputed else "; no run disagreed):"
+        )
+        lines.append((3, heading, _HEADING))
+        for group in recommendations:
+            sector = _panel_value(group.get("sector"))
+            split = "  [RUNS DISAGREE ON THIS SECTOR]" if group.get("disagreement") else ""
+            for action in group.get("actions") or []:
+                who = ", ".join(action.get("reported_by") or [])
+                lines.append(
+                    (
+                        3,
+                        f"  - {sector}: {_panel_value(action.get('action'))} -- reported by "
+                        f"{who} ({len(action.get('reported_by') or [])} of {reporting}){split}",
+                    )
+                )
+                rationale = _opt_text(action.get("rationale"), 260)
+                if rationale:
+                    lines.append(
+                        (
+                            # Where the runs split, *why* each side said what it
+                            # said is the decision-relevant half of the row.
+                            3 if group.get("disagreement") else 4,
+                            f"    rationale as written for "
+                            f"{_panel_value(action.get('rationale_reported_by'))}: {rationale}",
+                        )
+                    )
     rotation = data.get("rotation_signals") or []
     if rotation:
-        lines.append((3, "Rotation Signals (market-wide; symbol-specific ones sit with their symbol):"))
-        lines.extend((3, f"  > {signal}") for signal in rotation)
-    return _fit_to_budget(lines, budget)
+        lines.append(
+            (4, "Rotation Signals (market-wide; symbol-specific ones sit with their symbol):", _HEADING)
+        )
+        lines.extend((4, f"  > {signal}") for signal in rotation)
+    return _fit_to_budget(lines, budget, scope="market-wide")
 
 
 def format_symbol_panel_context(panel: dict[str, Any]) -> str:
@@ -857,6 +1050,8 @@ def format_symbol_panel_context(panel: dict[str, Any]) -> str:
         "analyst. Confidences are each analyst's own and are NOT merged or averaged.",
         "Stances marked with a 'stance basis' line were derived by the orchestrator",
         "from the analyst's structured output, not stated by the analyst itself.",
+        "Evidence is grouped by the direction of the claim itself -- bullish, bearish,",
+        "or neither -- not by whether it agrees with that derived stance.",
         "Cite evidence by the bracketed IDs; an ID belongs to exactly one symbol.",
     ]
 
@@ -872,7 +1067,7 @@ def format_symbol_panel_context(panel: dict[str, Any]) -> str:
 
     for entry in symbols:
         symbol = entry.get("symbol", "N/A")
-        lines: list[tuple[int, str]] = [
+        lines: list[tuple[int, str] | tuple[int, str, str]] = [
             (0, ""),
             (0, "-" * 60),
             (0, f"SYMBOL: {symbol}"),

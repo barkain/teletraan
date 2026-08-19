@@ -251,7 +251,7 @@ class TestNoRunGlobalTruncation:
         rendered = format_symbol_panel_context(build_symbol_panel(five_symbol_run))
 
         for symbol in five_symbol_run:
-            assert f"[{symbol}:technical:1]" in rendered, f"{symbol} lost its technical work"
+            assert f"[{symbol}:technical:bull1]" in rendered, f"{symbol} lost its technical work"
 
     def test_the_last_symbol_is_as_visible_as_the_first(self, five_symbol_run):
         rendered = format_symbol_panel_context(build_symbol_panel(five_symbol_run))
@@ -263,7 +263,7 @@ class TestNoRunGlobalTruncation:
             block = rendered[start:end]
             assert "stance:" in block
             assert "thesis:" in block
-            assert "evidence for:" in block
+            assert "bullish evidence:" in block
 
     def test_each_analyst_keeps_its_own_confidence(self, five_symbol_run):
         """``(current + new) / 2`` turned five 0.72s into 0.6765625.
@@ -338,7 +338,7 @@ class TestSectorWorkReachesSynthesis:
         decision = nu["reports"]["sector"]["decision"]
         assert decision["stance"] == "FAVORABLE"
         assert "names NU" in decision["stance_basis"]
-        assert any("EM fintech" in item["claim"] for item in decision["evidence"])
+        assert any("EM fintech" in item["claim"] for item in decision["bullish_evidence"])
 
     def test_a_market_wide_answer_is_not_reported_as_a_vote_on_the_symbol(
         self, five_symbol_run
@@ -358,7 +358,7 @@ class TestSectorWorkReachesSynthesis:
     def test_the_shared_table_is_rendered_once_not_once_per_symbol(self, five_symbol_run):
         rendered = format_symbol_panel_context(build_symbol_panel(five_symbol_run))
 
-        assert rendered.count("Sector Rankings (by relative strength):") == 1
+        assert rendered.count("Sector Rankings (relative strength;") == 1
         assert rendered.count("Energy: RS=1.165 (accelerating)") == 1
 
 
@@ -530,10 +530,14 @@ class TestEvidenceAndBudget:
             symbol = entry["symbol"]
             for analyst, view in entry["reports"].items():
                 decision = view["decision"] or {}
-                for item in (decision.get("evidence") or []) + (
-                    decision.get("counter_evidence") or []
+                for bucket in (
+                    "bullish_evidence",
+                    "bearish_evidence",
+                    "neutral_or_mixed_evidence",
+                    "conflicting_signals",
                 ):
-                    assert item["id"].startswith(f"{symbol}:{analyst}:")
+                    for item in decision.get(bucket) or []:
+                        assert item["id"].startswith(f"{symbol}:{analyst}:")
 
     def test_the_budget_is_per_symbol_and_truncation_announces_itself(self):
         """Codex's brief allows a cap; it does not allow a silent one."""
@@ -547,7 +551,7 @@ class TestEvidenceAndBudget:
         assert "[truncated:" in amd_block
         assert f"{MAX_PANEL_CHARS_PER_SYMBOL}-character per-symbol budget" in amd_block
         # The other symbol is untouched: the cap does not span symbols.
-        assert "[NU:technical:1]" in rendered
+        assert "[NU:technical:bull1]" in rendered
 
     def test_technical_finding_counts_are_stated_when_capped(self, five_symbol_run):
         rendered = format_symbol_panel_context(build_symbol_panel(five_symbol_run))
@@ -557,7 +561,9 @@ class TestEvidenceAndBudget:
     def test_conflicting_signals_are_never_dropped_from_the_panel(self, five_symbol_run):
         panel = build_symbol_panel(five_symbol_run)
         amd = next(e for e in panel["symbols"] if e["symbol"] == "AMD")
-        claims = [c["claim"] for c in amd["reports"]["technical"]["decision"]["counter_evidence"]]
+        claims = [
+            c["claim"] for c in amd["reports"]["technical"]["decision"]["conflicting_signals"]
+        ]
         assert "AMD MACD histogram still negative" in claims
 
 
@@ -671,3 +677,395 @@ class TestSynthesisWiring:
         from analysis.autonomous_engine import AutonomousDeepEngine
 
         assert not hasattr(AutonomousDeepEngine, "_flatten_analyst_reports")
+
+
+# ---------------------------------------------------------------------------
+# Truncation must not spend the bull case and drop the bear case
+# ---------------------------------------------------------------------------
+
+
+def _two_sided_technical(symbol: str, filler: int = 150, conflicts: int = 40) -> dict:
+    """A technical report with real evidence on both sides, over budget.
+
+    The bulk comes from ``conflicting_signals``, which is exactly how the real
+    AMD report is shaped: three directional findings and a long tail of the
+    analyst's own caveats.
+    """
+    report = _technical(symbol, 3, bias="BUY")
+    for index, finding in enumerate(report["findings"], start=1):
+        finding["description"] = f"bull case {index} " + "b" * filler
+    bears = _technical(symbol, 3, bias="SELL")["findings"]
+    for index, finding in enumerate(bears, start=1):
+        finding["signal"] = f"bear_signal_{index}"
+        finding["description"] = f"bear case {index} " + "r" * filler
+    report["findings"] += bears
+    report["conflicting_signals"] = [
+        f"caveat {index} " + "c" * 110 for index in range(1, conflicts + 1)
+    ]
+    return report
+
+
+def _lopsided_technical(symbol: str) -> dict:
+    """Support so bulky that the budget must choose between the two sides.
+
+    This is the shape that made the old priorities visible at the *production*
+    6,000-character budget rather than only at a squeezed one.
+    """
+    report = _two_sided_technical(symbol, conflicts=6)
+    for index, finding in enumerate(report["findings"][:3], start=1):
+        finding["description"] = f"bull case {index} " + "b" * 1700
+    return report
+
+
+def _cases_in(block: str, side: str) -> list[str]:
+    """Count surviving claims by their own text, not by any ID scheme.
+
+    Deliberately scheme-independent: the pre-fix panel labelled these
+    ``[AMD:technical:1]`` / ``[AMD:technical:c1]``, and a test that keyed off
+    the new IDs would pass pre-fix vacuously instead of measuring the behaviour.
+    """
+    return [line.strip() for line in block.splitlines() if f"{side} case " in line]
+
+
+class TestTruncationKeepsDissent:
+    """``_fit_to_budget`` used to give supporting evidence priority 1 and
+    counter-evidence priority 2, so the first thing a symbol over budget lost
+    was the opposing view. Three of the five real 2026-08-18 symbols emit
+    truncation markers, so this fired in production, on a panel whose entire
+    purpose is letting synthesis adjudicate disagreement."""
+
+    def test_the_strongest_claim_on_each_side_outranks_the_second_on_any_side(self):
+        from analysis.agents.synthesis_lead import _evidence_priority
+
+        # Lower survives longer. Depth dominates side: no side gets a second
+        # claim while another side still has none.
+        assert _evidence_priority("bearish_evidence", 1) < _evidence_priority(
+            "bullish_evidence", 1
+        )
+        assert _evidence_priority("bullish_evidence", 1) < _evidence_priority(
+            "bearish_evidence", 2
+        )
+        assert _evidence_priority("bearish_evidence", 2) < _evidence_priority(
+            "bullish_evidence", 2
+        )
+
+    def test_a_symbol_over_budget_keeps_evidence_on_both_sides(self):
+        """At the real 6,000-character budget, with a bulky bull case."""
+        run = {"AMD": {"technical": _lopsided_technical("AMD")}}
+
+        rendered = format_symbol_panel_context(build_symbol_panel(run))
+
+        assert "[truncated:" in rendered, "this fixture must actually exceed the budget"
+        assert _cases_in(rendered, "bull"), "the bull case vanished"
+        assert _cases_in(rendered, "bear"), "the bear case was cut before the bull case"
+
+    def test_dissent_is_never_truncated_to_zero_while_support_remains(self, monkeypatch):
+        """Swept across every budget from "one claim fits" upwards.
+
+        The old priorities emptied the counter-evidence bucket before touching
+        supporting evidence, so across this sweep the panel showed the bull case
+        with the bear case gone.
+        """
+        run = {"AMD": {"technical": _two_sided_technical("AMD")}}
+        truncating = 0
+
+        for budget in range(600, 6000, 100):
+            monkeypatch.setattr("analysis.agent_panel.MAX_PANEL_CHARS_PER_SYMBOL", budget)
+            rendered = format_symbol_panel_context(build_symbol_panel(run))
+            bull = _cases_in(rendered, "bull")
+            bear = _cases_in(rendered, "bear")
+            if "[truncated:" in rendered:
+                truncating += 1
+            assert not (bull and not bear), (
+                f"budget {budget}: support survived with dissent truncated to zero"
+            )
+            # Equal reservation: the sides never differ by more than the single
+            # claim a tie-break has to give away.
+            assert abs(len(bull) - len(bear)) <= 1, f"budget {budget}: {bull} vs {bear}"
+
+        assert truncating >= 5, "the sweep never actually hit the budget"
+
+    def test_a_heading_is_never_left_standing_over_nothing(self, monkeypatch):
+        run = {"AMD": {"technical": _two_sided_technical("AMD")}}
+
+        for budget in range(600, 6000, 100):
+            monkeypatch.setattr("analysis.agent_panel.MAX_PANEL_CHARS_PER_SYMBOL", budget)
+            rendered = format_symbol_panel_context(build_symbol_panel(run))
+            lines = rendered.splitlines()
+            for index, line in enumerate(lines):
+                # Any evidence heading, in either the old or the new wording.
+                if not (line.endswith("evidence:") or line.endswith("signals:")):
+                    continue
+                following = next((t for t in lines[index + 1 :] if t.strip()), "")
+                assert len(following) - len(following.lstrip()) > len(line) - len(
+                    line.lstrip()
+                ), (
+                    f"budget {budget}: '{line.strip()}' rendered with nothing under "
+                    "it, which reads as 'the analyst had none'"
+                )
+
+    def test_the_budget_is_the_ceiling_of_the_rendered_block(self):
+        """The marker used to be appended *after* fitting, so the named maximum
+        was not the maximum: the real run recorded a 6,151-character block under
+        a 6,000-character constant."""
+        from analysis.agents.synthesis_lead import _fit_to_budget
+
+        lines = [(0, "keep me")] + [(1, "x" * 99) for _ in range(50)]
+
+        rendered = _fit_to_budget(lines, 1000)
+
+        assert any("[truncated:" in line for line in rendered)
+        assert sum(len(line) + 1 for line in rendered) <= 1000
+
+
+# ---------------------------------------------------------------------------
+# The market-wide sector table shows its provenance
+# ---------------------------------------------------------------------------
+
+
+def _sector_with_energy(strength: float, trend: str, energy_action: str = "OVERWEIGHT") -> dict:
+    """One per-symbol sector run, with its own Energy number."""
+    report = _sector()
+    report["sector_rankings"] = [
+        {"sector": "Energy", "relative_strength": strength, "trend": trend},
+        {"sector": "Utilities", "relative_strength": 0.88, "trend": "lagging"},
+    ]
+    report["recommendations"][0]["action"] = energy_action
+    return report
+
+
+@pytest.fixture
+def disagreeing_sector_run() -> dict[str, dict]:
+    """The five real 2026-08-18 Energy relative-strength readings.
+
+    They are not a shared table: 1.35, 1.165, 4.59, 1.47, 1.165 -- and the 4.59
+    outlier shows the spread is not noise-level.
+    """
+    return {
+        "AMD": {"sector": _sector_with_energy(1.35, "strongly_strengthening")},
+        "DVN": {"sector": _sector_with_energy(1.165, "strengthening")},
+        "CL=F": {"sector": _sector_with_energy(4.59, "strongly_strengthening", "NEUTRAL")},
+        "AVGO": {"sector": _sector_with_energy(1.47, "strengthening")},
+        "NU": {"sector": _sector_with_energy(1.165, "accelerating")},
+    }
+
+
+class TestMarketWideSectorProvenance:
+    """The merge kept whichever report had the longest ranking list -- the first,
+    all lengths being equal -- and printed its numbers unattributed. That turns
+    stochastic disagreement between five runs of the same analyst into an
+    apparent shared observation: exactly the summary the panel exists to
+    remove."""
+
+    def test_the_energy_spread_is_rendered_with_a_reporting_count(
+        self, disagreeing_sector_run
+    ):
+        rendered = format_symbol_panel_context(build_symbol_panel(disagreeing_sector_run))
+
+        assert "Energy: RS median=1.350, range 1.165-4.590 across 5 reporting analysts" in rendered
+        assert "ANALYSTS DISAGREE" in rendered
+        # The pre-fix rendering: one run's draw, with no provenance at all.
+        assert "Energy: RS=1.350 (strongly_strengthening)" not in rendered
+
+    def test_the_spread_survives_in_the_panel_data_not_only_the_text(
+        self, disagreeing_sector_run
+    ):
+        panel = build_symbol_panel(disagreeing_sector_run)
+        energy = next(
+            r
+            for r in panel["market_wide"]["sector"]["sector_rankings"]
+            if r["sector"] == "Energy"
+        )
+
+        assert energy["relative_strength_median"] == 1.35
+        assert energy["relative_strength_min"] == 1.165
+        assert energy["relative_strength_max"] == 4.59
+        assert energy["reporting_count"] == 5
+        assert energy["disagreement"] is True
+        assert sorted(energy["reported_by"]) == ["AMD", "AVGO", "CL=F", "DVN", "NU"]
+
+    def test_a_split_recommendation_names_who_reported_each_action(
+        self, disagreeing_sector_run
+    ):
+        """First-rationale-wins printed one rationale for the sector and dropped
+        the fact that a run had said something else."""
+        rendered = format_symbol_panel_context(build_symbol_panel(disagreeing_sector_run))
+
+        assert "Energy: OVERWEIGHT -- reported by AMD, DVN, AVGO, NU (4 of 5)" in rendered
+        assert "Energy: NEUTRAL -- reported by CL=F (1 of 5)" in rendered
+        assert "RUNS DISAGREE ON THIS SECTOR" in rendered
+
+    def test_agreement_is_still_reported_as_agreement(self, five_symbol_run):
+        """Provenance is not noise: where the runs did agree, say so once."""
+        rendered = format_symbol_panel_context(build_symbol_panel(five_symbol_run))
+
+        assert "Energy: RS=1.165 (accelerating) -- all 5 reporting analysts agree" in rendered
+        assert "ANALYSTS DISAGREE" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# Buckets name the claim's own direction, not agreement with a derived stance
+# ---------------------------------------------------------------------------
+
+
+class TestBucketsNameTheClaimNotTheStance:
+    """The panel derived a stance and then sorted evidence into "for"/"against"
+    relative to it. On the real AMD report that filed an ``oversold`` finding --
+    whose own description says the selloff was overdone and the recovery may
+    have legs -- under "evidence against", because its ``action_bias`` did not
+    match the derived FAVORABLE stance. The words were right; the heading lied."""
+
+    def test_a_hold_finding_is_not_filed_as_evidence_against(self):
+        report = _technical("AMD", 2, bias="BUY")
+        hold = dict(report["findings"][0])
+        hold.update(
+            {
+                "signal": "oversold",
+                "action_bias": "HOLD",
+                "description": "CCI at an extreme low; the selloff was overdone and "
+                "the recovery may have legs",
+            }
+        )
+        report["findings"].append(hold)
+        report["conflicting_signals"] = []
+
+        panel = build_symbol_panel({"AMD": {"technical": report}})
+        decision = panel["symbols"][0]["reports"]["technical"]["decision"]
+        rendered = format_symbol_panel_context(panel)
+
+        assert [c["claim"] for c in decision["bearish_evidence"]] == []
+        assert any(
+            "recovery may have legs" in c["claim"]
+            for c in decision["neutral_or_mixed_evidence"]
+        )
+        assert "evidence against" not in rendered
+        assert "neutral or mixed evidence" in rendered
+
+    def test_a_neutral_sector_paragraph_is_not_filed_as_evidence_for(self):
+        report = _sector()
+        report["recommendations"].append(
+            {
+                "sector": "Technology",
+                "action": "NEUTRAL",
+                "rationale": "AMD's +6.50% daily surge is a stock-specific catalyst, "
+                "NOT sector rotation.",
+            }
+        )
+
+        panel = build_symbol_panel({"AMD": {"sector": report}})
+        decision = panel["symbols"][0]["reports"]["sector"]["decision"]
+        rendered = format_symbol_panel_context(panel)
+
+        assert decision["bullish_evidence"] == []
+        assert any(
+            "stock-specific catalyst" in c["claim"]
+            for c in decision["neutral_or_mixed_evidence"]
+        )
+        assert "evidence for" not in rendered
+
+    def test_an_underweight_recommendation_is_bearish_and_says_so(self):
+        report = _sector()
+        report["recommendations"].append(
+            {
+                "sector": "Utilities",
+                "action": "UNDERWEIGHT",
+                "rationale": "XYZ ranks last on relative strength.",
+            }
+        )
+
+        panel = build_symbol_panel({"XYZ": {"sector": report}})
+        decision = panel["symbols"][0]["reports"]["sector"]["decision"]
+
+        assert any("ranks last" in c["claim"] for c in decision["bearish_evidence"])
+        assert decision["bullish_evidence"] == []
+
+    def test_every_bucket_id_names_the_bucket_it_was_filed_in(self):
+        report = _technical("AMD", 1, bias="BUY")
+        report["findings"].append({**report["findings"][0], "action_bias": "SELL"})
+        report["findings"].append({**report["findings"][0], "action_bias": "NEUTRAL"})
+
+        decision = build_symbol_panel({"AMD": {"technical": report}})["symbols"][0][
+            "reports"
+        ]["technical"]["decision"]
+
+        assert decision["bullish_evidence"][0]["id"] == "AMD:technical:bull1"
+        assert decision["bearish_evidence"][0]["id"] == "AMD:technical:bear1"
+        assert decision["neutral_or_mixed_evidence"][0]["id"] == "AMD:technical:mixed1"
+        assert decision["conflicting_signals"][0]["id"] == "AMD:technical:conflict1"
+
+
+# ---------------------------------------------------------------------------
+# A self-reported tail-risk number is evidence, not a veto
+# ---------------------------------------------------------------------------
+
+
+class TestTailRiskIsNotAnAutomaticVeto:
+    """``SYNTHESIS_LEAD_PROMPT`` said risk warnings override bullish signals
+    when tail-risk probability exceeds 15%. That was inert while the risk block
+    printed fabricated zeros. The panel surfaces the analyst's real estimates --
+    the AMD block carries 20% and 18% figures -- so the rule became an
+    unconstrained narrative veto keyed to a number the same model invented.
+
+    A veto has to rest on a predicate the engine can verify. This does not, so
+    the number reaches synthesis as citable evidence it must answer, with no
+    rule that fires on it."""
+
+    def test_no_rule_turns_a_tail_risk_number_into_an_automatic_override(self):
+        import re
+
+        from analysis.agents.synthesis_lead import SYNTHESIS_LEAD_PROMPT
+
+        assert (
+            "Risk warnings override bullish signals if tail risk probability >15%"
+            not in SYNTHESIS_LEAD_PROMPT
+        )
+        assert not re.search(
+            r"tail[ -]?risk[^\n]*?[>≥]\s*\d+\s*%", SYNTHESIS_LEAD_PROMPT, re.IGNORECASE
+        ), "a numeric tail-risk threshold is back in the prompt"
+
+    def test_the_prompt_asks_synthesis_to_weigh_and_answer_it_instead(self):
+        from analysis.agents.synthesis_lead import SYNTHESIS_LEAD_PROMPT
+
+        rule = next(
+            line
+            for line in SYNTHESIS_LEAD_PROMPT.splitlines()
+            if line.startswith("- Tail-risk probability")
+        )
+        assert "never an automatic override" in rule
+        assert "risk_factors" in rule
+        assert "own estimate" in rule
+
+    def test_a_20_percent_tail_risk_reaches_synthesis_as_citable_evidence(self):
+        report = dict(RISK_LIST_SHAPE)
+        report["tail_risks"] = [
+            {"event": "30Y Yield Breach of 5.5%", "probability": 0.20, "impact": "severe"},
+            {"event": "Semiconductor Contagion", "probability": 0.18, "impact": "moderate"},
+        ]
+
+        panel = build_symbol_panel({"AMD": {"risk": report}})
+        rendered = format_symbol_panel_context(panel)
+        decision = panel["symbols"][0]["reports"]["risk"]["decision"]
+
+        cited = {c["id"]: c["claim"] for c in decision["bearish_evidence"]}
+        assert any("30Y Yield Breach of 5.5%" in claim for claim in cited.values())
+        assert "(p=20%, severe impact)" in rendered
+        assert "(p=18%, moderate impact)" in rendered
+        # It arrives as an argument with an ID, not as an instruction.
+        assert all(identifier.startswith("AMD:risk:bear") for identifier in cited)
+        assert "override" not in rendered
+
+    def test_the_derived_stance_is_still_never_a_block(self):
+        """``BLOCK`` stays reserved for machine-verifiable predicates: a
+        validator must not learn to veto from a narrative estimate."""
+        report = dict(RISK_LIST_SHAPE)
+        report["tail_risks"] = [
+            {"event": "systemic unwind", "probability": 0.95, "impact": "severe"}
+        ]
+
+        panel = build_symbol_panel({"AMD": {"risk": report}})
+
+        assert panel["symbols"][0]["reports"]["risk"]["decision"]["stance"] in {
+            "PASS",
+            "CAUTION",
+            None,
+        }
