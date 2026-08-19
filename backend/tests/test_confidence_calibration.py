@@ -8,9 +8,16 @@ A. `ConfidenceAdjuster` blended components with raw weights that summed to 0.8
    ones. The blend must now normalize over whichever components are present.
 
 B. The synthesis prompt defined confidence as "how many analysts agree" rather
-   than the probability the thesis is validated. All analysts share the same
-   discovery context, so agreement measures common priming. Confidence must be
-   anchored to the measured base rate instead.
+   than the probability the thesis is validated. Confidence must be anchored to
+   the measured base rate instead.
+
+   The prompt's stated *reason* moved with the pipeline. It used to be that all
+   analysts received the same discovery context, so agreement measured common
+   priming. The specialists are now run blind (``analysis/decision_brief.py``),
+   so that sentence became false; the prompt now says they are run blind and
+   that agreement is still weak evidence because three calls to one model share
+   their errors. Both the old claim's absence and the new claim's presence are
+   asserted below.
 """
 
 from __future__ import annotations
@@ -286,8 +293,17 @@ class TestConfidencePromptGuidance:
 
     def test_synthesis_prompt_rejects_agreement_as_justification(self):
         assert "Analyst agreement is NOT a justification" in SYNTHESIS_LEAD_PROMPT
-        # and says why
-        assert "share a prior" in SYNTHESIS_LEAD_PROMPT
+        # and says why.  The reason changed when the specialists were blinded:
+        # they no longer share a discovery prior, so claiming they do would be a
+        # false statement that suppresses legitimate corroboration signal.
+        assert "share a prior" not in SYNTHESIS_LEAD_PROMPT
+        assert "same discovery context" not in SYNTHESIS_LEAD_PROMPT
+        assert "run blind" in SYNTHESIS_LEAD_PROMPT
+        assert "separately elicited views from one underlying model" in SYNTHESIS_LEAD_PROMPT
+        assert "errors stay correlated" in SYNTHESIS_LEAD_PROMPT
+        # The rule that survives unchanged: agreement counts only from
+        # different observable data.
+        assert "different observable data" in SYNTHESIS_LEAD_PROMPT
 
     def test_synthesis_prompt_warns_about_high_confidence_band(self):
         assert "above 0.70 have hit LESS often" in SYNTHESIS_LEAD_PROMPT

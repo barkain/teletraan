@@ -20,7 +20,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from database import async_session_factory  # type: ignore[import-not-found]
@@ -120,6 +120,18 @@ from analysis.symbol_slice import (  # type: ignore[import-not-found]
     slice_context_for_symbol,
     target_banner,
 )
+from analysis.decision_brief import (  # type: ignore[import-not-found]
+    DEFAULT_DECISION_HORIZON,
+    neutral_decision_brief,
+)
+
+# Stamped onto every insight this engine stores, and honoured by
+# ``eval_insights.pipeline_version_for`` ahead of its date-bucketed era table.
+# Blinding the three specialists changes what they are shown before they
+# produce a report, so recommendations made after it are not comparable with
+# recommendations made before it and must be cohorted apart.
+PIPELINE_VERSION = "v6-blind-specialists"
+
 from analysis.memory_service import InstitutionalMemoryService  # type: ignore[import-not-found]
 from analysis.pattern_extractor import PatternExtractor  # type: ignore[import-not-found]
 from analysis.outcome_tracker import InsightOutcomeTracker  # type: ignore[import-not-found]
@@ -549,8 +561,12 @@ class AutonomousDeepEngine:
     }
 
     # Core analysts run per symbol during deep dive (3 instead of 5).
-    # Macro economist is redundant with Phase 1 macro scan (its context is
-    # already prepended to every analyst via discovery_context).
+    # Macro economist is dropped because the macro *state* these three need --
+    # dated volatility, rates, index and commodity levels -- now reaches them
+    # in the neutral decision brief (analysis/decision_brief.py), which is
+    # facts only.  It used to be justified by the discovery_context prefix
+    # instead; that prefix carried Phase 1-3's macro *call*, and handing the
+    # same conclusion to all three is what made their agreement meaningless.
     # Correlation detective provides marginal per-symbol value; sector
     # strategist already captures relative strength and rotation signals.
     ANALYSTS = {
@@ -1505,18 +1521,23 @@ class AutonomousDeepEngine:
         if self._run_metrics:
             self._run_metrics.start_phase("deep_dive")
 
-        # Build discovery context using macro result and heatmap analysis
-        discovery_context = self._build_heatmap_discovery_context(
+        # Build the nominator proposal: the discovery pipeline's own case for
+        # why these names entered the funnel.  This string used to be prepended
+        # to every specialist prompt, ahead of any data, which is what made the
+        # three reports agree on a conclusion they had all been handed.  It is
+        # now built for synthesis only, and reaches it once, after the private
+        # specialist reports already exist.
+        nominator_context = self._build_heatmap_discovery_context(
             macro_result, heatmap_analysis_result, factor_scores=factor_scores,
             thematic_result=getattr(self, '_thematic_result', None),
             stock_descriptions=self._stock_descriptions or None,
         )
 
-        # Append IC-calibrated quant signals so analysts know which names the
-        # quant model flagged and why — convergence with heatmap/thematic = higher conviction
+        # Append IC-calibrated quant signals: which names the bottom-up quant
+        # model flagged and why.  A nomination, not a vote.
         if getattr(self, '_quant_context', None):
-            discovery_context = (
-                f"{discovery_context}\n\n"
+            nominator_context = (
+                f"{nominator_context}\n\n"
                 f"## IC-Calibrated Quant Signals (Bottom-Up Screen)\n"
                 f"{self._quant_context}"
             )
@@ -1588,7 +1609,7 @@ class AutonomousDeepEngine:
                         calc = StatisticalFeatureCalculator(corr_session)
                         corr_result = await calc.compute_correlation_matrix(price_dfs)
                     corr_context = format_correlation_matrix_context(corr_result=corr_result)
-                    discovery_context += f"\n\n{corr_context}"
+                    nominator_context += f"\n\n{corr_context}"
                     logger.info(f"[AUTO] Correlation matrix computed for {len(price_dfs)} symbols")
 
                     # Store correlation highlights on the result for report generation
@@ -1636,8 +1657,13 @@ class AutonomousDeepEngine:
         except Exception as corr_err:
             logger.warning(f"[AUTO] Correlation matrix computation failed (non-fatal): {corr_err}")
 
+        # Each specialist gets the facts of the decision, not the case for it.
+        brief_for = self._decision_brief_factory(macro_result, portfolio_holdings)
+
         async def _analyze_symbol(sym: str) -> tuple[str, dict[str, Any]]:
-            reports = await self._run_analysts_for_symbol(sym, discovery_context, pre_built_context=pre_context)
+            reports = await self._run_analysts_for_symbol(
+                sym, brief_for(sym), pre_built_context=pre_context
+            )
             return sym, reports
 
         async def _with_timeout(coro, sym):
@@ -1756,6 +1782,7 @@ class AutonomousDeepEngine:
             heatmap_analysis=heatmap_analysis_result,
             max_insights=max_insights,
             portfolio_holdings=portfolio_holdings,
+            nominator_context=nominator_context,
         )
         result.phases_completed.append("synthesis")
         if self._run_metrics:
@@ -1943,7 +1970,7 @@ class AutonomousDeepEngine:
         analyst_reports: dict[str, dict[str, Any]],
         heatmap_data: HeatmapData,
         macro_result: MacroScanResult,
-        discovery_context: str,
+        decision_brief_for: Callable[[str], str],
         task_id: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Run the adaptive coverage evaluation loop.
@@ -1955,7 +1982,9 @@ class AutonomousDeepEngine:
             analyst_reports: Current deep dive results.
             heatmap_data: Full heatmap data.
             macro_result: Macro scan results.
-            discovery_context: Pre-built discovery context for analysts.
+            decision_brief_for: ``brief_for(symbol) -> str`` from
+                :meth:`_decision_brief_factory`. Follow-up deep dives are
+                blinded exactly like the first pass.
             task_id: Optional task ID for progress tracking.
 
         Returns:
@@ -1999,7 +2028,9 @@ class AutonomousDeepEngine:
             )
 
             async def _analyze_additional(sym: str) -> tuple[str, dict[str, Any]]:
-                reports = await self._run_analysts_for_symbol(sym, discovery_context)
+                reports = await self._run_analysts_for_symbol(
+                    sym, decision_brief_for(sym)
+                )
                 return sym, reports
 
             async def _with_timeout(coro, sym):
@@ -2627,6 +2658,7 @@ class AutonomousDeepEngine:
         heatmap_analysis: HeatmapAnalysis,
         max_insights: int,
         portfolio_holdings: dict[str, dict[str, float]] | None = None,
+        nominator_context: str = "",
     ) -> tuple[list[dict[str, Any]], str]:
         """Run Phase 5: Synthesis Lead with heatmap context.
 
@@ -2636,6 +2668,11 @@ class AutonomousDeepEngine:
             heatmap_analysis: Heatmap analysis results.
             max_insights: Maximum insights to generate.
             portfolio_holdings: Optional dict of user portfolio holdings.
+            nominator_context: The discovery pipeline's proposal -- regime
+                call, heatmap rationale, thematic call, factor/quant
+                nomination, correlation table.  The specialists never saw it;
+                it is rendered here exactly once, labelled as a proposal, so
+                that agreement with it cannot be mistaken for confirmation.
 
         Returns:
             Tuple of (list of insight dictionaries, raw LLM response).
@@ -2683,6 +2720,7 @@ class AutonomousDeepEngine:
             macro_context,
             heatmap_analysis,
             max_insights,
+            nominator_context,
         )
 
         # Add portfolio context if holdings exist
@@ -2690,11 +2728,10 @@ class AutonomousDeepEngine:
             portfolio_holdings or {}
         )
 
-        # Build thematic and investor context if available
-        thematic_context = ""
-        if getattr(self, '_thematic_result', None):
-            thematic_context = "\n\n" + format_thematic_for_downstream(self._thematic_result)
-
+        # The thematic block and the IC-calibrated quant block already travel
+        # inside nominator_context (the discovery builder appends both), so
+        # they are not rendered a second time here.  Duplicating a proposal is
+        # how one source starts to read as two agreeing.
         investor_context = ""
         if getattr(self, '_investor_result', None):
             investor_context = "\n\n" + format_investor_for_synthesis(self._investor_result)
@@ -2715,22 +2752,13 @@ class AutonomousDeepEngine:
             )
         )
 
-        quant_context_block = ""
-        if getattr(self, '_quant_context', None):
-            quant_context_block = (
-                f"\n\n## IC-Calibrated Quant Signals\n"
-                f"Stocks flagged by bottom-up quant scorer (IC-calibrated, 400-symbol universe). "
-                f"Convergence between quant signals and thematic/heatmap discovery = highest conviction.\n"
-                f"{self._quant_context}"
-            )
-
         # News + social-sentiment augmentation (per-symbol news for the
         # deep-dive candidates + the Phase-1 Reddit sentiment capture).
         news_sentiment_context = await self._build_news_and_sentiment_context(symbols)
 
         full_context = (
-            f"{autonomous_context}{portfolio_context}{thematic_context}"
-            f"{investor_context}{quant_context_block}{news_sentiment_context}"
+            f"{autonomous_context}{portfolio_context}"
+            f"{investor_context}{news_sentiment_context}"
             f"\n\n{synthesis_context}"
         )
 
@@ -2786,49 +2814,60 @@ class AutonomousDeepEngine:
         macro_context: MacroScanResult,
         heatmap_analysis: HeatmapAnalysis,
         max_insights: int,
+        nominator_context: str = "",
     ) -> str:
         """Build autonomous synthesis context with heatmap data.
 
+        The discovery material -- regime call, macro themes, heatmap overview
+        and patterns, factor scores, thematic call, quant nomination,
+        correlation table -- arrives as ``nominator_context``: the exact string
+        the three specialists used to be primed with, now rendered here once
+        and labelled as a proposal.  This builder no longer re-derives those
+        sections from ``macro_context``/``heatmap_analysis``; doing so beside
+        the same content would put the proposal in front of synthesis twice.
+        Only the per-stock selection rationale and the cluster analyses, which
+        ``nominator_context`` does not carry, are still rendered here.
+
         Args:
             analyst_reports: Per-symbol analyst reports.
-            macro_context: Macro scan results.
+            macro_context: Macro scan results (retained for the signature and
+                for callers; the regime call now travels inside the nominator
+                proposal rather than being restated).
             heatmap_analysis: Heatmap analysis results.
             max_insights: Target number of insights.
+            nominator_context: The discovery pipeline's proposal.
 
         Returns:
             Formatted autonomous context string.
         """
         lines = [
-            "## AUTONOMOUS DISCOVERY CONTEXT (Heatmap-Driven)",
+            "## NOMINATOR PROPOSAL -- NOT INDEPENDENT CONFIRMATION",
             "",
-            f"### Market Regime: {macro_context.market_regime}",
-            f"Regime Confidence: {macro_context.regime_confidence:.0%}",
+            "Everything in this section is the discovery pipeline's own case for "
+            "why these names reached you: the macro regime call, the heatmap "
+            "reading, the thematic view, the factor/quant screen and the "
+            "correlation table. It is ONE source making a proposal.",
             "",
-            "### Key Macro Themes:",
+            "The three specialists whose private reports appear further down did "
+            "NOT see any of it. They were given the target symbol, a facts-only "
+            "decision brief and their own data. So a specialist reaching the same "
+            "conclusion as this section is not confirming it -- but neither is it "
+            "an echo of it, which it would have been before. Weigh the specialist "
+            "reports on their evidence; treat this section as the proposal under "
+            "test, not as a fourth vote.",
+            "",
         ]
 
-        for theme in macro_context.themes[:3]:
-            lines.append(f"- {theme.name} ({theme.direction}): {theme.rationale[:100]}...")
+        if nominator_context:
+            lines.append(nominator_context)
+        else:
+            lines.append(
+                "(No discovery proposal was recorded for this run.)"
+            )
 
         lines.extend([
             "",
-            "### Heatmap Analysis:",
-            f"Overview: {heatmap_analysis.overview}",
-            f"Confidence: {heatmap_analysis.confidence:.0%}",
-            "",
-            "### Identified Patterns:",
-        ])
-
-        for pattern in heatmap_analysis.patterns[:5]:
-            lines.append(f"- {pattern.description}")
-            if pattern.sectors:
-                lines.append(f"  Sectors: {', '.join(pattern.sectors)}")
-
-        lines.extend([
-            "",
-            f"### Sectors to Watch: {', '.join(heatmap_analysis.sectors_to_watch)}",
-            "",
-            "### Stock Selection Rationale:",
+            "### Stock Selection Rationale (why each name entered the funnel):",
         ])
 
         for stock in heatmap_analysis.selected_stocks[:10]:
@@ -2836,14 +2875,6 @@ class AutonomousDeepEngine:
                 f"- {stock.symbol} ({stock.sector}): {stock.reason[:100]}... "
                 f"[{stock.opportunity_type}, {stock.priority}]"
             )
-
-        # Include thematic descriptions if available
-        if self._stock_descriptions:
-            lines.extend(["", "### Stock Thematic Profiles:"])
-            for sym, desc in self._stock_descriptions.items():
-                lines.append(f"- {sym}: {desc}")
-
-        lines.extend(self._render_cluster_context())
 
         if self._cluster_analyses:
             lines.extend(["", "### Cluster-Level Analysis (Phase 4.7):"])
@@ -2869,10 +2900,9 @@ class AutonomousDeepEngine:
             "",
             f"### Target: Generate {max_insights} actionable insights",
             "Prioritize opportunities with:",
-            "- Strong macro/heatmap alignment",
-            "- Thematic connections between stocks",
+            "- Specialist evidence that survives the counter-evidence in the same report",
+            "- Corroboration reached from *different* observable data, named in the thesis",
             "- Pattern confirmation from deep dive",
-            "- Multiple analyst agreement",
             "- Clear risk/reward profiles",
             "",
             "CRITICAL: Respond with ONLY the JSON object as specified in the system instructions. "
@@ -3335,6 +3365,9 @@ class AutonomousDeepEngine:
                     prediction_market_data=getattr(self, '_prediction_data', None) or None,
                     sentiment_data=getattr(self, '_sentiment_data', None) or None,
                     technical_analysis_data=self._extract_ta_for_symbol(primary_symbol, pre_context) if pre_context and primary_symbol else None,
+                    # Cohort marker: the specialists that produced this
+                    # recommendation were blind to the selection rationale.
+                    discovery_context={"pipeline_version": PIPELINE_VERSION},
                 )
                 # Persist news sentiment slice (column added by a peer agent).
                 self._set_insight_news_data(insight, primary_symbol)
@@ -3635,7 +3668,10 @@ class AutonomousDeepEngine:
             if self._run_metrics:
                 self._run_metrics.start_phase("deep_dive")
 
-            discovery_context = await self._build_discovery_context(
+            # The nominator proposal for the legacy pipeline: regime call,
+            # macro themes and sector signals.  Synthesis-only, for the same
+            # reason as the heatmap path.
+            nominator_context = await self._build_discovery_context(
                 macro_result, sector_result
             )
 
@@ -3668,10 +3704,14 @@ class AutonomousDeepEngine:
 
             analyst_reports: dict[str, dict[str, Any]] = {}
 
+            brief_for = self._decision_brief_factory(
+                macro_result, portfolio_holdings
+            )
+
             async def _analyze_one(sym: str) -> tuple[str, dict[str, Any] | None]:
                 try:
                     reports = await self._run_analysts_for_symbol(
-                        sym, discovery_context, pre_built_context=legacy_context
+                        sym, brief_for(sym), pre_built_context=legacy_context
                     )
                     return sym, reports
                 except Exception as e:
@@ -3726,6 +3766,7 @@ class AutonomousDeepEngine:
                 candidates=candidates,
                 max_insights=max_insights,
                 portfolio_holdings=portfolio_holdings,
+                nominator_context=nominator_context,
             )
             result.phases_completed.append("synthesis")
             if self._run_metrics:
@@ -4146,17 +4187,63 @@ class AutonomousDeepEngine:
             sector_result.to_dict(),
         )
 
+    def _decision_brief_factory(
+        self,
+        macro_result: MacroScanResult | None,
+        portfolio_holdings: dict[str, dict[str, float]] | None = None,
+        as_of: Any = None,
+    ) -> Callable[[str], str]:
+        """Return the per-symbol neutral brief builder for one run.
+
+        The run-level facts (as-of, horizon, mandate, observed market state)
+        are resolved once; only the holding status varies per symbol.
+        ``macro_result.raw_data`` is the pre-LLM macro fetch, so it carries
+        measurements and no part of the regime call.
+
+        Args:
+            macro_result: Phase 1 result; only its ``raw_data`` is read.
+            portfolio_holdings: ``{symbol: {...}}`` from
+                ``_get_portfolio_holdings()``, used only for held/not-held.
+            as_of: Run date; defaults to today.
+
+        Returns:
+            ``brief_for(symbol) -> str``.
+        """
+        market_state = getattr(macro_result, "raw_data", None)
+        held = {s.upper() for s in (portfolio_holdings or {})}
+        run_date = as_of or datetime.now().date()
+
+        def brief_for(symbol: str) -> str:
+            return neutral_decision_brief(
+                symbol,
+                as_of=run_date,
+                horizon=DEFAULT_DECISION_HORIZON,
+                long_only=True,
+                held=symbol.upper() in held,
+                market_state=market_state,
+            )
+
+        return brief_for
+
     async def _run_analysts_for_symbol(
         self,
         symbol: str,
-        discovery_context: str,
+        decision_brief: str,
         pre_built_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run all analysts for a single symbol.
 
         Args:
             symbol: Stock symbol to analyze.
-            discovery_context: Pre-built discovery context.
+            decision_brief: The neutral, facts-only brief for this symbol
+                (:func:`analysis.decision_brief.neutral_decision_brief`).  This
+                used to be the run's ``discovery_context`` -- the macro regime
+                call, the heatmap selection rationale, the thematic call and
+                the quant nomination -- handed identically to all three
+                specialists before they saw any data.  Their agreement then
+                measured that shared priming rather than independent
+                confirmation, so the conclusions were withdrawn and only the
+                dated facts remain.
             pre_built_context: Optional pre-built market context covering all
                 symbols. When provided, skips the per-symbol build_context()
                 call, saving redundant data fetches.
@@ -4196,7 +4283,7 @@ class AutonomousDeepEngine:
                 analyst_name,
                 config,
                 agent_context,
-                discovery_context,
+                decision_brief,
                 symbol,
             )
             tasks.append(task)
@@ -4228,16 +4315,22 @@ class AutonomousDeepEngine:
         analyst_name: str,
         config: dict[str, Any],
         agent_context: dict[str, Any],
-        discovery_context: str,
+        decision_brief: str,
         symbol: str,
     ) -> dict[str, Any]:
-        """Run a single analyst agent.
+        """Run a single analyst agent, blind to the selection rationale.
+
+        The payload is ``target_banner`` + ``decision_brief`` + the analyst's
+        own formatted data.  Phases 1-3's conclusions are not in it: they reach
+        synthesis once, as the nominator proposal, after these private reports
+        already exist.
 
         Args:
             analyst_name: Name of the analyst.
             config: Analyst configuration.
             agent_context: Symbol-specific context.
-            discovery_context: Discovery context from phases 1-3.
+            decision_brief: Neutral, facts-only brief -- target, as-of,
+                horizon, mandate, holding status and observed market state.
             symbol: Symbol being analyzed.
 
         Returns:
@@ -4257,12 +4350,18 @@ class AutonomousDeepEngine:
 
         # State the target in-band, ahead of everything else.  It used to
         # travel only as LLM call metadata, which the model never sees.
+        #
+        # The middle slot used to hold ``discovery_context`` -- the macro
+        # regime call, the heatmap reason this name was picked, the thematic
+        # call and the quant nomination -- identical for all three specialists
+        # and ahead of their data.  It now holds the neutral decision brief:
+        # the same slot, facts instead of conclusions.
         full_context = (
-            f"{target_banner(symbol)}\n\n{discovery_context}\n\n{formatted_context}"
+            f"{target_banner(symbol)}\n\n{decision_brief}\n\n{formatted_context}"
         )
 
         # Build a meaningful preview that distinguishes this entry from other
-        # analysts analyzing the same symbol (the discovery context prefix is
+        # analysts analyzing the same symbol (the banner and brief prefix is
         # identical for all analysts and would make entries look like duplicates).
         analyst_preview = f"[{symbol}] {analyst_name}: {formatted_context[:200]}"
 
@@ -4300,6 +4399,7 @@ class AutonomousDeepEngine:
         candidates: OpportunityList,
         max_insights: int,
         portfolio_holdings: dict[str, dict[str, float]] | None = None,
+        nominator_context: str = "",
     ) -> tuple[list[dict[str, Any]], str]:
         """Run Phase 5: Synthesis Lead (legacy pipeline).
 
@@ -4310,6 +4410,9 @@ class AutonomousDeepEngine:
             candidates: Opportunity candidates.
             max_insights: Maximum insights to generate.
             portfolio_holdings: Optional dict of user portfolio holdings.
+            nominator_context: The discovery pipeline's proposal -- regime
+                call, macro themes and sector signals.  The specialists never
+                saw it; it is rendered here once, labelled as a proposal.
 
         Returns:
             Tuple of (list of insight dictionaries, raw LLM response).
@@ -4358,6 +4461,7 @@ class AutonomousDeepEngine:
             sector_context,
             candidates,
             max_insights,
+            nominator_context,
         )
 
         # Add portfolio context if holdings exist
@@ -4444,46 +4548,46 @@ class AutonomousDeepEngine:
         sector_context: SectorRotationResult,
         candidates: OpportunityList,
         max_insights: int,
+        nominator_context: str = "",
     ) -> str:
         """Build additional context for autonomous synthesis (legacy pipeline).
 
+        Mirrors the heatmap path: the regime call, macro themes and sector
+        signals arrive as ``nominator_context`` -- the exact string the three
+        specialists used to be primed with -- rendered once and labelled as a
+        proposal rather than restated as fact.
+
         Args:
             analyst_reports: Per-symbol analyst reports.
-            macro_context: Macro scan results.
-            sector_context: Sector rotation results.
+            macro_context: Macro scan results (retained for the signature; the
+                regime call travels inside the nominator proposal).
+            sector_context: Sector rotation results (same).
             candidates: Opportunity candidates.
             max_insights: Target number of insights.
+            nominator_context: The discovery pipeline's proposal.
 
         Returns:
             Formatted autonomous context string.
         """
         lines = [
-            "## AUTONOMOUS DISCOVERY CONTEXT",
+            "## NOMINATOR PROPOSAL -- NOT INDEPENDENT CONFIRMATION",
             "",
-            f"### Market Regime: {macro_context.market_regime}",
-            f"Regime Confidence: {macro_context.regime_confidence:.0%}",
+            "Everything in this section is the discovery pipeline's own case for "
+            "why these names reached you: the macro regime call, its themes and "
+            "the sector rotation read. It is ONE source making a proposal.",
             "",
-            "### Key Macro Themes:",
+            "The three specialists whose private reports appear further down did "
+            "NOT see any of it. They were given the target symbol, a facts-only "
+            "decision brief and their own data. Weigh their reports on their "
+            "evidence; treat this section as the proposal under test, not as a "
+            "fourth vote.",
+            "",
         ]
 
-        for theme in macro_context.themes[:3]:
-            lines.append(f"- {theme.name} ({theme.direction}): {theme.rationale[:100]}...")
-
-        lines.extend([
-            "",
-            "### Sector Signals:",
-            f"Rotation Active: {sector_context.rotation_active}",
-        ])
-
-        if sector_context.rotation_active:
-            lines.append(
-                f"Rotating: {', '.join(sector_context.rotation_from)} -> "
-                f"{', '.join(sector_context.rotation_to)}"
-            )
-
-        lines.append("\nTop Sectors:")
-        for sector in sector_context.top_sectors[:3]:
-            lines.append(f"- {sector.sector_name}: {sector.rationale[:80]}...")
+        if nominator_context:
+            lines.append(nominator_context)
+        else:
+            lines.append("(No discovery proposal was recorded for this run.)")
 
         lines.extend([
             "",
@@ -4492,8 +4596,8 @@ class AutonomousDeepEngine:
             "",
             f"### Target: Generate {max_insights} actionable insights",
             "Prioritize opportunities with:",
-            "- Strong macro/sector alignment",
-            "- Multiple analyst agreement",
+            "- Specialist evidence that survives the counter-evidence in the same report",
+            "- Corroboration reached from *different* observable data, named in the thesis",
             "- Clear risk/reward profiles",
         ])
 
@@ -4666,6 +4770,7 @@ class AutonomousDeepEngine:
                     # The legacy pipeline does not persist a TA payload; the
                     # context is threaded in for the entry gate only.
                     technical_analysis_data=None,
+                    discovery_context={"pipeline_version": PIPELINE_VERSION},
                 )
                 # Persist news sentiment slice (column added by a peer agent).
                 self._set_insight_news_data(insight, data.get("primary_symbol"))
