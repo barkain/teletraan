@@ -712,6 +712,359 @@ def parse_risk_response(response: str) -> dict[str, Any]:
     }
 
 
+# =============================================================================
+# TOLERANT NORMALISATION OF THE MODEL'S ACTUAL RISK OUTPUT
+# =============================================================================
+#
+# RISK_ANALYST_PROMPT documents ``risk_assessments[]`` entries as flat scalars
+# (``max_drawdown_pct``, ``risk_reward``, ``stop_loss``, ...).  The model does
+# not comply, and it does not fail in one consistent way: in a single stored
+# run ``downside_scenarios`` came back as a *list* of scenario objects for AMD
+# and as a *dict* keyed by scenario name for DVN, while the stop level lived
+# under ``stop_loss_recommendations`` for one symbol and ``stop_loss_levels``
+# for another, sometimes as ``{"level": 42.0}`` and sometimes as the string
+# ``"$14.00 (-8.1%, psychological level)"``.
+#
+# The consumer (``_format_risk_report``) read the documented names, missed all
+# of them, and printed the ``0.0`` defaults as if they were measurements.  The
+# normaliser below reads the shapes the model really emits and returns ``None``
+# for anything genuinely absent, so a missing number can be rendered as missing
+# instead of as zero.  Same discipline as ``format_factor_value`` in
+# ``analysis/factor_model.py``.
+
+_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+# Nested containers the model has actually used for each documented scalar.
+_DOWNSIDE_KEYS = (
+    "downside_scenarios",
+    "max_drawdown_scenarios",
+    "downside_targets",
+    "downside_cases",
+)
+_STOP_KEYS = ("stop_loss_levels", "stop_loss_recommendations", "stop_levels")
+_SIZE_KEYS = (
+    "position_sizing",
+    "position_size_recommendations",
+    "position_size_suggestions",
+)
+_VAR_CONTAINER_KEYS = ("var_estimates", "var_analysis")
+_VOL_TEXT_KEYS = (
+    "realized_vol_20d",
+    "20d_historical_vol",
+    "historical_vol_20d",
+    "atr_pct_of_price",
+)
+# Preferred tier when the model reports conservative/moderate/aggressive bands.
+_MID_TIER_HINTS = ("moderate", "standard", "base", "medium")
+
+
+def _first_number(value: Any) -> float | None:
+    """Pull the first number out of a scalar the model may have written as prose.
+
+    ``42.0`` -> 42.0, ``"-12.2%"`` -> -12.2, ``"$13.43 (1.5x ATR)"`` -> 13.43,
+    ``"7.3% (~$1.11)"`` -> 7.3.  Returns ``None`` — never ``0.0`` — when there
+    is no number to read, so absent stays distinguishable from zero.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        match = _NUMBER_RE.search(value.replace(",", ""))
+        if match:
+            try:
+                return float(match.group(0))
+            except ValueError:
+                return None
+    return None
+
+
+def _dig(container: Any, *names: str) -> Any:
+    """First present, non-empty value among ``names`` in a dict."""
+    if not isinstance(container, dict):
+        return None
+    for name in names:
+        if name in container and container[name] not in (None, "", [], {}):
+            return container[name]
+    return None
+
+
+def _number_from(container: Any, *names: str) -> float | None:
+    """``_first_number`` of the first present name, unwrapping one dict level."""
+    value = _dig(container, *names)
+    if isinstance(value, dict):
+        value = _dig(value, "value", "value_pct", "pct", "level", "price", "target")
+    return _first_number(value)
+
+
+def _tiered_choice(container: Any) -> tuple[str | None, Any]:
+    """Pick the middle tier from a conservative/moderate/aggressive band dict.
+
+    Returns ``(tier_label, raw_value)``, or ``(None, None)`` when the container
+    is not a tier dict.  The middle tier is the one a reader would quote; the
+    label travels with it so the prompt says which band the number came from.
+    """
+    if not isinstance(container, dict) or not container:
+        return None, None
+    for key in container:
+        if any(hint in str(key).lower() for hint in _MID_TIER_HINTS):
+            return str(key), container[key]
+    first_key = next(iter(container))
+    return str(first_key), container[first_key]
+
+
+def _text_of(value: Any) -> str | None:
+    """Render a scenario/tier payload as one short human-readable string."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, dict):
+        for name in ("rationale", "basis", "scenario", "assessment", "trigger",
+                     "allocation", "recommendation", "risk", "implication", "note"):
+            text = value.get(name)
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+        return None
+    if isinstance(value, list):
+        parts = [p for p in (_text_of(v) for v in value) if p]
+        return "; ".join(parts) or None
+    return None
+
+
+def _normalize_scenarios(raw: Any) -> list[dict[str, Any]]:
+    """Normalise both observed ``downside_scenarios`` shapes into one list.
+
+    Accepts the list-of-objects shape (AMD) and the dict-keyed-by-name shape
+    (DVN/NU/AVGO), plus the ``downside_targets`` level_1/level_2 variant.
+    ``drawdown_pct`` comes back as a positive magnitude regardless of whether
+    the model wrote ``17.6``, ``-12.2`` or ``"-12.2%"``.
+    """
+    items: list[tuple[str | None, Any]] = []
+    if isinstance(raw, list):
+        items = [(None, entry) for entry in raw]
+    elif isinstance(raw, dict):
+        items = [(str(name), entry) for name, entry in raw.items()]
+    else:
+        return []
+
+    scenarios: list[dict[str, Any]] = []
+    for name, entry in items:
+        if isinstance(entry, dict):
+            label = (
+                _dig(entry, "scenario", "name", "case", "label")
+                if not name
+                else name
+            )
+            target = _number_from(entry, "target", "price", "level", "price_target")
+            drawdown = _number_from(
+                entry, "drawdown_pct", "pct", "drawdown", "loss_pct", "pct_loss"
+            )
+            probability = _number_from(entry, "probability", "odds", "likelihood")
+            note = _text_of(entry)
+        else:
+            label = name
+            target = _first_number(entry)
+            drawdown = None
+            probability = None
+            note = entry if isinstance(entry, str) else None
+        if probability is not None and probability > 1:
+            probability = probability / 100.0
+        scenarios.append(
+            {
+                "name": str(label) if label else None,
+                "target": target,
+                "drawdown_pct": abs(drawdown) if drawdown is not None else None,
+                "probability": probability,
+                "note": note if isinstance(note, str) else None,
+            }
+        )
+    return scenarios
+
+
+def normalize_risk_assessment(raw: dict[str, Any]) -> dict[str, Any]:
+    """Map one model-emitted risk assessment onto the documented scalar names.
+
+    Every numeric field is ``float | None``.  ``None`` means the model did not
+    report it; it is never silently replaced by ``0.0``.  ``unmapped_fields``
+    names the keys this normaliser did not consume, so the prompt can say what
+    was dropped rather than pretending the report contained nothing else.
+    """
+    if not isinstance(raw, dict):
+        return {}
+
+    consumed: set[str] = set()
+
+    def take(*names: str) -> Any:
+        for name in names:
+            if name in raw:
+                consumed.add(name)
+        return _dig(raw, *names)
+
+    symbol = take("symbol", "ticker")
+    current_price = _first_number(take("current_price", "price", "last_price"))
+
+    scenarios = _normalize_scenarios(take(*_DOWNSIDE_KEYS))
+    max_drawdown = _first_number(take("max_drawdown_pct"))
+    if max_drawdown is None:
+        modelled = [s["drawdown_pct"] for s in scenarios if s["drawdown_pct"] is not None]
+        max_drawdown = max(modelled) if modelled else None
+    else:
+        max_drawdown = abs(max_drawdown)
+
+    # Risk/reward: flat name first, then the nested analysis block.  AMD split
+    # the ratio across risk_reward_ratio_moderate / _support; with no single
+    # documented value the worst (smallest) ratio is the honest headline and
+    # the full set travels in the note.
+    rr = _first_number(take("risk_reward", "risk_reward_ratio"))
+    rr_note = None
+    rr_analysis = take("risk_reward_analysis", "risk_reward_assessment")
+    if isinstance(rr_analysis, dict):
+        rr_note = _text_of(rr_analysis)
+        if rr is None:
+            direct = _first_number(rr_analysis.get("risk_reward_ratio"))
+            if direct is not None:
+                rr = direct
+            else:
+                candidates = [
+                    value
+                    for key, value in rr_analysis.items()
+                    if str(key).startswith("risk_reward_ratio")
+                    and _first_number(value) is not None
+                ]
+                numbers = [_first_number(c) for c in candidates]
+                numbers = [n for n in numbers if n is not None]
+                if numbers:
+                    rr = min(numbers)
+
+    var_95 = _number_from(raw, "var_95_daily", "var_95_daily_pct")
+    if "var_95_daily" in raw or "var_95_daily_pct" in raw:
+        consumed.update({"var_95_daily", "var_95_daily_pct"})
+    if var_95 is None:
+        container = take(*_VAR_CONTAINER_KEYS)
+        var_95 = _number_from(
+            container, "var_95_daily_pct", "daily_var_95", "var_95_daily", "var_95"
+        )
+
+    stop_loss = _first_number(take("stop_loss"))
+    stop_note = None
+    if stop_loss is None:
+        tier_label, tier_value = _tiered_choice(take(*_STOP_KEYS))
+        if tier_value is not None:
+            stop_loss = (
+                _number_from(tier_value, "level", "price", "stop", "target")
+                if isinstance(tier_value, dict)
+                else _first_number(tier_value)
+            )
+            stop_note = tier_label
+
+    position_size = take("position_size_suggestion", "position_size")
+    position_size = position_size if isinstance(position_size, str) else None
+    if position_size is None:
+        tier_label, tier_value = _tiered_choice(take(*_SIZE_KEYS))
+        text = (
+            _dig(tier_value, "allocation", "size", "recommendation")
+            if isinstance(tier_value, dict)
+            else tier_value
+        )
+        if isinstance(text, str) and text.strip():
+            position_size = f"{tier_label}: {text.strip()}" if tier_label else text.strip()
+
+    invalidation_raw = take("invalidation_triggers", "invalidation_trigger", "invalidation")
+    if isinstance(invalidation_raw, str):
+        invalidation = [invalidation_raw]
+    elif isinstance(invalidation_raw, list):
+        invalidation = [str(item) for item in invalidation_raw if item]
+    else:
+        invalidation = []
+
+    volatility = take(*_VOL_TEXT_KEYS)
+    volatility = str(volatility) if volatility not in (None, "") else None
+
+    unmapped = sorted(
+        key
+        for key in raw
+        if key not in consumed and not str(key).startswith("_")
+    )
+
+    return {
+        "symbol": str(symbol) if symbol else None,
+        "current_price": current_price,
+        "max_drawdown_pct": max_drawdown,
+        "risk_reward": rr,
+        "risk_reward_note": rr_note,
+        "var_95_daily_pct": var_95,
+        "stop_loss": stop_loss,
+        "stop_loss_tier": stop_note,
+        "position_size": position_size,
+        "volatility": volatility,
+        "downside_scenarios": scenarios,
+        "invalidation": invalidation,
+        "unmapped_fields": unmapped,
+    }
+
+
+def normalize_risk_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a whole parsed risk report for downstream rendering.
+
+    ``parse_risk_response`` is a bare ``json.loads`` passthrough, so this is the
+    first point at which the risk analyst's output has a predictable shape.
+    Report-level lists are passed through; only ``risk_assessments`` entries are
+    rewritten, by :func:`normalize_risk_assessment`.
+    """
+    if not isinstance(report, dict):
+        return {}
+
+    assessments = report.get("risk_assessments")
+    normalized = [
+        normalize_risk_assessment(entry)
+        for entry in (assessments or [])
+        if isinstance(entry, dict)
+    ]
+
+    vol_regime = report.get("volatility_regime")
+    volatility_regime: dict[str, Any] | None = None
+    if isinstance(vol_regime, dict) and vol_regime:
+        volatility_regime = {
+            "current_vix": _first_number(
+                _dig(vol_regime, "current_vix", "vix", "vix_level")
+            ),
+            "regime": _dig(vol_regime, "regime", "name", "state"),
+            "term_structure": _dig(vol_regime, "term_structure", "structure"),
+            "implication": _dig(vol_regime, "implication", "interpretation", "note"),
+        }
+
+    tail_risks: list[dict[str, Any]] = []
+    for entry in report.get("tail_risks") or []:
+        if isinstance(entry, dict):
+            probability = _number_from(entry, "probability", "odds")
+            if probability is not None and probability > 1:
+                probability = probability / 100.0
+            tail_risks.append(
+                {
+                    "event": _dig(entry, "event", "risk", "scenario", "name"),
+                    "probability": probability,
+                    "impact": _dig(entry, "impact", "severity"),
+                }
+            )
+        elif isinstance(entry, str) and entry.strip():
+            tail_risks.append({"event": entry.strip(), "probability": None, "impact": None})
+
+    return {
+        "analyst": "risk",
+        "volatility_regime": volatility_regime,
+        "risk_assessments": normalized,
+        "portfolio_risks": [str(r) for r in (report.get("portfolio_risks") or []) if r],
+        "tail_risks": tail_risks,
+        "key_observations": [
+            str(o) for o in (report.get("key_observations") or []) if o
+        ],
+        "confidence": _first_number(report.get("confidence")),
+    }
+
+
 def parse_to_result(response: str) -> RiskAnalysisResult:
     """
     Parse response into a RiskAnalysisResult dataclass.

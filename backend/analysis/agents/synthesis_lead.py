@@ -586,6 +586,309 @@ def format_synthesis_context(analyst_reports: dict[str, Any]) -> str:
     return "\n".join(context_parts)
 
 
+def _panel_value(value: Any, spec: str = "", missing: str = "not reported") -> str:
+    """Render one panel value, or an explicit absence marker.
+
+    The panel stores ``None`` for anything an analyst did not report, and this
+    is the only place those values become text.  Same rule as
+    ``format_factor_value`` in ``analysis/factor_model.py``: never substitute a
+    zero.  ``Max Drawdown: 0.0%`` and ``Market Phase: Unknown (0% confidence)``
+    were both fabrications of absent data, and both read to the model as
+    measurements.
+    """
+    if value is None or value == "":
+        return missing
+    if spec and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return format(float(value), spec)
+    return str(value)
+
+
+def _opt_text(value: Any, limit: int) -> str | None:
+    """Trim a rationale to the panel's line budget, marking the cut."""
+    if not value:
+        return None
+    text = str(value).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _panel_money(value: Any) -> str:
+    """Currency, or the absence marker -- never a bare ``$`` with nothing behind it."""
+    if value is None:
+        return "not reported"
+    try:
+        return f"${float(value):,.2f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _fit_to_budget(
+    lines: list[tuple[int, str]],
+    budget: int,
+) -> list[str]:
+    """Trim one symbol's block to its budget, lowest-priority material first.
+
+    ``lines`` is ``(priority, text)`` with 0 = must keep.  Whatever is dropped
+    is counted in an in-band marker: a panel that truncates silently is the
+    defect this module replaces, only smaller.
+    """
+    kept = list(lines)
+    dropped = 0
+    while kept and sum(len(text) + 1 for _, text in kept) > budget:
+        worst = max(priority for priority, _ in kept)
+        if worst == 0:
+            break
+        for index in range(len(kept) - 1, -1, -1):
+            if kept[index][0] == worst:
+                del kept[index]
+                dropped += 1
+                break
+    rendered = [text for _, text in kept]
+    if dropped:
+        rendered.append(
+            f"  [truncated: {dropped} detail line(s) omitted to stay inside the "
+            f"{budget}-character per-symbol budget]"
+        )
+    return rendered
+
+
+def _format_panel_decision(analyst: str, view: dict[str, Any]) -> list[tuple[int, str]]:
+    """Render one analyst's entry inside one symbol's block.
+
+    Priorities drive what a per-symbol budget gives up first: 0 never goes,
+    then the analyst's headline numbers and supporting evidence, then opposing
+    evidence, then invalidation, and only last the colour commentary.
+    """
+    label = analyst.upper()
+    status = view.get("status", "missing")
+    if status != "ok":
+        reason = view.get("error") or "no report returned"
+        return [(0, f"\n[{label}] status: {status.upper()} -- {reason}")]
+
+    decision = view.get("decision") or {}
+    details = view.get("details") or {}
+    stance = decision.get("stance")
+    confidence = decision.get("confidence")
+    head = (
+        f"\n[{label}] stance: {_panel_value(stance, missing='NOT STATED')}"
+        f" | this analyst's confidence: {_panel_value(confidence, '.0%')}"
+    )
+    lines: list[tuple[int, str]] = [(0, head)]
+    basis = decision.get("stance_basis")
+    if basis:
+        lines.append((0, f"  stance basis: {basis}"))
+    lines.append((0, f"  thesis: {_panel_value(decision.get('thesis'))}"))
+
+    headline, extras = _format_panel_details(analyst, details)
+    lines.extend((1, text) for text in headline)
+
+    evidence = decision.get("evidence") or []
+    if evidence:
+        lines.append((1, "  evidence for:"))
+        lines.extend((1, f"    [{item['id']}] {item['claim']}") for item in evidence)
+    counter = decision.get("counter_evidence") or []
+    if counter:
+        lines.append((2, "  evidence against:"))
+        lines.extend((2, f"    [{item['id']}] {item['claim']}") for item in counter)
+    elif details.get("counter_evidence_elicited") is False:
+        lines.append(
+            (2, "  evidence against: not elicited -- this analyst's output contract has no such field")
+        )
+
+    invalidation = decision.get("invalidation") or []
+    if invalidation:
+        lines.append((3, "  invalidation:"))
+        lines.extend((3, f"    - {item}") for item in invalidation)
+
+    lines.extend((4, text) for text in extras)
+    return lines
+
+
+def _format_panel_details(
+    analyst: str, details: dict[str, Any]
+) -> tuple[list[str], list[str]]:
+    """Role-specific lines, split into headline numbers and droppable extras.
+
+    The headline half is what the old per-analyst formatters printed as
+    measurements -- and, for risk, printed as zeros. It must not be the first
+    thing a budget throws away.
+    """
+    headline: list[str] = []
+    extras: list[str] = []
+    if analyst == "technical":
+        shown = details.get("findings_shown")
+        total = details.get("findings_total")
+        if total:
+            note = " (truncated)" if details.get("truncated") else ""
+            headline.append(f"  findings shown: {shown} of {total}{note}")
+        timeframes = details.get("timeframes_analyzed") or []
+        if timeframes:
+            extras.append(f"  timeframes: {', '.join(timeframes)}")
+    elif analyst == "sector":
+        headline.append(
+            "  market phase: "
+            f"{_panel_value(details.get('market_phase'))}"
+            f" ({_panel_value(details.get('phase_confidence'), '.0%')} phase confidence)"
+        )
+        extras.append(
+            f"  market-wide table reported: {details.get('rankings_reported', 0)} rankings, "
+            f"{details.get('recommendations_reported', 0)} recommendations "
+            "(rendered once under MARKET-WIDE SECTOR VIEW)"
+        )
+    elif analyst == "risk":
+        headline.append(
+            "  price: " + _panel_money(details.get("current_price"))
+            + " | worst modelled drawdown: " + _panel_value(details.get("max_drawdown_pct"), ".1f") + "%"
+            + " | reward/risk: " + _panel_value(details.get("risk_reward"), ".2f") + "x"
+        )
+        stop_tier = details.get("stop_loss_tier")
+        headline.append(
+            "  stop: " + _panel_money(details.get("stop_loss"))
+            + (f" ({stop_tier})" if stop_tier else "")
+            + " | 95% 1-day VaR: " + _panel_value(details.get("var_95_daily_pct"), ".1f") + "%"
+            + " | position size: " + _panel_value(details.get("position_size"))
+        )
+        if details.get("volatility") or details.get("vix") is not None:
+            extras.append(
+                "  volatility: " + _panel_value(details.get("volatility"))
+                + " | VIX: " + _panel_value(details.get("vix"), ".1f")
+                + " | regime: " + _panel_value(details.get("volatility_regime"))
+            )
+        unmapped = details.get("unmapped_fields") or []
+        if unmapped:
+            extras.append(
+                "  other fields this analyst reported, not rendered here: "
+                + ", ".join(unmapped[:8])
+            )
+    for observation in details.get("key_observations") or []:
+        extras.append(f"  - {observation}")
+    return headline, extras
+
+
+def _format_market_wide_sector(data: dict[str, Any], budget: int) -> list[str]:
+    """The shared sector table, rendered once for the run."""
+    reporting = data.get("reporting_runs", 0)
+    if not reporting:
+        return []
+    lines: list[tuple[int, str]] = [
+        (0, ""),
+        (0, "-" * 60),
+        (
+            0,
+            "MARKET-WIDE SECTOR VIEW "
+            f"(reported by {reporting} of {data.get('total_runs', reporting)} per-symbol "
+            "sector runs; the strategist's table is market-wide by design)",
+        ),
+        (0, "-" * 60),
+    ]
+    for entry in data.get("market_phases") or []:
+        lines.append(
+            (
+                0,
+                "Market Phase: "
+                f"{_panel_value(entry.get('phase'))}"
+                f" ({_panel_value(entry.get('phase_confidence'), '.0%')} confidence)"
+                f" -- reported for {', '.join(entry.get('reported_by') or [])}",
+            )
+        )
+    rankings = data.get("sector_rankings") or []
+    if rankings:
+        lines.append((1, "Sector Rankings (by relative strength):"))
+        for ranking in rankings:
+            strength = ranking.get("relative_strength")
+            lines.append(
+                (
+                    1,
+                    f"  - {_panel_value(ranking.get('sector'))}: "
+                    f"RS={_panel_value(strength, '.3f')} ({_panel_value(ranking.get('trend'))})",
+                )
+            )
+    recommendations = data.get("recommendations") or []
+    if recommendations:
+        lines.append((2, "Recommendations:"))
+        for rec in recommendations:
+            lines.append(
+                (2, f"  - {_panel_value(rec.get('sector'))}: {_panel_value(rec.get('action'))}")
+            )
+            rationale = _opt_text(rec.get("rationale"), 260)
+            if rationale:
+                lines.append((3, f"    {rationale}"))
+    rotation = data.get("rotation_signals") or []
+    if rotation:
+        lines.append((3, "Rotation Signals (market-wide; symbol-specific ones sit with their symbol):"))
+        lines.extend((3, f"  > {signal}") for signal in rotation)
+    return _fit_to_budget(lines, budget)
+
+
+def format_symbol_panel_context(panel: dict[str, Any]) -> str:
+    """Render the per-symbol analyst panel for the synthesis lead.
+
+    This is a **new** entry point, deliberately not a replacement for
+    ``format_synthesis_context``: that one is also called by
+    ``DeepAnalysisEngine`` (``deep_engine.py:524``) with an analyst-keyed dict
+    from four production routes, and reshaping it in place would make those
+    routes render nothing.
+
+    What this preserves that the old autonomous path destroyed: the symbol
+    boundary, the analyst boundary, each analyst's own confidence (never
+    merged), its thesis, its evidence and counter-evidence with citable IDs, its
+    invalidation conditions, and an explicit status for the analysts that failed
+    or never ran.  The only caps are per symbol, and they announce themselves.
+
+    Args:
+        panel: The dict from ``analysis.agent_panel.build_symbol_panel``.
+
+    Returns:
+        Formatted string for the synthesis prompt.
+    """
+    from analysis.agent_panel import (  # local import: keeps agents/ leaf-level
+        MAX_MARKET_WIDE_CHARS,
+        MAX_PANEL_CHARS_PER_SYMBOL,
+    )
+
+    symbols = panel.get("symbols") or []
+    parts: list[str] = [
+        "=" * 60,
+        "PER-SYMBOL ANALYST PANEL "
+        f"(schema {panel.get('schema_version', 'symbol_panel.v1')}, {len(symbols)} symbols)",
+        "=" * 60,
+        "Each block below is one symbol's specialist reports, kept separate by",
+        "analyst. Confidences are each analyst's own and are NOT merged or averaged.",
+        "Stances marked with a 'stance basis' line were derived by the orchestrator",
+        "from the analyst's structured output, not stated by the analyst itself.",
+        "Cite evidence by the bracketed IDs; an ID belongs to exactly one symbol.",
+    ]
+
+    run_context = panel.get("run_context") or {}
+    if run_context:
+        rendered = ", ".join(
+            f"{key}={value}" for key, value in run_context.items() if value not in (None, "", [])
+        )
+        if rendered:
+            parts.append(f"Run context: {rendered}")
+
+    parts.extend(_format_market_wide_sector((panel.get("market_wide") or {}).get("sector") or {}, MAX_MARKET_WIDE_CHARS))
+
+    for entry in symbols:
+        symbol = entry.get("symbol", "N/A")
+        lines: list[tuple[int, str]] = [
+            (0, ""),
+            (0, "-" * 60),
+            (0, f"SYMBOL: {symbol}"),
+            (0, "-" * 60),
+        ]
+        for analyst, view in (entry.get("reports") or {}).items():
+            lines.extend(_format_panel_decision(analyst, view))
+        parts.extend(_fit_to_budget(lines, MAX_PANEL_CHARS_PER_SYMBOL))
+
+    parts.append("")
+    parts.append("=" * 60)
+    parts.append("END OF ANALYST PANEL")
+    parts.append("=" * 60)
+    return "\n".join(parts)
+
+
 def _format_technical_report(data: dict[str, Any]) -> str:
     """Format technical analyst report section."""
     parts = [

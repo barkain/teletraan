@@ -90,8 +90,12 @@ from analysis.agents.correlation_detective import (  # type: ignore[import-not-f
     format_correlation_context,
     parse_correlation_response,
 )
+from analysis.agent_panel import (  # type: ignore[import-not-found]
+    build_symbol_panel,
+    select_symbol_reports,
+)
 from analysis.agents.synthesis_lead import (  # type: ignore[import-not-found]
-    format_synthesis_context,
+    format_symbol_panel_context,
     parse_synthesis_response,
     format_synthesis_prompt_with_context,
     build_pattern_context,
@@ -2695,9 +2699,20 @@ class AutonomousDeepEngine:
         if getattr(self, '_investor_result', None):
             investor_context = "\n\n" + format_investor_for_synthesis(self._investor_result)
 
-        # Format analyst reports for synthesis
-        synthesis_context = format_synthesis_context(
-            self._flatten_analyst_reports(analyst_reports)
+        # Per-symbol analyst panel: every symbol's three specialists, kept
+        # separate, with each analyst's own confidence.  This replaces the
+        # aggregate-by-analyst-type flatten, which showed synthesis 5 of 23
+        # technical findings from 2 of 5 symbols and none of the sector work.
+        synthesis_context = format_symbol_panel_context(
+            build_symbol_panel(
+                analyst_reports,
+                run_context={
+                    "as_of": datetime.now().strftime("%Y-%m-%d"),
+                    "pipeline": "heatmap",
+                    "long_only": True,
+                    "symbols_analyzed": ", ".join(analyst_reports.keys()),
+                },
+            )
         )
 
         quant_context_block = ""
@@ -2919,15 +2934,13 @@ class AutonomousDeepEngine:
         symbol = insight.primary_symbol
         symbol_reports = analyst_reports.get(symbol, {}) if symbol else {}
 
-        def clean_report(report: dict[str, Any] | None) -> dict[str, Any] | None:
-            if not report or "error" in report:
-                return None
-            return {k: v for k, v in report.items() if not k.startswith("_")}
-
-        # Extract per-symbol analyst reports
-        technical_report = clean_report(symbol_reports.get("technical"))
-        sector_report = clean_report(symbol_reports.get("sector"))
-        risk_report = clean_report(symbol_reports.get("risk"))
+        # Same selection the synthesis panel uses (analysis/agent_panel.py), so
+        # what synthesis was shown and what is persisted for the insight
+        # conversation agent cannot drift apart.
+        selected = select_symbol_reports(analyst_reports, symbol)
+        technical_report = selected.get("technical")
+        sector_report = selected.get("sector")
+        risk_report = selected.get("risk")
 
         # Macro is global in autonomous engine
         macro_report = macro_result.to_dict() if macro_result else None
@@ -4352,9 +4365,18 @@ class AutonomousDeepEngine:
             portfolio_holdings or {}
         )
 
-        # Format analyst reports for synthesis
-        synthesis_context = format_synthesis_context(
-            self._flatten_analyst_reports(analyst_reports)
+        # Per-symbol analyst panel -- same builder as the heatmap path, so the
+        # fallback pipeline shows synthesis the same evidence structure.
+        synthesis_context = format_symbol_panel_context(
+            build_symbol_panel(
+                analyst_reports,
+                run_context={
+                    "as_of": datetime.now().strftime("%Y-%m-%d"),
+                    "pipeline": "legacy",
+                    "long_only": True,
+                    "symbols_analyzed": ", ".join(analyst_reports.keys()),
+                },
+            )
         )
 
         # News + social-sentiment augmentation (per-symbol news for the
@@ -4529,55 +4551,6 @@ class AutonomousDeepEngine:
             logger.info(f"[AUTO] Extracted conditions from analyst reports: {conditions}")
 
         return conditions
-
-    def _flatten_analyst_reports(
-        self,
-        analyst_reports: dict[str, dict[str, Any]],
-    ) -> dict[str, Any]:
-        """Flatten per-symbol analyst reports for synthesis.
-
-        Args:
-            analyst_reports: Dict mapping symbols to analyst reports.
-
-        Returns:
-            Flattened dict for synthesis context formatting.
-        """
-        # Aggregate reports by analyst type
-        aggregated: dict[str, Any] = {
-            "technical": {"findings": [], "confidence": 0.0},
-            "macro": {"market_implications": [], "confidence": 0.0},
-            "sector": {"sector_rankings": [], "confidence": 0.0},
-            "risk": {"risk_assessments": [], "confidence": 0.0},
-            "correlation": {"divergences": [], "confidence": 0.0},
-        }
-
-        for symbol, reports in analyst_reports.items():
-            for analyst_name, report in reports.items():
-                if analyst_name not in aggregated:
-                    continue
-                if "error" in report:
-                    continue
-
-                # Merge findings/data
-                if analyst_name == "technical":
-                    findings = report.get("findings", [])
-                    for f in findings:
-                        f["_symbol"] = symbol
-                    aggregated["technical"]["findings"].extend(findings)
-                elif analyst_name == "risk":
-                    assessments = report.get("risk_assessments", [])
-                    for a in assessments:
-                        a["_symbol"] = symbol
-                    aggregated["risk"]["risk_assessments"].extend(assessments)
-
-                # Average confidence
-                if "confidence" in report:
-                    current = aggregated[analyst_name].get("confidence", 0.0)
-                    aggregated[analyst_name]["confidence"] = (
-                        current + report["confidence"]
-                    ) / 2
-
-        return aggregated
 
     async def _store_insights(
         self,
