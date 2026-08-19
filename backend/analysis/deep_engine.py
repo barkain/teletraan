@@ -59,6 +59,11 @@ from analysis.agents.portfolio_analyst import (
     format_portfolio_context,
     parse_portfolio_response,
 )
+from analysis.long_only import (
+    coerce_long_only_action,
+    held_symbols_for_actions,
+    log_long_only_violation,
+)
 from analysis.context_builder import market_context_builder
 from analysis.statistical_calculator import StatisticalFeatureCalculator
 from analysis.memory_service import InstitutionalMemoryService
@@ -598,6 +603,33 @@ class DeepAnalysisEngine:
         result = await pool_query_llm(system_prompt, user_prompt, agent_name)
         return result.text
 
+    @staticmethod
+    async def _get_held_symbols() -> set[str]:
+        """Symbols the portfolio currently holds, upper-cased.
+
+        Mirrors ``AutonomousDeepEngine._get_portfolio_holdings`` but returns
+        only what the long-only guard needs. A portfolio that cannot be read
+        yields the empty set, which is the strict reading: nothing is held, so
+        no exit is permitted. It fails closed and never raises -- a portfolio
+        lookup must not break the analysis pipeline.
+
+        Returns:
+            Upper-cased held symbols, empty when none are held or on any error.
+        """
+        try:
+            from sqlalchemy import select  # type: ignore[import-not-found]
+            from models.portfolio import Portfolio  # type: ignore[import-not-found]
+
+            async with async_session_factory() as session:
+                result = await session.execute(select(Portfolio).limit(1))
+                portfolio = result.scalar_one_or_none()
+                if not portfolio or not portfolio.holdings:
+                    return set()
+                return {h.symbol.upper() for h in portfolio.holdings}
+        except Exception as e:
+            logger.warning(f"[DEEP] Portfolio lookup failed for long-only guard: {e}")
+            return set()
+
     async def _store_insights(
         self,
         insights_data: list[dict[str, Any]],
@@ -605,6 +637,12 @@ class DeepAnalysisEngine:
         fundamentals_map: dict[str, dict[str, Any]] | None = None,
     ) -> list[DeepInsight]:
         """Store insights in the database with their research contexts.
+
+        Enforces the long-only rule before anything is added to the session: a
+        SELL/STRONG_SELL/BUY_MORE on a symbol the portfolio does not hold is
+        downgraded (see :mod:`analysis.long_only`). Unlike the autonomous
+        pipeline, this one has no ``InsightStoreOutcome`` to report drops
+        through, so a downgrade is logged and not surfaced to the caller.
 
         Args:
             insights_data: List of insight dictionaries.
@@ -616,6 +654,11 @@ class DeepAnalysisEngine:
         """
         logger.info(f"Storing {len(insights_data)} insights to database...")
         stored: list[DeepInsight] = []
+        held_symbols = await held_symbols_for_actions(
+            [(d.get("action") or "") for d in insights_data],
+            self._get_held_symbols,
+        )
+        downgraded: list[str] = []
 
         async with async_session_factory() as session:
             for data in insights_data:
@@ -623,6 +666,20 @@ class DeepAnalysisEngine:
                     sym = data.get("primary_symbol")
                     fund = (fundamentals_map or {}).get(sym) if sym else None
                     insight = self._create_deep_insight(data, fundamentals=fund)
+
+                    # Long-only guard: the last check before the database, and
+                    # before _start_insight_tracking reads the action. A short
+                    # on a symbol the portfolio does not hold must not be stored
+                    # and must not be tracked as a bearish prediction.
+                    insight.action, violation = coerce_long_only_action(
+                        insight.action, insight.primary_symbol, held_symbols
+                    )
+                    if violation:
+                        downgraded.append(violation)
+                        log_long_only_violation(
+                            "[DEEP]", violation, insight.primary_symbol
+                        )
+
                     session.add(insight)
 
                     # Create and attach research context if data provided
@@ -637,6 +694,17 @@ class DeepAnalysisEngine:
                 except Exception as e:
                     logger.error(f"Failed to create DeepInsight: {e}")
                     continue
+
+            if downgraded:
+                # This pipeline has no InsightStoreOutcome, so the log is the
+                # only channel -- see the note in _store_insights' docstring.
+                logger.warning(
+                    "[DEEP] LONG-ONLY: %d of %d insight(s) named a portfolio-only "
+                    "action on a symbol the portfolio does not hold. This is a "
+                    "long-only system -- it does not short -- so the action was "
+                    "downgraded and the analysis kept: %s",
+                    len(downgraded), len(insights_data), ", ".join(downgraded),
+                )
 
             if stored:
                 await session.flush()

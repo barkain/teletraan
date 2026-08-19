@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -317,3 +317,137 @@ class TestPromptStatesTheConstraint:
         from analysis.agents.synthesis_lead import SYNTHESIS_LEAD_PROMPT
 
         assert "**AVOID**" not in SYNTHESIS_LEAD_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# The other engine. DeepAnalysisEngine is reachable from three production
+# routes (api/routes/deep_insights.py:231, api/routes/data.py:251 and :297) and
+# had no guard at all: it shares SYNTHESIS_LEAD_PROMPT so it inherited the
+# prompt layer, but its store path never called the normaliser, and its own
+# action_to_direction maps SELL/STRONG_SELL to "bearish" and starts outcome
+# tracking on them. The rule was half true until this closed.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def deep_engine(monkeypatch, db_session):
+    """A DeepAnalysisEngine whose store path is wired to the test database.
+
+    ``_store_insights`` opens its own session and, once anything is stored,
+    runs confidence adjustment and pattern extraction -- both of which call the
+    LLM. Those are stubbed out so these tests exercise the guard and nothing
+    else.
+    """
+    from contextlib import asynccontextmanager
+
+    import analysis.deep_engine as deep_engine_mod
+
+    @asynccontextmanager
+    async def _session_factory():
+        yield db_session
+
+    monkeypatch.setattr(deep_engine_mod, "async_session_factory", _session_factory)
+    monkeypatch.setattr(
+        deep_engine_mod, "ConfidenceAdjuster", MagicMock(side_effect=RuntimeError)
+    )
+    monkeypatch.setattr(
+        deep_engine_mod, "PatternExtractor", MagicMock(side_effect=RuntimeError)
+    )
+    return deep_engine_mod.DeepAnalysisEngine()
+
+
+def _deep_engine_held(engine, held: set[str]) -> None:
+    engine._get_held_symbols = AsyncMock(return_value=held)  # type: ignore[method-assign]
+
+
+class TestDeepEngineIsAlsoGuarded:
+    async def test_sell_on_unheld_symbol_is_downgraded(self, deep_engine):
+        _deep_engine_held(deep_engine, set())
+
+        stored = await deep_engine._store_insights([_insight("TSLA", "SELL")])
+
+        assert [i.action for i in stored] == ["WATCH"]
+
+    @pytest.mark.parametrize("action", ["SELL", "STRONG_SELL", "BUY_MORE"])
+    async def test_empty_portfolio_can_never_store_a_portfolio_only_action(
+        self, deep_engine, action
+    ):
+        _deep_engine_held(deep_engine, set())
+
+        stored = await deep_engine._store_insights([_insight("TSLA", action)])
+
+        assert len(stored) == 1
+        assert stored[0].action not in ("SELL", "STRONG_SELL", "BUY_MORE")
+
+    async def test_sell_on_held_symbol_still_exits(self, deep_engine):
+        _deep_engine_held(deep_engine, {"TSLA"})
+
+        stored = await deep_engine._store_insights([_insight("TSLA", "SELL")])
+
+        assert [i.action for i in stored] == ["SELL"]
+
+    @pytest.mark.parametrize("action", ["BUY", "STRONG_BUY", "HOLD", "WATCH"])
+    async def test_long_actions_pass_through(self, deep_engine, action):
+        _deep_engine_held(deep_engine, set())
+
+        stored = await deep_engine._store_insights([_insight("NVDA", action)])
+
+        assert [i.action for i in stored] == [action]
+
+    async def test_a_batch_of_longs_never_reads_the_portfolio(self, deep_engine):
+        _deep_engine_held(deep_engine, set())
+
+        await deep_engine._store_insights(
+            [_insight("NVDA", "BUY"), _insight("AMD", "WATCH")]
+        )
+
+        deep_engine._get_held_symbols.assert_not_awaited()  # type: ignore[attr-defined]
+
+    async def test_downgraded_insight_is_never_tracked_as_bearish(
+        self, deep_engine, db_session
+    ):
+        """The whole point: a blocked short must not enter the graded population.
+
+        ``_start_insight_tracking`` maps SELL/STRONG_SELL to "bearish" and
+        starts an InsightOutcome for them. After the downgrade the action is
+        WATCH, which is not in its direction map, so it resolves to "neutral"
+        and is skipped.
+        """
+        _deep_engine_held(deep_engine, set())
+        stored = await deep_engine._store_insights([_insight("TSLA", "SELL")])
+
+        tracked = await deep_engine._start_insight_tracking(stored, db_session)
+
+        assert tracked == 0
+
+    async def test_a_real_exit_on_a_held_position_is_still_tracked(
+        self, deep_engine, db_session, monkeypatch
+    ):
+        """The guard must not disable tracking for genuine exits."""
+        import analysis.deep_engine as deep_engine_mod
+
+        tracker = MagicMock()
+        tracker.start_tracking = AsyncMock()
+        monkeypatch.setattr(
+            deep_engine_mod, "InsightOutcomeTracker", MagicMock(return_value=tracker)
+        )
+        _deep_engine_held(deep_engine, {"TSLA"})
+        stored = await deep_engine._store_insights([_insight("TSLA", "SELL")])
+
+        tracked = await deep_engine._start_insight_tracking(stored, db_session)
+
+        assert tracked == 1
+        assert tracker.start_tracking.await_args.kwargs["predicted_direction"] == (
+            "bearish"
+        )
+
+
+class TestTheRuleHasOneHome:
+    def test_both_engines_import_the_same_function(self):
+        """The rule lives in analysis/long_only.py; nothing reimplements it."""
+        import analysis.autonomous_engine as auto_mod
+        import analysis.deep_engine as deep_mod
+        from analysis.long_only import coerce_long_only_action as canonical
+
+        assert auto_mod.coerce_long_only_action is canonical
+        assert deep_mod.coerce_long_only_action is canonical
