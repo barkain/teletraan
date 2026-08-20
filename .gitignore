@@ -65,3 +65,6 @@ debug-*.png
 # Logs
 *.log
 logs/
+
+# Replay harness response cache — regenerable, keyed by prompt hash
+backend/data/synthesis_replay_cache/
