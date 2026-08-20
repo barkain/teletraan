@@ -1,0 +1,230 @@
+{
+  "as_of": "2026-08-20T20:06:52.933349+00:00",
+  "calibration_version": "1.0.0",
+  "source": "analysis.eval_insights",
+  "label_rule": "sign_of_alpha",
+  "label_rule_description": "sign(symbol_return - SPY_return) == predicted_direction, over the insight's own time_horizon, entered at the close one bar after created_at.  This is analysis.eval_insights' decision rule with alpha_threshold_pct=0.0.  It is the only rule under which Brier and ECE are coherent: a threshold band carves out a region in which a directional call can neither win nor lose, so the graded event stops being a partition of outcomes and the forecast stops being a probability of anything.  The outcome grader's +/-2% band answers the track-record question instead and scores ~10 points lower on identical data.",
+  "n": 209,
+  "base_rate": 0.4498,
+  "effective_sample": {
+    "rows": 209,
+    "distinct_dates": 30,
+    "distinct_symbols": 71,
+    "most_repeated_symbol": "GC=F",
+    "most_repeated_symbol_n": 19,
+    "largest_date_cluster": 29,
+    "rows_per_date": 6.97
+  },
+  "gate": {
+    "min_oos_brier_skill": 0.01,
+    "min_records": 100,
+    "min_distinct_dates": 20
+  },
+  "out_of_sample": {
+    "raw": {
+      "leave_one_date_out": {
+        "method": "raw",
+        "scheme": "leave_one_date_out",
+        "n": 209,
+        "brier": 0.329,
+        "ece": 0.2376,
+        "skill_vs_base_rate": -0.315
+      },
+      "chronological_holdout": {
+        "method": "raw",
+        "scheme": "chronological_holdout",
+        "n": 65,
+        "brier": 0.2541,
+        "ece": 0.1162,
+        "skill_vs_base_rate": 0.0961
+      },
+      "grouped_kfold": {
+        "method": "raw",
+        "scheme": "grouped_5fold_x20seeds",
+        "mean_skill_vs_base_rate": -0.3151,
+        "min_skill": -0.3267,
+        "max_skill": -0.3014,
+        "seeds_with_positive_skill": 0
+      }
+    },
+    "platt": {
+      "leave_one_date_out": {
+        "method": "platt",
+        "scheme": "leave_one_date_out",
+        "n": 209,
+        "brier": 0.2502,
+        "ece": 0.0024,
+        "skill_vs_base_rate": 0.0
+      },
+      "chronological_holdout": {
+        "method": "platt",
+        "scheme": "chronological_holdout",
+        "n": 65,
+        "brier": 0.2991,
+        "ece": 0.2386,
+        "skill_vs_base_rate": -0.0637
+      },
+      "grouped_kfold": {
+        "method": "platt",
+        "scheme": "grouped_5fold_x20seeds",
+        "mean_skill_vs_base_rate": -0.0004,
+        "min_skill": -0.0033,
+        "max_skill": 0.0,
+        "seeds_with_positive_skill": 0
+      }
+    },
+    "platt_unconstrained": {
+      "leave_one_date_out": {
+        "method": "platt_unconstrained",
+        "scheme": "leave_one_date_out",
+        "n": 209,
+        "brier": 0.2515,
+        "ece": 0.0335,
+        "skill_vs_base_rate": -0.0052
+      },
+      "chronological_holdout": {
+        "method": "platt_unconstrained",
+        "scheme": "chronological_holdout",
+        "n": 65,
+        "brier": 0.2991,
+        "ece": 0.2386,
+        "skill_vs_base_rate": -0.0637
+      },
+      "grouped_kfold": {
+        "method": "platt_unconstrained",
+        "scheme": "grouped_5fold_x20seeds",
+        "mean_skill_vs_base_rate": -0.0072,
+        "min_skill": -0.023,
+        "max_skill": 0.0035,
+        "seeds_with_positive_skill": 4
+      }
+    },
+    "isotonic": {
+      "leave_one_date_out": {
+        "method": "isotonic",
+        "scheme": "leave_one_date_out",
+        "n": 209,
+        "brier": 0.2591,
+        "ece": 0.0338,
+        "skill_vs_base_rate": -0.0358
+      },
+      "chronological_holdout": {
+        "method": "isotonic",
+        "scheme": "chronological_holdout",
+        "n": 65,
+        "brier": 0.3936,
+        "ece": 0.3771,
+        "skill_vs_base_rate": -0.3998
+      },
+      "grouped_kfold": {
+        "method": "isotonic",
+        "scheme": "grouped_5fold_x20seeds",
+        "mean_skill_vs_base_rate": -0.0381,
+        "min_skill": -0.0643,
+        "max_skill": -0.0206,
+        "seeds_with_positive_skill": 0
+      }
+    }
+  },
+  "calibrator": {
+    "kind": "platt",
+    "slope": 0.0,
+    "intercept": -0.201637
+  },
+  "mapping": {
+    "0.30": 0.4498,
+    "0.40": 0.4498,
+    "0.50": 0.4498,
+    "0.60": 0.4498,
+    "0.70": 0.4498,
+    "0.80": 0.4498,
+    "0.90": 0.4498,
+    "0.95": 0.4498
+  },
+  "diagnostics": {
+    "full_sample_platt": {
+      "kind": "platt",
+      "slope": -0.130373,
+      "intercept": -0.097101
+    },
+    "raw_reliability": [
+      {
+        "bin": 3,
+        "range": [
+          0.3,
+          0.4
+        ],
+        "n": 3,
+        "mean_prediction": 0.3752,
+        "hit_rate": 0.3333
+      },
+      {
+        "bin": 4,
+        "range": [
+          0.4,
+          0.5
+        ],
+        "n": 39,
+        "mean_prediction": 0.4609,
+        "hit_rate": 0.5128
+      },
+      {
+        "bin": 5,
+        "range": [
+          0.5,
+          0.6
+        ],
+        "n": 36,
+        "mean_prediction": 0.5311,
+        "hit_rate": 0.5
+      },
+      {
+        "bin": 6,
+        "range": [
+          0.6,
+          0.7
+        ],
+        "n": 25,
+        "mean_prediction": 0.6543,
+        "hit_rate": 0.52
+      },
+      {
+        "bin": 7,
+        "range": [
+          0.7,
+          0.8
+        ],
+        "n": 55,
+        "mean_prediction": 0.7462,
+        "hit_rate": 0.3455
+      },
+      {
+        "bin": 8,
+        "range": [
+          0.8,
+          0.9
+        ],
+        "n": 42,
+        "mean_prediction": 0.8491,
+        "hit_rate": 0.4286
+      },
+      {
+        "bin": 9,
+        "range": [
+          0.9,
+          1.0
+        ],
+        "n": 9,
+        "mean_prediction": 0.9254,
+        "hit_rate": 0.5556
+      }
+    ],
+    "selected_method": "platt",
+    "selected_leave_one_date_out_skill": 0.0,
+    "runner_up": "isotonic"
+  },
+  "active": false,
+  "verdict": "no method clears the gate. Best is platt at leave-one-date-out Brier skill +0.0000, below 0.01. Stated confidence carries no measurable information about outcomes at n=209 across 30 dates, so the calibrated probability is the base rate and a fitted map only spends parameters to say so. Serving stays on the identity fallback.",
+  "eval_harness_version": "1.0.0",
+  "eval_git_sha": "e77b5b5"
+}
