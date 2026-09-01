@@ -3,6 +3,8 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
+import { useActionBaseRates, selectActionBaseRate } from '@/lib/hooks/use-action-base-rates';
+import { TrackRecordBadge } from './track-record-badge';
 import { formatDistanceToNow } from 'date-fns';
 import {
   TrendingUp,
@@ -387,33 +389,39 @@ function formatInsightDate(timestamp: string): string {
 // Sub-Components
 // ============================================
 
-function ConfidenceGauge({ confidence, size = 'md' }: { confidence: number; size?: 'sm' | 'md' | 'lg' }) {
+/**
+ * Confidence in one analyst dimension, e.g. how firm the technical read is.
+ *
+ * Not the insight-level confidence -- that one was measured to carry no
+ * information about whether a call works and is gone from the UI entirely; see
+ * track-record-badge.tsx. This is a different quantity: how solid a *finding*
+ * is ("RSI is 28" beats "sentiment feels stretched"), which is not a forecast
+ * of a return and which the calibration study never measured. No claim is made
+ * that the colours predict anything; they are a legibility aid.
+ *
+ * Bands match `_evidence_confidence_color` in backend/api/routes/reports.py, and
+ * sit on the observed distribution of these scores (median 0.77, quartiles 0.70
+ * and 0.82) rather than on the outcome base rate. Under the old 80/60 split
+ * almost every dimension rendered the same colour.
+ *
+ * The large "Confidence" tile this component used to be able to render was
+ * removed with the insight-level gauge; only the inline bar remains.
+ */
+function ConfidenceGauge({ confidence }: { confidence: number }) {
   const percentage = Math.round(confidence * 100);
-  const getColor = () => {
-    if (percentage >= 80) return 'text-green-600 dark:text-green-400';
-    if (percentage >= 60) return 'text-yellow-600 dark:text-yellow-400';
-    return 'text-red-600 dark:text-red-400';
-  };
-  const getProgressColor = () => {
-    if (percentage >= 80) return '[&>[data-slot=progress-indicator]]:bg-green-500';
-    if (percentage >= 60) return '[&>[data-slot=progress-indicator]]:bg-yellow-500';
-    return '[&>[data-slot=progress-indicator]]:bg-red-500';
-  };
-
-  if (size === 'sm') {
-    return (
-      <div className="flex items-center gap-2">
-        <Progress value={percentage} className={cn('h-1.5 w-16', getProgressColor())} />
-        <span className={cn('text-xs font-semibold', getColor())}>{percentage}%</span>
-      </div>
-    );
-  }
+  const textColor =
+    percentage >= 80 ? 'text-green-600 dark:text-green-400'
+    : percentage >= 70 ? 'text-yellow-600 dark:text-yellow-400'
+    : 'text-red-600 dark:text-red-400';
+  const barColor =
+    percentage >= 80 ? '[&>[data-slot=progress-indicator]]:bg-green-500'
+    : percentage >= 70 ? '[&>[data-slot=progress-indicator]]:bg-yellow-500'
+    : '[&>[data-slot=progress-indicator]]:bg-red-500';
 
   return (
-    <div className="rounded-lg px-4 py-3 text-center bg-card/80 backdrop-blur-sm border border-border/50">
-      <div className={cn('text-3xl font-bold', getColor())}>{percentage}%</div>
-      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Confidence</div>
-      <Progress value={percentage} className={cn('h-1.5 mt-2', getProgressColor())} />
+    <div className="flex items-center gap-2">
+      <Progress value={percentage} className={cn('h-1.5 w-16', barColor)} />
+      <span className={cn('text-xs font-semibold', textColor)}>{percentage}%</span>
     </div>
   );
 }
@@ -507,7 +515,7 @@ function DimensionSectionCard({
           <span className="text-sm font-semibold text-foreground">{config.label}</span>
           {confidence != null && (
             <div className="ml-auto">
-              <ConfidenceGauge confidence={confidence} size="sm" />
+              <ConfidenceGauge confidence={confidence} />
             </div>
           )}
         </div>
@@ -531,7 +539,7 @@ function DimensionSectionCard({
           <span className="text-sm font-semibold text-foreground">{config.label}</span>
           {confidence != null && (
             <div className="ml-auto mr-3">
-              <ConfidenceGauge confidence={confidence} size="sm" />
+              <ConfidenceGauge confidence={confidence} />
             </div>
           )}
           <ChevronDown className="h-4 w-4 text-muted-foreground ml-auto transition-transform group-data-[state=open]:rotate-180" />
@@ -978,6 +986,10 @@ function OverviewSection({
 }) {
   const actionInfo = actionConfig[insight.action];
   const ActionIcon = actionInfo.icon;
+  // Shown in place of the stated confidence, which has no measured relationship
+  // to outcomes. See components/insights/track-record-badge.tsx.
+  const { data: baseRates } = useActionBaseRates();
+  const trackRecord = insight.track_record ?? selectActionBaseRate(baseRates, insight.action);
 
   return (
     <div
@@ -1026,12 +1038,12 @@ function OverviewSection({
               {insight.thesis}
             </p>
             <p className="text-sm text-muted-foreground italic leading-relaxed">
-              {laymanExplain(insight.thesis) ?? `In plain terms: This analysis recommends a "${actionConfig[insight.action].label}" position with ${Math.round(insight.confidence * 100)}% confidence over a ${insight.time_horizon.replace(/_/g, ' ')} timeframe.`}
+              {laymanExplain(insight.thesis) ?? `In plain terms: This analysis recommends a "${actionConfig[insight.action].label}" position over a ${insight.time_horizon.replace(/_/g, ' ')} timeframe.`}
             </p>
           </div>
 
           <div className="flex flex-col items-end gap-3">
-            <ConfidenceGauge confidence={insight.confidence} />
+            <TrackRecordBadge record={trackRecord} />
             {(insight.action === 'BUY' || insight.action === 'STRONG_BUY' ||
               insight.action === 'SELL' || insight.action === 'STRONG_SELL') && (
               <TooltipProvider>

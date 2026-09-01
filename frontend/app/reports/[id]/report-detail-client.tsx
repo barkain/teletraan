@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { useActionBaseRates, selectActionBaseRate } from '@/lib/hooks/use-action-base-rates';
+import { TrackRecordBadge } from '@/components/insights/track-record-badge';
 import { useReportDetail, usePublishReport } from '@/lib/hooks/use-reports';
 import { api } from '@/lib/api';
 import type { ReportInsight } from '@/lib/types/report';
@@ -90,6 +92,11 @@ function formatAction(action: string | null): string {
 // ---- Components ----
 
 function InsightCard({ insight }: { insight: ReportInsight }) {
+  // Shown instead of insight.confidence, which is still served but has no
+  // measured relationship to outcomes.
+  const { data: baseRates } = useActionBaseRates();
+  const trackRecord = selectActionBaseRate(baseRates, insight.action);
+
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -119,15 +126,8 @@ function InsightCard({ insight }: { insight: ReportInsight }) {
             </div>
             <p className="text-sm font-medium mt-1">{insight.title}</p>
           </div>
-          {/* Confidence */}
-          {insight.confidence !== null && (
-            <div className="text-right shrink-0">
-              <div className="text-lg font-bold">
-                {Math.round(insight.confidence * 100)}%
-              </div>
-              <div className="text-xs text-muted-foreground">confidence</div>
-            </div>
-          )}
+          {/* Track record for this action type -- not a per-idea probability */}
+          <TrackRecordBadge record={trackRecord} size="sm" className="shrink-0" />
         </div>
 
         {/* Expand/collapse toggle */}

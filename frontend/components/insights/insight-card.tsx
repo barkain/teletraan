@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { UntrackedNotice } from './track-record-badge';
 import { formatRelativeTime, getInsightTypeLabel } from '@/lib/hooks/use-insights';
 import type { Insight } from '@/types';
 import {
@@ -16,7 +17,6 @@ import {
   Info,
   Eye,
   ShieldAlert,
-  Gauge,
 } from 'lucide-react';
 
 interface InsightCardProps {
@@ -95,12 +95,6 @@ function getSeverityIcon(severity: Insight['severity']) {
   }
 }
 
-function getConfidenceLabel(percent: number): { label: string; color: string } {
-  if (percent >= 80) return { label: 'High confidence', color: 'bg-green-500' };
-  if (percent >= 60) return { label: 'Moderate confidence', color: 'bg-yellow-500' };
-  return { label: 'Low confidence', color: 'bg-red-500' };
-}
-
 /** Generate a simple plain-English summary from insight type */
 function getLaymanSummary(type: Insight['type'], severity: Insight['severity']): string {
   const urgency = severity === 'alert' ? 'Urgent' : severity === 'warning' ? 'Notable' : 'Informational';
@@ -121,9 +115,7 @@ function getLaymanSummary(type: Insight['type'], severity: Insight['severity']):
 }
 
 export function InsightCard({ insight, onClick }: InsightCardProps) {
-  const confidencePercent = insight.confidence ? Math.round(insight.confidence * 100) : null;
   const severityAction = getSeverityAction(insight.severity);
-  const confidenceInfo = confidencePercent !== null ? getConfidenceLabel(confidencePercent) : null;
 
   return (
     <Card
@@ -136,7 +128,7 @@ export function InsightCard({ insight, onClick }: InsightCardProps) {
       )}
       onClick={onClick}
     >
-      {/* Header: Action badge left, Confidence gauge right */}
+      {/* Header: Action badge left, track-record notice right */}
       <div className="px-5 pt-4 pb-2">
         <div className="flex items-start justify-between gap-3">
           {/* Left: Action + Type badges */}
@@ -151,24 +143,10 @@ export function InsightCard({ insight, onClick }: InsightCardProps) {
             </Badge>
           </div>
 
-          {/* Right: Confidence gauge */}
-          {confidenceInfo && confidencePercent !== null && (
-            <div className="flex items-center gap-2 shrink-0">
-              <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
-              <div className="flex flex-col items-end gap-0.5">
-                <div className="flex items-center gap-1.5">
-                  <div className="h-2 w-16 bg-secondary rounded-full overflow-hidden">
-                    <div
-                      className={cn('h-full rounded-full transition-all', confidenceInfo.color)}
-                      style={{ width: `${confidencePercent}%` }}
-                    />
-                  </div>
-                  <span className="text-xs font-semibold tabular-nums">{confidencePercent}%</span>
-                </div>
-                <span className="text-[10px] text-muted-foreground leading-none">{confidenceInfo.label}</span>
-              </div>
-            </div>
-          )}
+          {/* Right: these signals carry a stated confidence but nothing grades
+              their outcomes, so there is no hit rate to show and the number is
+              not printed. */}
+          <UntrackedNotice className="shrink-0" />
         </div>
       </div>
 

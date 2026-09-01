@@ -12,6 +12,7 @@ import { DeepInsightCard } from '@/components/insights/deep-insight-card';
 import { StatisticalSignalsCard } from '@/components/insights/statistical-signals-card';
 import { InsightDetailView } from '@/components/insights/insight-detail-view';
 import { useDeepInsights, DeepInsightParams } from '@/lib/hooks/use-deep-insights';
+import { useActionBaseRates, selectActionBaseRate } from '@/lib/hooks/use-action-base-rates';
 import type { DeepInsight, DeepInsightType, InsightAction } from '@/types';
 import { Sparkles, ChevronLeft, ChevronRight, Search, Filter, Activity, PanelRightOpen, Calendar, LayoutGrid, List, TrendingUp, TrendingDown, Minus, Target } from 'lucide-react';
 import { ConnectionError } from '@/components/ui/empty-state';
@@ -157,11 +158,11 @@ function InsightListRow({
 }) {
   const action = listActionConfig[insight.action];
   const ActionIcon = action.icon;
-  const confidencePct = Math.round(insight.confidence * 100);
-  const confidenceColor =
-    confidencePct >= 75 ? 'text-green-600 dark:text-green-400' :
-    confidencePct >= 50 ? 'text-yellow-600 dark:text-yellow-400' :
-    'text-red-600 dark:text-red-400';
+  // The stated confidence used to be rendered here as a bare percentage. It is
+  // still on the insight, but it has no measured relationship to outcomes, so
+  // the column now shows the graded hit rate for this action type.
+  const { data: baseRates } = useActionBaseRates();
+  const trackRecord = insight.track_record ?? selectActionBaseRate(baseRates, insight.action);
 
   const dateStr = insight.created_at
     ? new Date(insight.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -199,9 +200,16 @@ function InsightListRow({
         {insight.title}
       </span>
 
-      {/* Confidence */}
-      <span className={cn('text-sm font-semibold tabular-nums shrink-0', confidenceColor)}>
-        {confidencePct}%
+      {/* Track record for this action type -- not a per-idea probability */}
+      <span
+        className="text-xs text-muted-foreground tabular-nums shrink-0 w-24 text-right"
+        title={trackRecord ? `${trackRecord.headline} ${trackRecord.caveat}` : undefined}
+      >
+        {trackRecord === null
+          ? ''
+          : trackRecord.percent === null
+            ? `${insight.action} n/a`
+            : `${insight.action} ${trackRecord.percent}% (n=${trackRecord.graded})`}
       </span>
 
       {/* Date */}

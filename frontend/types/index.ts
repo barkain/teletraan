@@ -196,6 +196,44 @@ export interface LLMTestResult {
   response_preview: string | null;
 }
 
+
+// ============================================
+// Action track record
+// ============================================
+
+/**
+ * How often calls of one action type have actually worked.
+ *
+ * This is what the UI shows in place of `DeepInsight.confidence`. The stated
+ * confidence is still served by the API and still stored, but it was measured
+ * to carry no information about whether a call works (calibration slope -0.151,
+ * 95% CI [-0.503, +0.150]), so rendering it as a percentage told readers
+ * something the data does not support.
+ *
+ * `rate` is null when fewer than `min_sample` outcomes have been graded for the
+ * action. Null means unmeasured: never substitute zero, and never fall back to
+ * the overall rate, which would state something about this action that the
+ * record does not say.
+ */
+export interface ActionBaseRate {
+  action: string;
+  graded: number;
+  validated: number;
+  rate: number | null;
+  percent: number | null;
+  available: boolean;
+  headline: string;
+  caveat: string;
+}
+
+export interface ActionBaseRates {
+  min_sample: number;
+  caveat: string;
+  method: string;
+  overall: ActionBaseRate;
+  by_action: Record<string, ActionBaseRate>;
+}
+
 // ============================================
 // Deep Insights Types
 // ============================================
@@ -237,8 +275,16 @@ export interface DeepInsight {
   // Evidence
   supporting_evidence: AnalystEvidence[];
 
-  // Confidence & Timing
+  /**
+   * The model's own stated confidence. Kept because deleting it would destroy
+   * the ability to re-measure calibration later -- but do NOT render it. Render
+   * `track_record` instead; see the ActionBaseRate docs above.
+   */
   confidence: number;
+
+  /** Measured record for this insight's action type, when the API supplied it. */
+  track_record?: ActionBaseRate | null;
+
   time_horizon: string;
 
   // Risk Management

@@ -15,6 +15,8 @@ from database import async_session_factory
 from models.deep_insight import DeepInsight
 from models.analysis_task import AnalysisTask, AnalysisTaskStatus, PHASE_NAMES
 from schemas.deep_insight import DeepInsightResponse, DeepInsightListResponse
+from schemas.knowledge import ActionBaseRateResponse
+from analysis.action_base_rates import ActionBaseRates, load_action_base_rates
 from analysis.deep_engine import deep_analysis_engine
 from analysis.autonomous_engine import get_autonomous_engine
 from analysis.backtester import get_today_picks
@@ -26,6 +28,23 @@ from api.routes.reports import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _attach_track_record(
+    response: DeepInsightResponse, rates: ActionBaseRates
+) -> DeepInsightResponse:
+    """Attach the measured record for this insight's action type.
+
+    Clients render this instead of ``confidence``. The stated confidence is
+    still on the response for research and re-calibration; it is simply not the
+    number a reader should be shown, because it has no measured relationship to
+    whether the call works.
+    """
+    response.track_record = ActionBaseRateResponse.model_validate(
+        rates.for_action(response.action.value).to_dict()
+    )
+    return response
+
 
 
 class GenerateRequest(BaseModel):
@@ -165,9 +184,12 @@ async def list_deep_insights(
     # entire list. Rows that still fail validation are logged and skipped.
     items: list[DeepInsightResponse] = []
     skipped = 0
+    rates = await load_action_base_rates(db)
     for i in insights:
         try:
-            items.append(DeepInsightResponse.model_validate(i))
+            items.append(
+                _attach_track_record(DeepInsightResponse.model_validate(i), rates)
+            )
         except Exception as exc:
             skipped += 1
             logger.warning(
@@ -197,7 +219,10 @@ async def get_deep_insight(
     if not insight:
         raise HTTPException(status_code=404, detail="Deep insight not found")
     try:
-        return DeepInsightResponse.model_validate(insight)
+        rates = await load_action_base_rates(db)
+        return _attach_track_record(
+            DeepInsightResponse.model_validate(insight), rates
+        )
     except Exception as exc:
         logger.warning(
             "Deep insight id=%s failed response validation: %s", insight_id, exc
@@ -359,8 +384,12 @@ async def get_more_insights(
     if has_more:
         insights = insights[: request.limit]  # Trim to requested limit
 
+    rates = await load_action_base_rates(db)
     return MoreInsightsResponse(
-        items=[DeepInsightResponse.model_validate(i) for i in insights],
+        items=[
+            _attach_track_record(DeepInsightResponse.model_validate(i), rates)
+            for i in insights
+        ],
         offset=request.offset,
         limit=request.limit,
         has_more=has_more,
@@ -470,9 +499,10 @@ async def _auto_publish_report(task_id: str) -> None:
                 if ins:
                     insights.append(ins)
 
-        html_content = _build_report_html(task, insights)
+        base_rates = await load_action_base_rates(session)
+        html_content = _build_report_html(task, insights, base_rates)
         published_url = await publish_report_async(
-            task, html_content, _REPO_DIR, insights,
+            task, html_content, _REPO_DIR, insights, base_rates,
         )
 
         # Persist the published URL on the task

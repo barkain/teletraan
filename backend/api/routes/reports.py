@@ -17,6 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps import get_db
 from config import get_settings
 from models.analysis_task import AnalysisTask, AnalysisTaskStatus
+from analysis.action_base_rates import (
+    BASE_RATE_CAVEAT,
+    BASE_RATE_METHOD,
+    ActionBaseRate,
+    ActionBaseRates,
+    load_action_base_rates,
+)
 from models.deep_insight import DeepInsight
 from schemas.report import (
     ReportDetail,
@@ -389,15 +396,39 @@ def _parse_github_org_repo(remote_url: str) -> tuple[str, str]:
     return "barkain", "teletraan"
 
 
+def _track_record_stat(record: dict | None) -> str:
+    """Render the index stats-bar track-record tile from a sidecar snapshot.
+
+    ``None`` means no published report has recorded a track record yet, which
+    is a different statement from a rate of zero and must read as such.
+    """
+    if not record or not record.get("graded"):
+        return "Track record <strong>not yet recorded</strong>"
+    if not record.get("available"):
+        return (
+            f"Track record: <strong>too few graded calls</strong> "
+            f"(n={record['graded']})"
+        )
+    return (
+        f"<strong>{record['percent']}%</strong> of "
+        f"{record['graded']} graded calls worked"
+    )
+
+
 def _build_report_metadata(
     task: AnalysisTask,
     insights: list[DeepInsight],
     filename: str,
+    base_rates: ActionBaseRates | None = None,
 ) -> dict:
     """Build an enriched metadata dict for a report to be stored as a JSON sidecar.
 
     This metadata powers the rich index page with symbol pills, action
-    distributions, confidence bars, and summaries.
+    distributions, the graded track record, and summaries.
+
+    ``avg_confidence`` is still written for backward compatibility with sidecars
+    already on gh-pages and with anything parsing them, but nothing renders it
+    any more -- see ``track_record``, which is what the index shows.
     """
     symbols: list[str] = sorted(set(
         ins.primary_symbol for ins in insights if ins.primary_symbol
@@ -425,6 +456,10 @@ def _build_report_metadata(
         "symbols": symbols,
         "action_counts": action_counts,
         "avg_confidence": round(avg_conf, 1),
+        # Snapshot of the graded record as of publication. None on sidecars
+        # written before this existed; the index renders that as unknown rather
+        # than as zero.
+        "track_record": base_rates.overall.to_dict() if base_rates else None,
         "insight_types": sorted(set(insight_types)),
         "created_at": task.created_at.isoformat() if task.created_at else "",
         "started_at": task.started_at.isoformat() if task.started_at else "",
@@ -446,8 +481,14 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
     # --- Aggregate stats for the stats bar ---
     total_reports = len(report_metas)
     total_insights = sum(m.get("insights_count", 0) for m in report_metas)
-    all_confidences = [m.get("avg_confidence", 0) for m in report_metas if m.get("avg_confidence")]
-    overall_avg_conf = round(sum(all_confidences) / len(all_confidences), 0) if all_confidences else 0
+    # Track record, from the most recent sidecar that recorded one. Averaging
+    # the reports' stated confidence used to sit here; it was a mean of a number
+    # with no measured link to outcomes, and (because avg_confidence is stored
+    # on a 0-1 scale and was rounded as if it were 0-100) it rendered as "1%"
+    # regardless. Deleting it removes both problems.
+    latest_record = next(
+        (m["track_record"] for m in report_metas if m.get("track_record")), None
+    )
 
     # "Latest" time-ago
     latest_ago = ""
@@ -605,11 +646,6 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
             # Insight count
             ins_count = m.get("insights_count", 0)
 
-            # Confidence bar
-            avg_conf = m.get("avg_confidence", 0)
-            conf_pct = min(100, max(0, round(avg_conf)))
-            conf_color = "#EF4444" if conf_pct < 50 else "#F59E0B" if conf_pct < 70 else "#10B981"
-
             # Summary (2-line truncated)
             summary = m.get("discovery_summary", "")
             if len(summary) > 160:
@@ -639,10 +675,6 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
           <div class="action-row">{action_badges}</div>
           <div class="card-stats-row">
             <span class="card-stat">{ins_count} insight{"s" if ins_count != 1 else ""}</span>
-            <div class="conf-bar-wrap">
-              <div class="conf-bar" style="width:{conf_pct}%;background:{conf_color};"></div>
-            </div>
-            <span class="card-stat conf-label">{conf_pct}%</span>
           </div>
           <div class="card-summary">{_esc(summary)}</div>
           <div class="card-footer-row">
@@ -1029,7 +1061,7 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
     border: 1px solid color-mix(in srgb, var(--act-color) 20%, transparent);
   }}
 
-  /* Stats row with confidence bar */
+  /* Stats row */
   .card-stats-row {{
     display: flex;
     align-items: center;
@@ -1041,23 +1073,6 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
     font-weight: 500;
     white-space: nowrap;
   }}
-  .conf-label {{
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 600;
-  }}
-  .conf-bar-wrap {{
-    flex: 1;
-    height: 4px;
-    background: rgba(255,255,255,0.06);
-    border-radius: 2px;
-    overflow: hidden;
-  }}
-  .conf-bar {{
-    height: 100%;
-    border-radius: 2px;
-    transition: width 0.6s ease;
-  }}
-
   /* Summary */
   .card-summary {{
     font-size: 13px;
@@ -1212,7 +1227,7 @@ def _generate_index_html(report_metas: list[dict], org: str, repo: str) -> str:
   <div class="stats-bar">
     <div class="stat-card"><span style="font-size:18px;">&#x1F4CA;</span> <strong>{total_reports}</strong> Reports</div>
     <div class="stat-card"><span style="font-size:18px;">&#x1F4A1;</span> <strong>{total_insights}</strong> Insights</div>
-    <div class="stat-card"><span style="font-size:18px;">&#x1F3AF;</span> Avg <strong>{int(overall_avg_conf)}%</strong> Confidence</div>
+    <div class="stat-card" title="{_esc(BASE_RATE_METHOD)} {_esc(BASE_RATE_CAVEAT)}"><span style="font-size:18px;">&#x1F3AF;</span> {_track_record_stat(latest_record)}</div>
     <div class="stat-card"><span style="font-size:18px;">&#x1F552;</span> Latest: <strong>{_esc(latest_ago)}</strong></div>
   </div>
 
@@ -1352,6 +1367,7 @@ def _do_publish_github_pages(
     html_content: str,
     repo_dir: str,
     insights: list[DeepInsight] | None = None,
+    base_rates: ActionBaseRates | None = None,
 ) -> str:
     """Synchronous helper that publishes an HTML report to the gh-pages branch.
 
@@ -1454,7 +1470,7 @@ def _do_publish_github_pages(
         # Write a JSON metadata sidecar for this report
         meta_dir = os.path.join(reports_dir, "meta")
         os.makedirs(meta_dir, exist_ok=True)
-        meta = _build_report_metadata(task, insights or [], filename)
+        meta = _build_report_metadata(task, insights or [], filename, base_rates)
         meta_path = os.path.join(meta_dir, filename.replace(".html", ".json"))
         with open(meta_path, "w", encoding="utf-8") as fh:
             json.dump(meta, fh, ensure_ascii=False, indent=2)
@@ -1545,6 +1561,7 @@ def _do_publish_static_dir(
     task: AnalysisTask,
     html_content: str,
     insights: list[DeepInsight] | None = None,
+    base_rates: ActionBaseRates | None = None,
 ) -> str:
     """Publish an HTML report by copying it to a local directory.
 
@@ -1580,7 +1597,7 @@ def _do_publish_static_dir(
         fh.write(html_content)
 
     # Write the JSON metadata sidecar
-    meta = _build_report_metadata(task, insights or [], filename)
+    meta = _build_report_metadata(task, insights or [], filename, base_rates)
     meta_path = os.path.join(meta_dir, filename.replace(".html", ".json"))
     with open(meta_path, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)
@@ -1622,6 +1639,7 @@ def _do_publish(
     html_content: str,
     repo_dir: str,
     insights: list[DeepInsight] | None = None,
+    base_rates: ActionBaseRates | None = None,
 ) -> str:
     """Dispatch report publishing to the configured method.
 
@@ -1638,13 +1656,15 @@ def _do_publish(
     method = pub_config["method"]
 
     if method == "static_dir":
-        return _do_publish_static_dir(task, html_content, insights)
+        return _do_publish_static_dir(task, html_content, insights, base_rates)
 
     if method == "none":
         raise RuntimeError("Publishing is disabled (PUBLISH_METHOD=none).")
 
     # Default: github_pages
-    return _do_publish_github_pages(task, html_content, repo_dir, insights)
+    return _do_publish_github_pages(
+        task, html_content, repo_dir, insights, base_rates
+    )
 
 
 def _meta_from_filename(fname: str) -> dict:
@@ -1709,6 +1729,7 @@ async def publish_report_async(
     html_content: str,
     repo_dir: str,
     insights: list[DeepInsight] | None = None,
+    base_rates: ActionBaseRates | None = None,
 ) -> str:
     """Publish HTML report using the configured method (async wrapper).
 
@@ -1717,7 +1738,7 @@ async def publish_report_async(
     """
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
-        None, _do_publish, task, html_content, repo_dir, insights,
+        None, _do_publish, task, html_content, repo_dir, insights, base_rates,
     )
 
 
@@ -1914,7 +1935,7 @@ async def get_report_html(
             if ins:
                 insights.append(ins)
 
-    html = _build_report_html(task, insights)
+    html = _build_report_html(task, insights, await load_action_base_rates(db))
     return Response(content=html, media_type="text/html")
 
 
@@ -1976,12 +1997,13 @@ async def publish_report(
             if ins:
                 insights.append(ins)
 
-    html_content = _build_report_html(task, insights)
+    base_rates = await load_action_base_rates(db)
+    html_content = _build_report_html(task, insights, base_rates)
 
     # 3. Publish using configured method -------------------------------------
     try:
         published_url = await publish_report_async(
-            task, html_content, _REPO_DIR, insights,
+            task, html_content, _REPO_DIR, insights, base_rates,
         )
     except RuntimeError as exc:
         logger.exception("Report publish failed for task %s", task_id)
@@ -2395,21 +2417,62 @@ def _format_duration(seconds: float | None) -> str:
     return f"{s}s"
 
 
-def _confidence_color(confidence: float) -> str:
-    """Return color for the confidence gauge, banded around the measured base rate.
+def _evidence_confidence_color(confidence: float) -> str:
+    """Colour for one analyst's stated confidence in one piece of evidence.
 
-    Roughly 35% of directional calls have beaten SPY by more than 2% over their
-    stated horizon, and the synthesis prompt anchors confidence on that number.
-    So a well-calibrated insight typically lands at 0.30-0.55, and the old bands
-    (green >=0.8, red <0.6) would have rendered almost every honest insight red.
-    These bands read relative to the base rate instead: green means the thesis
-    claims a justified edge over it, red means it is below our own hit rate.
+    This used to colour the insight-level confidence gauge too, banded around
+    the measured base rate. That gauge is gone: the insight-level number was
+    shown to carry no information about outcomes, and it now renders as the
+    graded hit rate for the action instead (see ``_base_rate_color``).
+
+    What is left is a different quantity. An analyst's confidence in a *finding*
+    is a statement about how firm that piece of evidence is -- "RSI is 28" is
+    firmer than "sentiment feels stretched" -- and is not a forecast of a return,
+    so it is not the thing the calibration study measured and no base rate
+    applies to it. There is no claim here that these bands predict anything; they
+    are a legibility aid on a qualitative score, and they are banded on where
+    that score actually falls.
+
+    The thresholds are the observed distribution, not a base rate. Across the
+    1,234 evidence confidences in the database the median is 0.77 and the
+    quartiles are 0.70 and 0.82. Under the previous bands, which were centred on
+    the 0.35 outcome base rate, 97% of every finding ever recorded rendered
+    green -- a colour that is always the same colour tells the reader nothing.
+    Splitting at the lower quartile and just above the median gives roughly a
+    quarter red, two fifths amber and a third green, which is the most a
+    three-colour scale can say about this quantity.
     """
-    if confidence >= 0.55:
+    if confidence >= 0.80:
         return "#10B981"
-    elif confidence >= 0.35:
+    elif confidence >= 0.70:
         return "#F59E0B"
     return "#EF4444"
+
+
+# Used when a renderer is called without a session to read the graded record
+# from. Every action then reports zero graded outcomes, so the report says "too
+# few graded calls" rather than falling back to the stated confidence.
+_EMPTY_BASE_RATES = ActionBaseRates(by_action={}, overall=ActionBaseRate("ALL", 0, 0))
+
+
+def _base_rate_color(record: ActionBaseRate, overall: ActionBaseRate) -> str:
+    """Colour the track-record bar by how this action compares with the pooled rate.
+
+    Deliberately *not* the old absolute bands. A base rate is only meaningful
+    against another base rate: 35% means one thing when everything we do lands at
+    33% and something else entirely when it lands at 60%. So green means this
+    action beats our own overall hit rate by more than 5 points, red means it
+    trails by more than 5, amber is the band in between, and grey means we have
+    not graded enough of them to say — which is a real state, not a bad score.
+    """
+    if record.rate is None or overall.rate is None:
+        return "#64748B"
+    delta = record.rate - overall.rate
+    if delta > 0.05:
+        return "#10B981"
+    if delta < -0.05:
+        return "#EF4444"
+    return "#F59E0B"
 
 
 def _regime_color(regime: str) -> str:
@@ -2522,14 +2585,16 @@ def _build_tldr_section(
     insights: list[DeepInsight],
     regime: str,
     sectors: list[str],
+    base_rates: ActionBaseRates | None = None,
 ) -> str:
     """Build a TL;DR action-oriented summary box for the Executive Briefing.
 
     Generates plain-English bullet points telling the reader what to do based
-    on the market regime, top opportunities, sector data, and confidence
-    distribution.  Returns an HTML string ready to be inserted at the top of
-    the Executive Briefing section.
+    on the market regime, top opportunities, sector data, and our graded track
+    record.  Returns an HTML string ready to be inserted at the top of the
+    Executive Briefing section.
     """
+    base_rates = base_rates or _EMPTY_BASE_RATES
     bullets: list[str] = []
 
     # --- 1. Market regime action ---
@@ -2613,22 +2678,33 @@ def _build_tldr_section(
             "Sector data available but no clear winners or losers."
         )
 
-    # --- 4. Confidence summary ---
+    # --- 4. Track record ---
+    #
+    # This used to summarise the stated confidence ("N of M insights above 80%
+    # confidence"), which asserted an accuracy the number has never been shown
+    # to have. It now reports what the graded record says about the kinds of
+    # call this report is making, and says so when there is not enough of one.
     if insights:
-        confidences = [ins.confidence or 0 for ins in insights]
-        avg_conf = sum(confidences) / len(confidences)
-        high_count = sum(1 for c in confidences if c >= 0.8)
-        total = len(confidences)
-        if avg_conf >= 0.8:
-            conf_note = "Analysis confidence is <strong>high</strong>"
-        elif avg_conf >= 0.6:
-            conf_note = "Analysis confidence is <strong>moderate</strong>"
+        overall = base_rates.overall
+        if overall.rate is None:
+            bullets.append(
+                "<strong>Track record:</strong> too few graded calls so far to "
+                f"state a hit rate (n={overall.graded}). Treat every "
+                "recommendation below as unproven."
+            )
         else:
-            conf_note = "Analysis confidence is <strong>low</strong>"
-        conf_note += (
-            f" &mdash; {high_count} of {total} insights above 80% confidence."
-        )
-        bullets.append(conf_note)
+            actions_here = sorted({(ins.action or "WATCH") for ins in insights})
+            per_action = "; ".join(
+                base_rates.for_action(action).headline() for action in actions_here
+            )
+            bullets.append(
+                f"<strong>Track record:</strong> {overall.percent}% of our "
+                f"{overall.graded} graded calls have worked "
+                f"({BASE_RATE_METHOD[0].lower() + BASE_RATE_METHOD[1:].rstrip('.')}). "
+                f"For the calls in this report &mdash; {per_action}. "
+                "These are hit rates for a class of call, not forecasts for any "
+                "single idea below."
+            )
 
     if not bullets:
         return ""
@@ -3133,7 +3209,9 @@ def _first_sentence(text: str) -> str:
     return truncated + '...'
 
 
-def _build_insight_card(ins: DeepInsight, index: int) -> str:
+def _build_insight_card(
+    ins: DeepInsight, index: int, base_rates: ActionBaseRates | None = None
+) -> str:
     """Build a single interactive insight card with two-layer progressive disclosure.
 
     Collapsed: action badge, primary symbol, confidence bar, one-liner, timeframe.
@@ -3153,9 +3231,24 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
     }
     icon = _ACTION_ICONS.get(action, "")
     border_color = _ACTION_BORDER_COLORS.get(action, "#6366F1")
+    # The model's own confidence is still read here, but only to carry it into
+    # the card's data-confidence attribute, which nothing on the page reads any
+    # more: the "sort by confidence" control that used to is gone. It is kept so
+    # a published report still contains the raw number a future re-calibration
+    # would need. It is never printed -- the calibration study measured its
+    # slope against outcomes at -0.151 with a 95% interval of [-0.503, +0.150],
+    # so as a displayed probability it is an invented number. What the reader
+    # sees is the graded record for this class of call instead -- see
+    # analysis/action_base_rates.py.
     confidence = ins.confidence or 0
-    confidence_pct = int(confidence * 100)
-    conf_color = _confidence_color(confidence)
+    rates = base_rates or _EMPTY_BASE_RATES
+    record = rates.for_action(ins.action)
+    overall = rates.overall
+    rate_color = _base_rate_color(record, overall)
+    rate_pct = record.percent
+    rate_bar_width = rate_pct if rate_pct is not None else 0
+    rate_text = f"{rate_pct}%" if rate_pct is not None else "n/a"
+    rate_tooltip = _esc(f"{record.headline()} {BASE_RATE_CAVEAT} {BASE_RATE_METHOD}")
 
     # --- Collapsed header: primary symbol only ---
     primary_symbol_html = ""
@@ -3312,7 +3405,7 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
                 conf_html = ""
                 if conf is not None:
                     conf_pct = int(float(conf) * 100)
-                    conf_bar_color = _confidence_color(float(conf))
+                    conf_bar_color = _evidence_confidence_color(float(conf))
                     conf_html = (
                         f'<div class="analyst-conf-bar">'
                         f'<div class="analyst-conf-track">'
@@ -3404,11 +3497,13 @@ def _build_insight_card(ins: DeepInsight, index: int) -> str:
             {primary_symbol_html}
             {timeframe_html}
           </div>
-          <div class="confidence-bar-inline">
-            <div class="confidence-bar-track">
-              <div class="confidence-bar-fill" style="width:{confidence_pct}%;background:{conf_color};"></div>
+          <div class="track-record-inline" title="{rate_tooltip}">
+            <span class="track-record-caption">{_esc(action)} track record</span>
+            <div class="track-record-track">
+              <div class="track-record-fill" style="width:{rate_bar_width}%;background:{rate_color};"></div>
             </div>
-            <span class="confidence-bar-label" style="color:{conf_color};">{confidence_pct}%</span>
+            <span class="track-record-label" style="color:{rate_color};">{rate_text}</span>
+            <span class="track-record-n">n={record.graded}</span>
           </div>
         </div>
         <p class="insight-thesis-preview">{_esc(_first_sentence(ins.thesis or ''))}</p>
@@ -4925,13 +5020,26 @@ def _build_market_mood_section(insights: list[DeepInsight]) -> str:
     )
 
 
-def _build_report_html(task: AnalysisTask, insights: list[DeepInsight]) -> str:
+def _build_report_html(
+    task: AnalysisTask,
+    insights: list[DeepInsight],
+    base_rates: ActionBaseRates | None = None,
+) -> str:
     """Build an interactive dashboard HTML report.
 
     Features: slim header bar, KPI row, executive briefing with markdown,
     two-column sectors/phases grid, insight cards with colored borders,
     filter/sort toolbar, staggered animations, and visual polish.
+
+    Args:
+        task: The completed analysis run.
+        insights: Its insights, in display order.
+        base_rates: The graded record per action, from
+            ``load_action_base_rates``. Omitted, every action reports zero
+            graded outcomes and the report says so; it never falls back to
+            printing the model's stated confidence.
     """
+    base_rates = base_rates or _EMPTY_BASE_RATES
     # Format dates
     report_date = ""
     report_date_short = ""
@@ -4949,10 +5057,27 @@ def _build_report_html(task: AnalysisTask, insights: list[DeepInsight]) -> str:
     # --- KPI metrics ---
     num_insights = len(insights)
 
-    # Average confidence across insights
-    avg_confidence = sum((ins.confidence or 0) for ins in insights) / max(len(insights), 1)
-    avg_conf_pct = int(avg_confidence * 100)
-    avg_conf_color = _confidence_color(avg_confidence)
+    # Track record, in place of the old "Avg Confidence" KPI.
+    #
+    # Averaging the stated confidence produced a headline number out of a
+    # quantity measured to have no relationship to outcomes. What can honestly
+    # sit in a KPI tile is how often calls have actually worked, with its sample
+    # size attached.
+    overall_record = base_rates.overall
+    overall_rate_pct = overall_record.percent
+    overall_rate_text = (
+        f"{overall_rate_pct}%" if overall_rate_pct is not None else "Not enough data"
+    )
+    overall_rate_color = (
+        "#64748B" if overall_rate_pct is None else _base_rate_color(
+            overall_record, overall_record
+        )
+    )
+    overall_rate_sub = (
+        f"{overall_record.validated}/{overall_record.graded} graded calls"
+        if overall_record.graded
+        else "no graded calls yet"
+    )
 
     # Action breakdown for top action KPI
     action_counts: Counter[str] = Counter()
@@ -4963,11 +5088,32 @@ def _build_report_html(task: AnalysisTask, insights: list[DeepInsight]) -> str:
     top_action_label = _ACTION_LABELS.get(top_action[0], top_action[0])
     top_action_color = _ACTION_COLORS.get(top_action[0], "#6366F1")
 
-    # --- Confidence distribution for chart ---
-    conf_high = sum(1 for ins in insights if (ins.confidence or 0) >= 0.8)
-    conf_med = sum(1 for ins in insights if 0.6 <= (ins.confidence or 0) < 0.8)
-    conf_low = sum(1 for ins in insights if (ins.confidence or 0) < 0.6)
-    conf_dist_json = json.dumps([conf_high, conf_med, conf_low])
+    # --- Track record by action, for the chart that used to plot the stated
+    # confidence distribution. Only actions this report actually uses are
+    # plotted, and only those with enough graded outcomes to quote a rate; the
+    # rest are named underneath so their absence is visible rather than silent.
+    tr_labels: list[str] = []
+    tr_values: list[int] = []
+    tr_counts: list[int] = []
+    tr_unmeasured: list[str] = []
+    for act in sorted(action_counts):
+        rec = base_rates.for_action(act)
+        if rec.percent is None:
+            tr_unmeasured.append(f"{act} (n={rec.graded})")
+            continue
+        tr_labels.append(act)
+        tr_values.append(rec.percent)
+        tr_counts.append(rec.graded)
+    track_record_labels_json = json.dumps(tr_labels)
+    track_record_values_json = json.dumps(tr_values)
+    track_record_counts_json = json.dumps(tr_counts)
+    track_record_overall_json = json.dumps(base_rates.overall.percent)
+    track_record_unmeasured_html = (
+        f'<div class="track-record-unmeasured">Not enough graded outcomes to '
+        f'rate: {_esc(", ".join(tr_unmeasured))}</div>'
+        if tr_unmeasured
+        else ""
+    )
 
     # --- Action breakdown for chart ---
     action_chart_labels = []
@@ -5024,7 +5170,9 @@ def _build_report_html(task: AnalysisTask, insights: list[DeepInsight]) -> str:
         )
 
     # --- TL;DR action box ---
-    tldr_html = _build_tldr_section(insights, regime, effective_sectors)
+    tldr_html = _build_tldr_section(
+        insights, regime, effective_sectors, base_rates
+    )
 
     # --- Priority actions ---
     priority_actions_html = _build_priority_actions(insights)
@@ -5074,7 +5222,8 @@ def _build_report_html(task: AnalysisTask, insights: list[DeepInsight]) -> str:
     cards_html = ""
     if insights:
         cards_html = "".join(
-            _build_insight_card(ins, i) for i, ins in enumerate(insights)
+            _build_insight_card(ins, i, base_rates)
+            for i, ins in enumerate(insights)
         )
     else:
         cards_html = (
@@ -5604,30 +5753,6 @@ body {{
   border-color: rgba(99,102,241,0.3);
   color: #A5B4FC;
 }}
-.sort-btn {{
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  color: #64748B;
-  padding: 6px 14px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-family: inherit;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}}
-.sort-btn:hover {{
-  color: #E2E8F0;
-  background: rgba(255,255,255,0.08);
-}}
-.sort-btn.active {{
-  color: #A5B4FC;
-  border-color: rgba(99,102,241,0.3);
-}}
-
 /* === INSIGHT CARDS === */
 .insight-card {{
   background: rgba(255,255,255,0.03);
@@ -5702,30 +5827,52 @@ body {{
   font-weight: 500;
 }}
 
-/* Confidence progress bar (inline in insight cards) */
-.confidence-bar-inline {{
+.track-record-unmeasured {{
+  font-size: 11px;
+  color: #64748B;
+  margin-top: 6px;
+  text-align: center;
+}}
+
+/* Track-record readout (inline in insight cards).
+   Replaces the old stated-confidence bar. The caption and the n= suffix are
+   load-bearing: without them a bare percentage reads as a forecast for this
+   idea, which is exactly the claim the measurement does not support. */
+.track-record-inline {{
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 100px;
+  min-width: 190px;
 }}
-.confidence-bar-track {{
+.track-record-caption {{
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748B;
+  white-space: nowrap;
+}}
+.track-record-track {{
   flex: 1;
   height: 6px;
   background: rgba(255,255,255,0.08);
   border-radius: 3px;
   overflow: hidden;
-  min-width: 60px;
+  min-width: 40px;
 }}
-.confidence-bar-fill {{
+.track-record-fill {{
   height: 100%;
   border-radius: 3px;
   transition: width 0.6s ease;
 }}
-.confidence-bar-label {{
+.track-record-label {{
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   font-weight: 700;
+}}
+.track-record-n {{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: #64748B;
 }}
 
 /* Layman explanation text */
@@ -6643,9 +6790,9 @@ body {{
       </div>
     </div>
     <div class="kpi-card">
-      <div class="kpi-label"><span class="card-title-tooltip">Avg Confidence<span class="tooltip-icon">?</span><span class="tooltip-text">Average confidence across all insights in this report. Higher values indicate stronger supporting evidence.</span></span></div>
-      <div class="kpi-value" style="font-size:22px;color:{avg_conf_color};">{avg_conf_pct}%</div>
-      <div class="kpi-sub">across {num_insights} insight{"s" if num_insights != 1 else ""}</div>
+      <div class="kpi-label"><span class="card-title-tooltip">Track Record<span class="tooltip-icon">?</span><span class="tooltip-text">{_esc(BASE_RATE_METHOD)} {_esc(BASE_RATE_CAVEAT)} This is every call we have graded, not the {num_insights} in this report.</span></span></div>
+      <div class="kpi-value" style="font-size:22px;color:{overall_rate_color};">{overall_rate_text}</div>
+      <div class="kpi-sub">{overall_rate_sub}</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Top Action</div>
@@ -6657,8 +6804,9 @@ body {{
   <!-- CHARTS ROW -->
   <div class="charts-row">
     <div class="card">
-      <div class="card-label"><span class="card-title-tooltip">Confidence Distribution<span class="tooltip-icon">?</span><span class="tooltip-text">Shows how analysis confidence is distributed across insights. Higher confidence (80-100%) means stronger supporting data. The bands are: Low (0-40%), Medium-Low (40-60%), Medium (60-80%), and High (80-100%).</span></span></div>
-      <div class="chart-container" id="chart-confidence"></div>
+      <div class="card-label"><span class="card-title-tooltip">Track Record by Action<span class="tooltip-icon">?</span><span class="tooltip-text">{_esc(BASE_RATE_METHOD)} {_esc(BASE_RATE_CAVEAT)} Bars cover every call of that type we have ever graded, not only the ones in this report. The dashed line is our rate across all actions.</span></span></div>
+      <div class="chart-container" id="chart-track-record"></div>
+      {track_record_unmeasured_html}
     </div>
     <div class="card">
       <div class="card-label">Action Breakdown</div>
@@ -6700,14 +6848,6 @@ body {{
       <div class="filter-bar">
         {filter_buttons}
       </div>
-      <button class="sort-btn" onclick="toggleSort()" id="sort-btn">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <polyline points="19 12 12 19 5 12"></polyline>
-        </svg>
-        Sort by confidence
-      </button>
     </div>
 
     <div id="insights-container">
@@ -6794,7 +6934,6 @@ body {{
   // Insight data for filtering/sorting
   var insightData = {insight_data_json};
   var currentFilter = 'ALL';
-  var sortDescending = false;
 
   // Toggle expand/collapse
   window.toggleInsight = function(index) {{
@@ -6813,14 +6952,10 @@ body {{
     applyFiltersAndSort();
   }};
 
-  // Toggle sort by confidence
-  window.toggleSort = function() {{
-    sortDescending = !sortDescending;
-    var btn = document.getElementById('sort-btn');
-    btn.classList.toggle('active', sortDescending);
-    applyFiltersAndSort();
-  }};
-
+  // Filtering only. There used to be a "sort by confidence" toggle here; it
+  // ranked the cards by a number the calibration study found uninformative,
+  // which presented an ordering as a quality ranking. Cards keep the order the
+  // synthesis produced.
   function applyFiltersAndSort() {{
     var container = document.getElementById('insights-container');
     var cards = Array.from(container.querySelectorAll('.insight-card'));
@@ -6828,20 +6963,11 @@ body {{
     if (currentFilter !== 'ALL') {{
       order = order.filter(function(d) {{ return d.action === currentFilter; }});
     }}
-    if (sortDescending) {{
-      order.sort(function(a, b) {{ return b.confidence - a.confidence; }});
-    }}
     var visibleIndices = new Set(order.map(function(d) {{ return d.index; }}));
     cards.forEach(function(card) {{
       var idx = parseInt(card.getAttribute('data-index'));
       card.style.display = visibleIndices.has(idx) ? '' : 'none';
     }});
-    if (sortDescending) {{
-      order.forEach(function(d) {{
-        var card = container.querySelector('.insight-card[data-index="' + d.index + '"]');
-        if (card) container.appendChild(card);
-      }});
-    }}
   }}
 
   // === ApexCharts === //
@@ -6851,35 +6977,40 @@ body {{
     monochrome: {{ enabled: false }}
   }};
 
-  // Confidence Distribution (radialBar)
-  var confDist = {conf_dist_json};
-  var confTotal = confDist[0] + confDist[1] + confDist[2];
-  if (confTotal > 0) {{
-    var confPcts = confDist.map(function(v) {{ return Math.round(v / confTotal * 100); }});
-    var confHoveredIdx = -1;
-    new ApexCharts(document.querySelector('#chart-confidence'), {{
-      chart: {{ type: 'radialBar', height: 220, background: 'transparent' }},
+  // Track record by action (bar). Replaces the stated-confidence distribution:
+  // that chart plotted a number measured to have no relationship to outcomes.
+  var trLabels = {track_record_labels_json};
+  var trValues = {track_record_values_json};
+  var trCounts = {track_record_counts_json};
+  var trOverall = {track_record_overall_json};
+  if (trLabels.length > 0) {{
+    new ApexCharts(document.querySelector('#chart-track-record'), {{
+      chart: {{ type: 'bar', height: 220, background: 'transparent', toolbar: {{ show: false }} }},
       theme: darkTheme,
-      plotOptions: {{
-        radialBar: {{
-          hollow: {{ size: '30%' }},
-          track: {{ background: 'rgba(255,255,255,0.06)' }},
-          dataLabels: {{
-            name: {{ fontSize: '12px', color: '#94A3B8', offsetY: -4,
-                     formatter: function(seriesName, opts) {{ confHoveredIdx = opts && opts.seriesIndex != null ? opts.seriesIndex : -1; return seriesName; }} }},
-            value: {{ fontSize: '14px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,
-                      formatter: function(val) {{ var count = confHoveredIdx >= 0 && confHoveredIdx < confDist.length ? confDist[confHoveredIdx] : confTotal; return count + ' insight' + (count !== 1 ? 's' : ''); }} }}
-          }}
-        }}
+      plotOptions: {{ bar: {{ horizontal: true, borderRadius: 3, barHeight: '55%' }} }},
+      dataLabels: {{
+        enabled: true,
+        formatter: function(val, opts) {{
+          return val + '%  (n=' + trCounts[opts.dataPointIndex] + ')';
+        }},
+        style: {{ fontSize: '11px', fontFamily: 'JetBrains Mono, monospace' }}
       }},
-      series: confPcts,
-      labels: ['High (>80%)', 'Medium (60-80%)', 'Low (<60%)'],
-      colors: ['#10B981', '#F59E0B', '#EF4444'],
-      stroke: {{ lineCap: 'round' }}
+      series: [{{ name: 'Hit rate', data: trValues }}],
+      xaxis: {{ categories: trLabels, max: 100, labels: {{ formatter: function(v) {{ return Math.round(v) + '%'; }} }} }},
+      annotations: trOverall === null ? {{}} : {{
+        xaxis: [{{
+          x: trOverall,
+          borderColor: '#94A3B8',
+          strokeDashArray: 4,
+          label: {{ text: 'all actions ' + trOverall + '%', style: {{ background: '#1E293B', color: '#94A3B8', fontSize: '10px' }} }}
+        }}]
+      }},
+      colors: ['#6366F1'],
+      tooltip: {{ y: {{ formatter: function(val, opts) {{ return val + '% of ' + trCounts[opts.dataPointIndex] + ' graded calls worked'; }} }} }}
     }}).render();
   }} else {{
-    document.querySelector('#chart-confidence').innerHTML =
-      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">No confidence data</div>';
+    document.querySelector('#chart-track-record').innerHTML =
+      '<div style="color:#475569;text-align:center;padding:40px 0;font-size:14px;">Not enough graded outcomes yet to rate any action in this report.</div>';
   }}
 
   // Action Breakdown (donut)

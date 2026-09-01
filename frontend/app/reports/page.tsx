@@ -7,7 +7,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Progress } from '@/components/ui/progress';
 import {
   Select,
   SelectContent,
@@ -24,6 +23,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useReportList } from '@/lib/hooks/use-reports';
+import { useActionBaseRates } from '@/lib/hooks/use-action-base-rates';
 import type { ReportSummary } from '@/lib/types/report';
 import {
   FileText,
@@ -196,7 +196,10 @@ function matchesDateRange(dateStr: string | null, range: DateRange): boolean {
 // Sort helpers for list view
 // ---------------------------------------------------------------------------
 
-type SortField = 'date' | 'regime' | 'confidence' | 'insights';
+// 'confidence' was a sortable field here. Ranking reports by the mean stated
+// confidence ordered them by a number with no measured link to outcomes, so the
+// column and the sort are gone rather than relabelled.
+type SortField = 'date' | 'regime' | 'insights';
 type SortDir = 'asc' | 'desc';
 
 function compareReports(a: ReportSummary, b: ReportSummary, field: SortField, dir: SortDir): number {
@@ -211,9 +214,6 @@ function compareReports(a: ReportSummary, b: ReportSummary, field: SortField, di
     case 'regime':
       cmp = (a.market_regime ?? '').localeCompare(b.market_regime ?? '');
       break;
-    case 'confidence':
-      cmp = (a.avg_confidence ?? 0) - (b.avg_confidence ?? 0);
-      break;
     case 'insights':
       cmp = a.insights_count - b.insights_count;
       break;
@@ -226,22 +226,26 @@ function compareReports(a: ReportSummary, b: ReportSummary, field: SortField, di
 // ---------------------------------------------------------------------------
 
 function StatsBar({ reports }: { reports: ReportSummary[] }) {
+  // The stats bar used to average the reports' stated confidence. It now shows
+  // the measured hit rate across every graded call instead.
+  const { data: baseRates } = useActionBaseRates();
   const stats = useMemo(() => {
     const totalInsights = reports.reduce((acc, r) => acc + r.insights_count, 0);
-    const confidences = reports.map((r) => r.avg_confidence).filter((c) => c > 0);
-    const avgConfidence =
-      confidences.length > 0
-        ? Math.round(confidences.reduce((a, b) => a + b, 0) / confidences.length)
-        : 0;
     const latestDate =
       reports.length > 0 ? (reports[0].completed_at ?? reports[0].started_at) : null;
-    return { totalReports: reports.length, totalInsights, avgConfidence, latestDate };
+    return { totalReports: reports.length, totalInsights, latestDate };
   }, [reports]);
 
   const statItems = [
     { icon: BarChart3, label: `${stats.totalReports} Reports` },
     { icon: Lightbulb, label: `${stats.totalInsights} Insights` },
-    { icon: Target, label: `Avg ${stats.avgConfidence}% Confidence` },
+    {
+      icon: Target,
+      label:
+        baseRates?.overall.percent != null
+          ? `${baseRates.overall.percent}% of ${baseRates.overall.graded} graded calls worked`
+          : 'Track record not yet available',
+    },
     { icon: Clock, label: `Latest: ${timeAgo(stats.latestDate)}` },
   ];
 
@@ -350,7 +354,6 @@ function ReportCard({
   const displayedSymbols = symbols.slice(0, MAX_SYMBOLS);
 
   const actions = Object.entries(report.action_summary ?? {});
-  const confidence = Math.round(report.avg_confidence ?? 0);
 
   return (
     <Card
@@ -412,12 +415,6 @@ function ReportCard({
               </Badge>
             ))}
           </div>
-          {confidence > 0 && (
-            <div className="flex items-center gap-2 ml-auto min-w-[80px]">
-              <Progress value={confidence} className="h-1.5 flex-1" />
-              <span className="text-xs text-muted-foreground font-mono">{confidence}%</span>
-            </div>
-          )}
         </div>
 
         {/* Zone 4 - Footer: summary + insight count + published */}
@@ -592,13 +589,6 @@ function CompactListView({
             <TableHead>Symbols</TableHead>
             <TableHead>Actions</TableHead>
             <SortableHeader
-              label="Conf"
-              field="confidence"
-              sortField={sortField}
-              sortDir={sortDir}
-              onSort={handleSort}
-            />
-            <SortableHeader
               label="Insights"
               field="insights"
               sortField={sortField}
@@ -614,7 +604,6 @@ function CompactListView({
             const maxSym = 3;
             const extra = symbols.length > maxSym ? symbols.length - maxSym : 0;
             const actions = Object.entries(report.action_summary ?? {});
-            const confidence = Math.round(report.avg_confidence ?? 0);
 
             return (
               <TableRow
@@ -671,13 +660,6 @@ function CompactListView({
                       </Badge>
                     ))}
                   </div>
-                </TableCell>
-                <TableCell>
-                  {confidence > 0 ? (
-                    <span className="font-mono text-sm">{confidence}%</span>
-                  ) : (
-                    <span className="text-muted-foreground">--</span>
-                  )}
                 </TableCell>
                 <TableCell className="text-center">{report.insights_count}</TableCell>
                 <TableCell className="text-center">

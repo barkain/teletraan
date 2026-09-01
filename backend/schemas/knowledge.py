@@ -170,3 +170,45 @@ class MatchingConditions(BaseModel):
     vix: float | None = Field(None, ge=0, description="Current VIX level")
     volume_surge_pct: float | None = Field(None, description="Volume surge percentage")
     sector_momentum: float | None = Field(None, description="Sector momentum score")
+
+
+class ActionBaseRateResponse(BaseModel):
+    """Measured hit rate for one action type.
+
+    This is what the UI shows in place of the model's stated confidence. It
+    describes a class of call, not the specific idea on screen, which is why
+    ``caveat`` travels with it and every renderer is expected to print it.
+    """
+
+    action: str = Field(..., description="Action label, e.g. BUY")
+    graded: int = Field(..., ge=0, description="Outcomes carrying a verdict")
+    validated: int = Field(..., ge=0, description="How many were graded correct")
+    rate: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "validated / graded, or null when the sample is below min_sample. "
+            "Null means unmeasured -- do not substitute zero or an overall rate."
+        ),
+    )
+    percent: int | None = Field(
+        None, description="rate in whole percentage points, or null"
+    )
+    available: bool = Field(..., description="Whether a rate could be quoted")
+    headline: str = Field(..., description="Ready-to-render short form")
+    caveat: str = Field(..., description="Why this is not a per-idea probability")
+
+
+class ActionBaseRatesResponse(BaseModel):
+    """The graded record for every action type."""
+
+    min_sample: int = Field(
+        ..., ge=1, description="Graded outcomes needed before a rate is quoted"
+    )
+    caveat: str = Field(..., description="Applies to every rate below")
+    method: str = Field(..., description="How a call is scored correct")
+    overall: ActionBaseRateResponse = Field(..., description="All actions pooled")
+    by_action: dict[str, ActionBaseRateResponse] = Field(
+        default_factory=dict, description="Keyed by action label"
+    )

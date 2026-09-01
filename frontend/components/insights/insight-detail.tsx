@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { UntrackedNotice } from './track-record-badge';
 import {
   formatRelativeTime,
   getInsightTypeLabel,
@@ -39,7 +40,6 @@ import {
   ChevronRight,
   Eye,
   ShieldAlert,
-  Gauge,
   Calendar,
   Tag,
   Database,
@@ -120,11 +120,6 @@ function getSeverityIcon(severity: Insight['severity'], className: string = 'h-4
   }
 }
 
-function getConfidenceLabel(percent: number): { label: string; color: string; textColor: string } {
-  if (percent >= 80) return { label: 'High confidence', color: 'bg-green-500', textColor: 'text-green-600 dark:text-green-400' };
-  if (percent >= 60) return { label: 'Moderate confidence', color: 'bg-yellow-500', textColor: 'text-yellow-600 dark:text-yellow-400' };
-  return { label: 'Low confidence', color: 'bg-red-500', textColor: 'text-red-600 dark:text-red-400' };
-}
 
 /** Generate a layman explanation for a specific insight type */
 function getTypeExplanation(type: Insight['type']): string {
@@ -210,8 +205,6 @@ function DetailSection({
 }
 
 export function InsightDetail({ insight, open, onOpenChange }: InsightDetailProps) {
-  const confidencePercent = insight.confidence ? Math.round(insight.confidence * 100) : null;
-  const confidenceInfo = confidencePercent !== null ? getConfidenceLabel(confidencePercent) : null;
   const severityAction = getSeverityAction(insight.severity);
   const typeColor = getTypeSectionColor(insight.type);
 
@@ -290,39 +283,15 @@ export function InsightDetail({ insight, open, onOpenChange }: InsightDetailProp
             </CardContent>
           </Card>
 
-          {/* Confidence Section */}
-          {confidencePercent !== null && confidenceInfo && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Gauge className="h-4 w-4 text-muted-foreground" />
-                <h4 className="text-sm font-medium">Confidence Score</h4>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <div className="h-3 w-full bg-secondary rounded-full overflow-hidden">
-                    <div
-                      className={cn('h-full rounded-full transition-all duration-500', confidenceInfo.color)}
-                      style={{ width: `${confidencePercent}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <span className={cn('text-lg font-bold tabular-nums', confidenceInfo.textColor)}>
-                    {confidencePercent}%
-                  </span>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground italic">
-                {confidenceInfo.label} -- {
-                  confidencePercent >= 80
-                    ? 'The analysis strongly supports this signal based on multiple data points.'
-                    : confidencePercent >= 60
-                      ? 'The analysis shows supporting evidence, but some uncertainty remains.'
-                      : 'Limited supporting evidence. Consider gathering more information before acting.'
-                }
-              </p>
-            </div>
-          )}
+          {/* Confidence section removed.
+              These signals carry an LLM-stated confidence, but nothing tracks
+              whether they work, so there is no measured hit rate to put here --
+              and the stated number was shown to carry no information about
+              outcomes on the insights that *are* tracked. Saying nothing is the
+              honest option; see components/insights/track-record-badge.tsx. */}
+          <div className="space-y-2">
+            <UntrackedNotice />
+          </div>
 
           <Separator />
 

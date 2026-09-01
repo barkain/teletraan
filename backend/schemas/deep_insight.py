@@ -3,6 +3,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional, Any
 from enum import Enum
 
+from schemas.knowledge import ActionBaseRateResponse
+
 class InsightAction(str, Enum):
     STRONG_BUY = "STRONG_BUY"
     BUY = "BUY"
@@ -107,6 +109,17 @@ class DeepInsightResponse(DeepInsightBase):
     sentiment_data: dict[str, Any] | None = None
     news_data: dict[str, Any] | None = None
     valuation_data: dict[str, Any] | None = None
+
+    # The measured record for this insight's action type.
+    #
+    # ``confidence`` above is still the model's own stated number and is still
+    # served, because deleting it would destroy the ability to re-run the
+    # calibrator on future data. It is not, however, what clients should render:
+    # it was measured to carry no information about whether a call works. This
+    # field is what the UI shows instead. None means the caller did not populate
+    # it, which is different from ``track_record.available == False`` (populated,
+    # but too few graded outcomes to quote a rate).
+    track_record: Optional[ActionBaseRateResponse] = None
 
     class Config:
         from_attributes = True

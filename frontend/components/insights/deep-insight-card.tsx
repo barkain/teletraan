@@ -15,6 +15,8 @@ import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from '@/comp
 import { DeepInsight, InsightAction } from '@/types';
 import { OutcomeBadge } from './outcome-badge';
 import { useInsightConversations } from '@/lib/hooks/use-insight-conversation';
+import { useActionBaseRates, selectActionBaseRate } from '@/lib/hooks/use-action-base-rates';
+import { TrackRecordBadge } from './track-record-badge';
 import { cn } from '@/lib/utils';
 
 // ============================================
@@ -514,51 +516,6 @@ function formatInsightDate(timestamp: string): string {
   });
 }
 
-/** Confidence gauge: a small colored arc/progress indicator */
-function ConfidenceGauge({ value, className }: { value: number; className?: string }) {
-  const pct = Math.round(value * 100);
-  const color = pct >= 75 ? 'text-green-500' : pct >= 50 ? 'text-yellow-500' : 'text-red-500';
-  const strokeColor = pct >= 75 ? '#22c55e' : pct >= 50 ? '#eab308' : '#ef4444';
-  const bgStroke = 'rgba(128,128,128,0.2)';
-
-  // SVG arc parameters
-  const size = 52;
-  const strokeWidth = 5;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (pct / 100) * circumference;
-
-  return (
-    <div className={cn('relative inline-flex items-center justify-center', className)}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={bgStroke}
-          strokeWidth={strokeWidth}
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={strokeColor}
-          strokeWidth={strokeWidth}
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          className="transition-all duration-500"
-        />
-      </svg>
-      <span className={cn('absolute text-xs font-bold', color)}>
-        {pct}%
-      </span>
-    </div>
-  );
-}
-
 /** Thin colored progress bar for analyst confidence */
 function ThinConfidenceBar({ value, colorClass }: { value: number; colorClass: string }) {
   const pct = Math.round(value * 100);
@@ -588,6 +545,13 @@ export function DeepInsightCard({ insight, onSymbolClick, onClick, onChatClick, 
   const [isExpanded, setIsExpanded] = useState(false);
   const actionInfo = actionConfig[insight.action];
   const ActionIcon = actionInfo.icon;
+
+  // The graded record for this action type, which is what the card shows in
+  // place of the stated confidence. Prefer the copy the API attached to the
+  // insight; fall back to the shared fetch for insights that arrived from an
+  // endpoint that does not populate it.
+  const { data: baseRates } = useActionBaseRates();
+  const trackRecord = insight.track_record ?? selectActionBaseRate(baseRates, insight.action);
 
   // Get conversation count for this insight
   const { conversations } = useInsightConversations(insight.id);
@@ -699,9 +663,12 @@ export function DeepInsightCard({ insight, onSymbolClick, onClick, onChatClick, 
             </div>
           </div>
 
-          {/* Right side: Confidence gauge, outcome, timestamp */}
+          {/* Right side: track record, outcome, timestamp */}
           <div className="flex flex-col items-center gap-2 shrink-0">
-            <ConfidenceGauge value={insight.confidence} />
+            {/* The stated confidence used to be gauged here. It was measured to
+                carry no information about whether a call works, so what is shown
+                is the graded hit rate for this action type instead. */}
+            <TrackRecordBadge record={trackRecord} size="sm" />
 
             {/* Outcome Badge */}
             {(insight.action === 'BUY' || insight.action === 'STRONG_BUY' ||

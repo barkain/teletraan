@@ -19,7 +19,9 @@ from models.knowledge_pattern import KnowledgePattern
 from models.conversation_theme import ConversationTheme
 from models.insight_outcome import InsightOutcome
 from models.deep_insight import DeepInsight
+from analysis.action_base_rates import load_action_base_rates
 from schemas.knowledge import (
+    ActionBaseRatesResponse,
     ConversationThemeListResponse,
     ConversationThemeResponse,
     KnowledgePatternListResponse,
@@ -344,6 +346,26 @@ async def get_theme(
         raise HTTPException(status_code=404, detail="Theme not found")
 
     return ConversationThemeResponse.model_validate(theme)
+
+
+@router.get("/action-base-rates", response_model=ActionBaseRatesResponse)
+async def get_action_base_rates(
+    db: AsyncSession = Depends(get_db),
+) -> ActionBaseRatesResponse:
+    """How often each action type has actually worked.
+
+    This is the number the UI shows in place of the model's stated confidence,
+    which was measured to carry no information about whether a call works (see
+    ``analysis/confidence_calibrator.py``). Actions with fewer than
+    ``min_sample`` graded outcomes come back with ``rate: null`` and
+    ``available: false`` rather than a figure the record cannot support.
+
+    Unlike ``/track-record`` this is not windowed: it is the whole graded
+    history, because the record spans only ~30 distinct trading dates and a
+    90-day window would leave most actions unreportable.
+    """
+    rates = await load_action_base_rates(db)
+    return ActionBaseRatesResponse.model_validate(rates.to_dict())
 
 
 @router.get("/track-record", response_model=TrackRecordResponse)

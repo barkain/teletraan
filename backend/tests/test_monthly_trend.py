@@ -89,16 +89,22 @@ async def test_monthly_trend_empty(client: AsyncClient, db_session: AsyncSession
 
 async def test_monthly_trend_with_data(client: AsyncClient, db_session: AsyncSession):
     """Returns correctly grouped monthly data when outcomes exist."""
-    today = date.today()
+    # Anchored inside a month rather than on date.today(). Seeding at today,
+    # today-1 and today-2 splits across two months whenever the suite runs on
+    # the 1st or 2nd, and the "three outcomes in one month" setup then fails on
+    # the calendar rather than on the code. This anchor lands on the 16th or
+    # 17th of last month, so anchor-1 and anchor-2 stay in the same month, and
+    # it is always in the past and inside the 12-month lookback.
+    anchor = date.today().replace(day=1) - timedelta(days=15)
 
     # Create outcomes across two different months
-    # Month 1 (current month): 2 successful, 1 failed
-    await _seed_outcome(db_session, thesis_validated=True, tracking_end_date=today)
-    await _seed_outcome(db_session, thesis_validated=True, tracking_end_date=today - timedelta(days=1))
-    await _seed_outcome(db_session, thesis_validated=False, tracking_end_date=today - timedelta(days=2))
+    # Month 1 (the anchor month): 2 successful, 1 failed
+    await _seed_outcome(db_session, thesis_validated=True, tracking_end_date=anchor)
+    await _seed_outcome(db_session, thesis_validated=True, tracking_end_date=anchor - timedelta(days=1))
+    await _seed_outcome(db_session, thesis_validated=False, tracking_end_date=anchor - timedelta(days=2))
 
-    # Month 2 (last month): 1 successful
-    last_month = today.replace(day=1) - timedelta(days=1)
+    # Month 2 (the month before the anchor): 1 successful
+    last_month = anchor.replace(day=1) - timedelta(days=1)
     await _seed_outcome(db_session, thesis_validated=True, tracking_end_date=last_month)
 
     resp = await client.get("/api/v1/knowledge/track-record/monthly-trend")
@@ -111,8 +117,8 @@ async def test_monthly_trend_with_data(client: AsyncClient, db_session: AsyncSes
     months = [dp["month"] for dp in body["data"]]
     assert months == sorted(months)  # noqa: S101
 
-    # Find current month data
-    current_month_key = today.strftime("%Y-%m")
+    # Find anchor month data
+    current_month_key = anchor.strftime("%Y-%m")
     current_dp = next((dp for dp in body["data"] if dp["month"] == current_month_key), None)
     assert current_dp is not None  # noqa: S101
     assert current_dp["total"] == 3  # noqa: S101

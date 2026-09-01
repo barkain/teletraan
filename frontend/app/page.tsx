@@ -53,6 +53,7 @@ import { useRecentDeepInsights } from '@/lib/hooks/use-deep-insights';
 import { useAnalysisTask } from '@/lib/hooks/use-analysis-task';
 import type { LLMActivityEntry } from '@/lib/hooks/use-analysis-task';
 import { knowledgeApi, outcomesApi } from '@/lib/api';
+import { useActionBaseRates } from '@/lib/hooks/use-action-base-rates';
 import type { DeepInsight, InsightAction, AutonomousAnalysisResponse } from '@/types';
 import type { TrackRecordStats, MonthlyTrendResponse, OutcomeSummary } from '@/lib/types/track-record';
 import type { PatternsSummary } from '@/lib/types/knowledge';
@@ -69,9 +70,10 @@ interface AnalysisStats {
   watchSignals: number;
 }
 
-interface ConfidenceBucket {
-  range: string;
-  count: number;
+interface ActionHitRateBar {
+  action: string;
+  percent: number;
+  graded: number;
   fill: string;
 }
 
@@ -100,13 +102,12 @@ const TYPE_COLORS: Record<string, string> = {
   thematic: '#a855f7',
 };
 
-const CONFIDENCE_COLORS = [
-  '#ef4444', // 0-20 red
-  '#f97316', // 20-40 orange
-  '#f59e0b', // 40-60 amber
-  '#84cc16', // 60-80 lime
-  '#22c55e', // 80-100 green
-];
+// A hit rate is only meaningful against another hit rate, so bars are coloured
+// by how far the action sits from our own all-actions rate rather than by
+// absolute bands.
+const HIT_RATE_ABOVE = '#22c55e';
+const HIT_RATE_NEAR = '#f59e0b';
+const HIT_RATE_BELOW = '#ef4444';
 
 // ============================================
 // Skeleton Components
@@ -713,82 +714,106 @@ function ActionDistributionChart({ insights, trackRecord, isLoading }: { insight
 }
 
 // ============================================
-// Confidence Distribution Histogram
+// Track Record by Action
 // ============================================
 
-function ConfidenceDistributionChart({ insights, isLoading }: { insights?: { confidence: number }[]; isLoading: boolean }) {
-  const buckets: ConfidenceBucket[] = useMemo(() => {
-    const ranges = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%'];
-    const counts = [0, 0, 0, 0, 0];
+/**
+ * Replaces the old "Confidence Distribution" histogram.
+ *
+ * That chart plotted how the model's stated confidence was spread across
+ * insights. The calibration study measured whether that number predicts
+ * anything and found it does not, so the histogram was a picture of noise
+ * presented as a quality signal. This shows the graded hit rate per action type
+ * instead, with the sample size on every bar and actions below the API's
+ * min_sample named rather than plotted.
+ */
+function TrackRecordByActionChart() {
+  const { data: rates, isLoading } = useActionBaseRates();
 
-    if (insights) {
-      for (const item of insights) {
-        const c = item.confidence * 100;
-        if (c < 20) counts[0]++;
-        else if (c < 40) counts[1]++;
-        else if (c < 60) counts[2]++;
-        else if (c < 80) counts[3]++;
-        else counts[4]++;
+  const { bars, unmeasured, overallPct } = useMemo(() => {
+    if (!rates) return { bars: [] as ActionHitRateBar[], unmeasured: [] as string[], overallPct: null as number | null };
+    const overall = rates.overall.rate;
+    const bars: ActionHitRateBar[] = [];
+    const unmeasured: string[] = [];
+    for (const [action, rec] of Object.entries(rates.by_action)) {
+      if (rec.rate === null || rec.percent === null) {
+        unmeasured.push(`${action} (n=${rec.graded})`);
+        continue;
       }
+      const delta = overall === null ? 0 : rec.rate - overall;
+      bars.push({
+        action,
+        percent: rec.percent,
+        graded: rec.graded,
+        fill: delta > 0.05 ? HIT_RATE_ABOVE : delta < -0.05 ? HIT_RATE_BELOW : HIT_RATE_NEAR,
+      });
     }
-
-    return ranges.map((range, i) => ({
-      range,
-      count: counts[i],
-      fill: CONFIDENCE_COLORS[i],
-    }));
-  }, [insights]);
-
-  const hasData = buckets.some(b => b.count > 0);
+    bars.sort((a, b) => b.percent - a.percent);
+    return { bars, unmeasured, overallPct: rates.overall.percent };
+  }, [rates]);
 
   return (
     <Card className="bg-card/80 backdrop-blur-sm border-border/50">
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
           <BarChart3 className="h-4 w-4 text-primary" />
-          <CardTitle className="text-base">Confidence Distribution</CardTitle>
+          <CardTitle className="text-base">Track Record by Action</CardTitle>
         </div>
-        <CardDescription>How confident our insights are</CardDescription>
+        <CardDescription>
+          {overallPct === null
+            ? 'How often each kind of call has actually worked'
+            : `How often each kind of call has actually worked -- ${overallPct}% across all actions`}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading ? (
           <ChartSkeleton />
-        ) : !hasData ? (
-          <EmptyChartState message="No confidence data yet" />
+        ) : bars.length === 0 ? (
+          <EmptyChartState message="Not enough graded outcomes yet to rate any action" />
         ) : (
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={buckets} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
-              <XAxis
-                dataKey="range"
-                tick={{ fontSize: 12 }}
-                className="fill-muted-foreground"
-              />
-              <YAxis
-                tick={{ fontSize: 12 }}
-                className="fill-muted-foreground"
-                allowDecimals={false}
-              />
-              <Tooltip
-                wrapperStyle={tooltipWrapperStyle}
-                cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }}
-                content={({ active, payload, label }) => {
-                  if (!active || !payload?.length) return null;
-                  return (
-                    <div className="text-sm" style={tooltipStyle}>
-                      <p className="font-medium text-white/90">{label}</p>
-                      <p className="text-white/60">{payload[0].value} insights</p>
-                    </div>
-                  );
-                }}
-              />
-              <Bar dataKey="count" radius={[6, 6, 0, 0]}>
-                {buckets.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.fill} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={bars} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
+                <XAxis dataKey="action" tick={{ fontSize: 12 }} className="fill-muted-foreground" />
+                <YAxis
+                  tick={{ fontSize: 12 }}
+                  className="fill-muted-foreground"
+                  domain={[0, 100]}
+                  tickFormatter={(v) => `${v}%`}
+                />
+                <Tooltip
+                  wrapperStyle={tooltipWrapperStyle}
+                  cursor={{ fill: 'rgba(255, 255, 255, 0.05)' }}
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null;
+                    const bar = payload[0].payload as ActionHitRateBar;
+                    return (
+                      <div className="text-sm" style={tooltipStyle}>
+                        <p className="font-medium text-white/90">{label}</p>
+                        <p className="text-white/60">
+                          {bar.percent}% of {bar.graded} graded calls worked
+                        </p>
+                        <p className="text-white/40 text-xs mt-1">
+                          Historical rate for this type of call, not a forecast.
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="percent" radius={[6, 6, 0, 0]}>
+                  {bars.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            {unmeasured.length > 0 && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Not enough graded outcomes to rate: {unmeasured.join(', ')}
+              </p>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
@@ -1345,12 +1370,9 @@ export default function DashboardPage() {
         <ActionDistributionChart insights={allInsightsData?.items} trackRecord={trackRecord} isLoading={isLoadingInsights && isLoadingTrackRecord} />
       </div>
 
-      {/* Row 3: Confidence Distribution + Performance by Type */}
+      {/* Row 3: Track Record by Action + Performance by Type */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ConfidenceDistributionChart
-          insights={allInsightsData?.items}
-          isLoading={isLoadingInsights}
-        />
+        <TrackRecordByActionChart />
         <PerformanceByTypeChart insights={allInsightsData?.items} trackRecord={trackRecord} isLoading={isLoadingInsights && isLoadingTrackRecord} />
       </div>
 
